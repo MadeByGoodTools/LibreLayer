@@ -91,6 +91,7 @@ import {
 } from '@/lib/recovery';
 import type { Layer as PsdLayer } from 'ag-psd';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
+import { packProject, unpackProject } from '@/lib/project-format';
 import {
   Dialog,
   DialogContent,
@@ -6207,24 +6208,35 @@ export default function Home() {
         selectionPath: selectionPathRef.current,
         feather,
       };
-      const blob = new Blob([JSON.stringify(project)], {
-        type: 'application/json',
-      });
+      const blob = await packProject(project);
       checkFileSize(blob.size);
       const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}.pixelstudio`;
       let savedToFolder = false;
       if (directory && folderPermission === 'granted') {
+        let writable:
+          | Awaited<
+              ReturnType<
+                Awaited<
+                  ReturnType<LocalDirectoryHandle['getFileHandle']>
+                >['createWritable']
+              >
+            >
+          | undefined;
         try {
           const handle = await directory.getFileHandle(projectName, {
-              create: true,
-            }),
-            writable = await handle.createWritable();
+            create: true,
+          });
+          writable = await handle.createWritable({ keepExistingData: false });
           await writable.write(blob);
           await writable.close();
           await rememberRecentFile(handle);
           setRecent(await recentFiles());
           savedToFolder = true;
-        } catch {}
+        } catch {
+          try {
+            await writable?.abort?.();
+          } catch {}
+        }
       }
       if (!savedToFolder) {
         const url = URL.createObjectURL(blob),
@@ -6240,8 +6252,8 @@ export default function Home() {
       setTimeout(() => recoveryTick.current(true), 0);
       setStatus(
         savedToFolder
-          ? `Layered project saved to ${directory?.name}`
-          : 'Layered project saved to Downloads — reopen with File > Open',
+          ? `Integrity-protected project saved to ${directory?.name}`
+          : 'Integrity-protected project saved to Downloads — reopen with File > Open',
       );
     } catch (e) {
       setPsdError(
@@ -6260,7 +6272,8 @@ export default function Home() {
     setPsdBusy(true);
     try {
       checkFileSize(file.size);
-      const data = JSON.parse(await file.text());
+      const unpacked = await unpackProject<any>(await file.text()),
+        data = unpacked.project;
       if (
         data.format !== 'pixel-studio' ||
         ![1, 2].includes(data.version) ||
@@ -6499,7 +6512,9 @@ export default function Home() {
       setStatus(
         restore
           ? 'Workspace restored from this browser profile'
-          : 'Layered project reopened — layers, masks, paths and comps restored',
+          : unpacked.verified
+            ? 'Layered project reopened — integrity verified; layers, masks, paths and comps restored'
+            : 'Legacy layered project reopened — save it again to add integrity protection',
       );
       return true;
     } catch (e) {

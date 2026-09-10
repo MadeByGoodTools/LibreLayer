@@ -43,9 +43,9 @@ export function ProSuiteDialog({
       >
         <DialogTitle>Professional Studio</DialogTitle>
         <DialogDescription>
-          Advanced Photoshop-familiar tools. Every command performs a real
-          document, pixel, selection, production, or workspace action and
-          remains inside the browser unless you explicitly export.
+          Photoshop-familiar browser tools with clear capability levels.
+          Functional is dependable for its stated task, Basic is intentionally
+          bounded, and Experimental may use a simplified or fallback workflow.
         </DialogDescription>
         <div className="pro-suite-controls">
           <label>
@@ -109,6 +109,12 @@ export function ProSuiteDialog({
                   >
                     <span>{feature.id}</span>
                     {feature.label}
+                    <small
+                      className="capability-level"
+                      data-level={feature.level.toLowerCase()}
+                    >
+                      {feature.level}
+                    </small>
                   </Button>
                 ))}
             </TabsContent>

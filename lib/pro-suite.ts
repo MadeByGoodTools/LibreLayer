@@ -8,12 +8,31 @@ export type SuiteKind =
   | 'collaboration'
   | 'analysis';
 
+export type CapabilityLevel = 'Functional' | 'Basic' | 'Experimental';
+
 export type SuiteFeature = {
   id: number;
   command: string;
   label: string;
   group: string;
   kind: SuiteKind;
+  level: CapabilityLevel;
+};
+
+const capabilityLevel = (name: string, kind: SuiteKind): CapabilityLevel => {
+  if (name === 'AI-assisted editing' || kind === 'collaboration')
+    return 'Experimental';
+  if (
+    [
+      'Filters & photography',
+      'Channels & color',
+      'Automation & production',
+      'Compositing & motion',
+      'Shapes & layout',
+    ].includes(name)
+  )
+    return 'Basic';
+  return 'Functional';
 };
 
 const group = (
@@ -27,6 +46,7 @@ const group = (
     label,
     group: name,
     kind,
+    level: capabilityLevel(name, kind),
   }));
 
 export const suiteFeatures: SuiteFeature[] = [
@@ -321,6 +341,7 @@ export function runSuiteSelfTest() {
     if (
       !feature.label ||
       !feature.group ||
+      !['Functional', 'Basic', 'Experimental'].includes(feature.level) ||
       feature.id < 174 ||
       feature.id > 300
     )

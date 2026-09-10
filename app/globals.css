@@ -1859,6 +1859,26 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.pro-feature-grid .capability-level {
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 1px solid #58606b;
+  border-radius: 999px;
+  color: #c8d0da;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.pro-feature-grid .capability-level[data-level='functional'] {
+  border-color: #347a59;
+  color: #83d5aa;
+}
+
+.pro-feature-grid .capability-level[data-level='experimental'] {
+  border-color: #8a6234;
+  color: #f1bd72;
+}
+
 .pro-suite-footer {
   display: flex;
   align-items: center;

@@ -42,9 +42,10 @@ export type LocalDirectoryHandle = {
     options: { create: boolean },
   ) => Promise<
     LocalFileHandle & {
-      createWritable: () => Promise<{
+      createWritable: (options?: { keepExistingData?: boolean }) => Promise<{
         write: (data: Blob) => Promise<void>;
         close: () => Promise<void>;
+        abort?: () => Promise<void>;
       }>;
     }
   >;
