@@ -23,6 +23,18 @@ export type AdvancedAdjustmentOptions = {
   blurMode: 'none' | 'gaussian' | 'motion' | 'radial';
   blurRadius: number;
   blurAngle: number;
+  levelsBlack?: number;
+  levelsWhite?: number;
+  levelsGamma?: number;
+  curveShadows?: number;
+  curveHighlights?: number;
+  exposure?: number;
+  exposureGamma?: number;
+  balanceCyanRed?: number;
+  balanceMagentaGreen?: number;
+  balanceYellowBlue?: number;
+  photoFilter?: string;
+  photoFilterDensity?: number;
 };
 
 const defaults: AdvancedAdjustmentOptions = {
@@ -38,6 +50,18 @@ const defaults: AdvancedAdjustmentOptions = {
   blurMode: 'none',
   blurRadius: 0,
   blurAngle: 0,
+  levelsBlack: 0,
+  levelsWhite: 255,
+  levelsGamma: 1,
+  curveShadows: 0,
+  curveHighlights: 0,
+  exposure: 0,
+  exposureGamma: 1,
+  balanceCyanRed: 0,
+  balanceMagentaGreen: 0,
+  balanceYellowBlue: 0,
+  photoFilter: '#ec8a32',
+  photoFilterDensity: 0,
 };
 const numberValue = (value: number | readonly number[]) =>
   Number(Array.isArray(value) ? value[0] : value);
@@ -61,6 +85,7 @@ export function AdvancedAdjustmentsDialog({
     min: number,
     max: number,
     unit = '',
+    step = 1,
   ) => (
     <label className="advanced-adjustment-row">
       <span>
@@ -74,7 +99,8 @@ export function AdvancedAdjustmentsDialog({
         aria-label={label}
         min={min}
         max={max}
-        value={value[key] as number}
+        step={step}
+        value={(value[key] as number) ?? 0}
         onValueChange={(next) =>
           setValue((current) => ({ ...current, [key]: numberValue(next) }))
         }
@@ -100,6 +126,56 @@ export function AdvancedAdjustmentsDialog({
           {slider('Hue', 'hue', -180, 180, '°')}
           {slider('Saturation', 'saturation', -100, 100)}
           {slider('Vibrance', 'vibrance', -100, 100)}
+          <details>
+            <summary>Levels</summary>
+            <div className="channel-mix-grid">
+              {slider('Black point', 'levelsBlack', 0, 254)}
+              {slider('White point', 'levelsWhite', 1, 255)}
+              {slider('Midtone gamma', 'levelsGamma', 0.1, 3, '', 0.05)}
+            </div>
+          </details>
+          <details>
+            <summary>Curves</summary>
+            <div className="channel-mix-grid">
+              {slider('Shadow curve', 'curveShadows', -100, 100)}
+              {slider('Highlight curve', 'curveHighlights', -100, 100)}
+            </div>
+          </details>
+          <details>
+            <summary>Exposure</summary>
+            <div className="channel-mix-grid">
+              {slider('Exposure', 'exposure', -5, 5, ' EV', 0.1)}
+              {slider('Gamma correction', 'exposureGamma', 0.1, 3, '', 0.05)}
+            </div>
+          </details>
+          <details>
+            <summary>Color Balance</summary>
+            <div className="channel-mix-grid">
+              {slider('Cyan / Red', 'balanceCyanRed', -100, 100)}
+              {slider('Magenta / Green', 'balanceMagentaGreen', -100, 100)}
+              {slider('Yellow / Blue', 'balanceYellowBlue', -100, 100)}
+            </div>
+          </details>
+          <details>
+            <summary>Photo Filter</summary>
+            <div className="photo-filter-row">
+              <label>
+                Filter color
+                <input
+                  aria-label="Photo filter color"
+                  type="color"
+                  value={value.photoFilter}
+                  onChange={(event) =>
+                    setValue((current) => ({
+                      ...current,
+                      photoFilter: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              {slider('Filter density', 'photoFilterDensity', 0, 100, '%')}
+            </div>
+          </details>
           <label className="inline-check">
             <input
               type="checkbox"

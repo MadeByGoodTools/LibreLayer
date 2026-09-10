@@ -1785,6 +1785,59 @@ button {
 .selection-manager-dialog {
   gap: 13px;
 }
+
+.professional-geometry-dialog,
+.selection-repair-dialog {
+  width: min(94vw, 620px);
+  max-height: 86vh;
+  overflow: auto;
+}
+
+.professional-geometry-dialog [role='tabpanel'] {
+  display: grid;
+  gap: 14px;
+  padding-top: 16px;
+}
+
+.professional-geometry-dialog label,
+.selection-repair-dialog label,
+.photo-filter-row label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.professional-geometry-dialog select,
+.professional-geometry-dialog input,
+.selection-repair-dialog input {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--foreground);
+  padding: 5px 9px;
+}
+
+.geometry-number-grid,
+.mixer-controls,
+.photo-filter-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.geometry-help {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.brush-preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .raw-develop-dialog img {
   width: 100%;
   height: 210px;

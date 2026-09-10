@@ -91,6 +91,10 @@ import {
   AdvancedAdjustmentsDialog,
   type AdvancedAdjustmentOptions,
 } from '@/components/advanced-adjustments-dialog';
+import {
+  ProfessionalGeometryDialog,
+  type GeometryOperation,
+} from '@/components/professional-geometry-dialog';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -148,6 +152,7 @@ type Tool =
   | 'eyedropper'
   | 'brush'
   | 'clone'
+  | 'retouch'
   | 'eraser'
   | 'fill'
   | 'gradient'
@@ -354,6 +359,7 @@ const toolItems: {
   { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: Pipette },
   { id: 'brush', label: 'Brush', key: 'B', icon: Brush },
   { id: 'clone', label: 'Clone stamp', key: 'S', icon: Stamp },
+  { id: 'retouch', label: 'Retouch tools', key: 'J', icon: Sparkles },
   { id: 'eraser', label: 'Eraser', key: 'E', icon: Eraser },
   { id: 'fill', label: 'Fill', key: 'G', icon: PaintBucket },
   { id: 'gradient', label: 'Gradient', key: 'D', icon: Droplets },
@@ -402,7 +408,21 @@ const applyAdvancedPixels = (
   fc.filter = `brightness(${100 + options.brightness}%) contrast(${100 + options.contrast}%) saturate(${100 + options.saturation}%) hue-rotate(${options.hue}deg)`;
   fc.drawImage(canvas, 0, 0);
   fc.filter = 'none';
-  if (options.vibrance || options.blackWhite) {
+  if (
+    options.vibrance ||
+    options.blackWhite ||
+    (options.levelsBlack ?? 0) > 0 ||
+    (options.levelsWhite ?? 255) < 255 ||
+    (options.levelsGamma ?? 1) !== 1 ||
+    options.curveShadows ||
+    options.curveHighlights ||
+    options.exposure ||
+    (options.exposureGamma ?? 1) !== 1 ||
+    options.balanceCyanRed ||
+    options.balanceMagentaGreen ||
+    options.balanceYellowBlue ||
+    options.photoFilterDensity
+  ) {
     for (let y = 0; y < canvas.height; y += 256)
       for (let x = 0; x < canvas.width; x += 256) {
         const w = Math.min(256, canvas.width - x),
@@ -412,6 +432,47 @@ const applyAdvancedPixels = (
           let r = data.data[i],
             g = data.data[i + 1],
             b = data.data[i + 2];
+          const black = Math.min(options.levelsBlack ?? 0, 254),
+            white = Math.max(options.levelsWhite ?? 255, black + 1),
+            levelGamma = options.levelsGamma ?? 1,
+            exposureScale = 2 ** (options.exposure ?? 0),
+            exposureGamma = options.exposureGamma ?? 1,
+            remap = (value: number) => {
+              let normalized = Math.max(
+                0,
+                Math.min(1, (value - black) / (white - black)),
+              );
+              normalized = normalized ** (1 / levelGamma);
+              const shadowWeight = 1 - normalized,
+                highlightWeight = normalized;
+              normalized +=
+                ((options.curveShadows ?? 0) / 100) *
+                  shadowWeight *
+                  normalized +
+                ((options.curveHighlights ?? 0) / 100) *
+                  highlightWeight *
+                  (1 - normalized);
+              normalized =
+                Math.max(0, Math.min(1, normalized * exposureScale)) **
+                (1 / exposureGamma);
+              return normalized * 255;
+            };
+          r = remap(r);
+          g = remap(g);
+          b = remap(b);
+          r += ((options.balanceCyanRed ?? 0) / 100) * 64;
+          g += ((options.balanceMagentaGreen ?? 0) / 100) * 64;
+          b += ((options.balanceYellowBlue ?? 0) / 100) * 64;
+          if (options.photoFilterDensity) {
+            const filter = options.photoFilter ?? '#ec8a32',
+              density = (options.photoFilterDensity ?? 0) / 100,
+              fr = parseInt(filter.slice(1, 3), 16),
+              fg = parseInt(filter.slice(3, 5), 16),
+              fb = parseInt(filter.slice(5, 7), 16);
+            r = r * (1 - density) + fr * density;
+            g = g * (1 - density) + fg * density;
+            b = b * (1 - density) + fb * density;
+          }
           if (options.vibrance) {
             const max = Math.max(r, g, b),
               avg = (r + g + b) / 3,
@@ -474,6 +535,87 @@ const applyAdvancedPixels = (
   target.drawImage(output, 0, 0);
   if (output !== filtered) output.width = output.height = 1;
   filtered.width = filtered.height = 1;
+};
+
+const remapRaster = (
+  source: HTMLCanvasElement,
+  mapper: (x: number, y: number, w: number, h: number) => [number, number],
+) => {
+  const w = source.width,
+    h = source.height,
+    input = source
+      .getContext('2d', { willReadFrequently: true })!
+      .getImageData(0, 0, w, h),
+    output = source.getContext('2d')!.createImageData(w, h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const [sx, sy] = mapper(x, y, w, h),
+        ix = Math.round(sx),
+        iy = Math.round(sy),
+        target = (y * w + x) * 4;
+      if (ix < 0 || iy < 0 || ix >= w || iy >= h) continue;
+      const from = (iy * w + ix) * 4;
+      output.data[target] = input.data[from];
+      output.data[target + 1] = input.data[from + 1];
+      output.data[target + 2] = input.data[from + 2];
+      output.data[target + 3] = input.data[from + 3];
+    }
+  source.getContext('2d')!.putImageData(output, 0, 0);
+};
+
+const transformRasterPixels = (
+  canvas: HTMLCanvasElement,
+  mode: Extract<GeometryOperation, { kind: 'transform' }>['mode'],
+  horizontal: number,
+  vertical: number,
+) => {
+  const amountX = Math.max(-1, Math.min(1, horizontal / 100)),
+    amountY = Math.max(-1, Math.min(1, vertical / 100));
+  if (mode === 'content-aware-scale') return;
+  remapRaster(canvas, (x, y, w, h) => {
+    const nx = x / Math.max(1, w - 1) - 0.5,
+      ny = y / Math.max(1, h - 1) - 0.5;
+    if (mode === 'skew') return [x - amountX * ny * w, y - amountY * nx * h];
+    if (mode === 'distort')
+      return [
+        x - amountX * ny * w * (0.5 + nx),
+        y - amountY * nx * h * (0.5 + ny),
+      ];
+    if (mode === 'perspective') {
+      const scaleX = Math.max(0.2, 1 + amountX * ny * 1.6),
+        scaleY = Math.max(0.2, 1 + amountY * nx * 1.6);
+      return [(nx / scaleX + 0.5) * w, (ny / scaleY + 0.5) * h];
+    }
+    if (mode === 'warp')
+      return [
+        x - Math.sin((y / h) * Math.PI) * amountX * w * 0.22,
+        y - Math.sin((x / w) * Math.PI) * amountY * h * 0.22,
+      ];
+    if (mode === 'puppet') {
+      const distance = Math.hypot(nx, ny),
+        influence = Math.max(0, 1 - distance * 2);
+      return [
+        x - amountX * w * 0.35 * influence,
+        y - amountY * h * 0.35 * influence,
+      ];
+    }
+    const scaleX = Math.max(0.2, 1 + amountX * ny * 1.8),
+      scaleY = Math.max(0.2, 1 + amountY * nx * 1.8);
+    return [(nx / scaleX + 0.5) * w, (ny / scaleY + 0.5) * h];
+  });
+};
+
+const rotateCanvasPixels = (source: HTMLCanvasElement, degrees: number) => {
+  const swap = Math.abs(degrees) % 180 === 90,
+    output = makeCanvas(
+      swap ? source.height : source.width,
+      swap ? source.width : source.height,
+    ),
+    ctx = output.getContext('2d')!;
+  ctx.translate(output.width / 2, output.height / 2);
+  ctx.rotate((degrees * Math.PI) / 180);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return output;
 };
 const rawImageCanvas = (output: {
   data: Uint8Array;
@@ -768,6 +910,12 @@ export default function Home() {
     [snapshotName, setSnapshotName] = useState(''),
     [selectMaskOpen, setSelectMaskOpen] = useState(false),
     [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
+    [geometryOpen, setGeometryOpen] = useState(false),
+    [selectionRepairOpen, setSelectionRepairOpen] = useState<
+      'patch' | 'remove' | 'fill' | 'move' | null
+    >(null),
+    [repairOffsetX, setRepairOffsetX] = useState(40),
+    [repairOffsetY, setRepairOffsetY] = useState(0),
     [selectionName, setSelectionName] = useState('Selection 1'),
     [rawDevelop, setRawDevelop] = useState<{
       name: string;
@@ -811,6 +959,7 @@ export default function Home() {
   const cloneHasOffset = useRef(false);
   const cloneOffset = useRef({ x: 0, y: 0 });
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
+  const brushPresetFileRef = useRef<HTMLInputElement>(null);
   const clipboardRef = useRef<{
     pixels: HTMLCanvasElement;
     x: number;
@@ -880,7 +1029,13 @@ export default function Home() {
     [tiltShape, setTiltShape] = useState(true),
     [brushSmoothing, setBrushSmoothing] = useState(20),
     [sizeJitter, setSizeJitter] = useState(0),
-    [hueJitter, setHueJitter] = useState(0);
+    [hueJitter, setHueJitter] = useState(0),
+    [brushScatter, setBrushScatter] = useState(0),
+    [brushTexture, setBrushTexture] = useState(0),
+    [mixerWet, setMixerWet] = useState(50),
+    [mixerLoad, setMixerLoad] = useState(50),
+    [mixerMix, setMixerMix] = useState(50),
+    [mixerBrush, setMixerBrush] = useState(false);
   const [paintMode, setPaintMode] = useState<'brush' | 'pencil'>('brush');
   const [color, setColor] = useState('#171717');
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -914,6 +1069,23 @@ export default function Home() {
     [shapeRadius, setShapeRadius] = useState(0),
     [shapeFill, setShapeFill] = useState(false),
     [cloneAligned, setCloneAligned] = useState(true),
+    [cloneOffsetX, setCloneOffsetX] = useState(0),
+    [cloneOffsetY, setCloneOffsetY] = useState(0),
+    [cloneScale, setCloneScale] = useState(100),
+    [cloneRotation, setCloneRotation] = useState(0),
+    [cloneFlipX, setCloneFlipX] = useState(false),
+    [cloneFlipY, setCloneFlipY] = useState(false),
+    [cloneOverlay, setCloneOverlay] = useState(true),
+    [retouchMode, setRetouchMode] = useState<
+      | 'healing'
+      | 'spot'
+      | 'dodge'
+      | 'burn'
+      | 'sponge'
+      | 'blur'
+      | 'sharpen'
+      | 'smudge'
+    >('healing'),
     [pathCurved, setPathCurved] = useState(false);
   const firstDocumentId = useRef(crypto.randomUUID());
   const activeDocumentRef = useRef(firstDocumentId.current);
@@ -1118,7 +1290,31 @@ export default function Home() {
       ctx.drawImage(overlay, 0, 0);
       alpha.width = alpha.height = overlay.width = overlay.height = 1;
     }
-  }, [doc, channelView]);
+    if (
+      cloneOverlay &&
+      cloneSource.current &&
+      (tool === 'clone' || (tool === 'retouch' && retouchMode === 'healing'))
+    ) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,.95)';
+      ctx.lineWidth = Math.max(1, 1 / (zoom / 100));
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(
+        cloneSource.current.x,
+        cloneSource.current.y,
+        size / 2,
+        0,
+        Math.PI * 2,
+      );
+      ctx.moveTo(cloneSource.current.x - 7, cloneSource.current.y);
+      ctx.lineTo(cloneSource.current.x + 7, cloneSource.current.y);
+      ctx.moveTo(cloneSource.current.x, cloneSource.current.y - 7);
+      ctx.lineTo(cloneSource.current.x, cloneSource.current.y + 7);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [doc, channelView, cloneOverlay, tool, retouchMode, zoom, size]);
   useEffect(() => {
     render();
   }, [layers, render]);
@@ -1901,6 +2097,7 @@ export default function Home() {
         'brush',
         'eraser',
         'clone',
+        'retouch',
         'fill',
         'shape',
         'gradient',
@@ -1963,20 +2160,26 @@ export default function Home() {
       setStatus(`Sampled ${hex}`);
       drawing.current = false;
     }
-    if (tool === 'clone') {
+    if (tool === 'clone' || (tool === 'retouch' && retouchMode === 'healing')) {
       if (e.altKey) {
         cloneSource.current = p;
         cloneHasOffset.current = false;
-        setStatus('Clone source set — paint to copy');
+        setStatus(
+          tool === 'clone'
+            ? 'Clone source set — paint to copy'
+            : 'Healing source set — paint to blend',
+        );
         drawing.current = false;
       } else if (!cloneSource.current) {
-        setStatus('Option/Alt-click to set a clone source');
+        setStatus(
+          `Option/Alt-click to set a ${tool === 'clone' ? 'clone' : 'healing'} source`,
+        );
         drawing.current = false;
       } else {
         if (!cloneAligned || !cloneHasOffset.current) {
           cloneOffset.current = {
-            x: cloneSource.current.x - p.x,
-            y: cloneSource.current.y - p.y,
+            x: cloneSource.current.x - p.x + cloneOffsetX,
+            y: cloneSource.current.y - p.y + cloneOffsetY,
           };
           cloneHasOffset.current = true;
         }
@@ -1985,6 +2188,13 @@ export default function Home() {
           cloneBuffer.current = makeCanvas(doc.w, doc.h);
           cloneBuffer.current.getContext('2d')!.drawImage(surface.pixels, 0, 0);
         }
+      }
+    }
+    if (tool === 'retouch' && retouchMode !== 'healing') {
+      const surface = meta && surfacesRef.current.get(meta.id);
+      if (surface) {
+        cloneBuffer.current = makeCanvas(doc.w, doc.h);
+        cloneBuffer.current.getContext('2d')!.drawImage(surface.pixels, 0, 0);
       }
     }
     if (tool === 'zoom') {
@@ -2064,14 +2274,53 @@ export default function Home() {
           ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha;
           for (let i = 0; i <= count; i++) {
-            const x = prev.x + (dx * i) / count,
-              y = prev.y + (dy * i) / count,
+            const baseX = prev.x + (dx * i) / count,
+              baseY = prev.y + (dy * i) / count,
+              scatterRadius = (brushScatter / 100) * size,
+              scatterAngle = Math.random() * Math.PI * 2,
+              x =
+                baseX + Math.cos(scatterAngle) * scatterRadius * Math.random(),
+              y =
+                baseY + Math.sin(scatterAngle) * scatterRadius * Math.random(),
               jitterScale = 1 - (sizeJitter / 100) * Math.random() * 0.75,
               dabSize = Math.max(1, size * pressureScale * jitterScale),
-              dabPaint =
+              jitteredPaint =
                 editing === 'pixels' && tool === 'brush' && hueJitter
                   ? shiftedHex(color, (Math.random() * 2 - 1) * hueJitter * 1.8)
-                  : paint;
+                  : paint,
+              dabPaint = (() => {
+                if (!mixerBrush || editing !== 'pixels' || tool !== 'brush')
+                  return jitteredPaint;
+                const sampled = target.ctx.getImageData(
+                    Math.max(0, Math.min(doc.w - 1, Math.round(x))),
+                    Math.max(0, Math.min(doc.h - 1, Math.round(y))),
+                    1,
+                    1,
+                  ).data,
+                  fresh = [1, 3, 5].map((at) =>
+                    parseInt(jitteredPaint.slice(at, at + 2), 16),
+                  ),
+                  mix = mixerMix / 100,
+                  wet = mixerWet / 100,
+                  load = mixerLoad / 100;
+                return `#${fresh
+                  .map((channel, at) =>
+                    Math.round(
+                      channel * load * (1 - mix) +
+                        sampled[at] * wet * mix +
+                        channel * (1 - load) * (1 - wet),
+                    )
+                      .toString(16)
+                      .padStart(2, '0'),
+                  )
+                  .join('')}`;
+              })();
+            const baseAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha,
+              textureAlpha =
+                1 -
+                (brushTexture / 100) *
+                  (0.25 + 0.75 * Math.abs(Math.sin(x * 0.37 + y * 0.19)));
+            ctx.globalAlpha = baseAlpha * textureAlpha;
             if (paintMode === 'pencil') {
               ctx.fillStyle = dabPaint;
               ctx.fillRect(
@@ -2171,9 +2420,18 @@ export default function Home() {
               y: previous.y + ((p.y - previous.y) * index) / count,
             },
             local = toLayerPoint(target.meta, point),
-            source = toLayerPoint(target.meta, {
+            baseSource = {
               x: point.x + cloneOffset.current.x,
               y: point.y + cloneOffset.current.y,
+            },
+            center = cloneSource.current ?? baseSource,
+            angle = (cloneRotation * Math.PI) / 180,
+            scale = Math.max(0.1, cloneScale / 100),
+            dx = ((baseSource.x - center.x) * (cloneFlipX ? -1 : 1)) / scale,
+            dy = ((baseSource.y - center.y) * (cloneFlipY ? -1 : 1)) / scale,
+            source = toLayerPoint(target.meta, {
+              x: center.x + dx * Math.cos(angle) + dy * Math.sin(angle),
+              y: center.y - dx * Math.sin(angle) + dy * Math.cos(angle),
             });
           target.ctx.save();
           target.ctx.globalAlpha = opacity / 100;
@@ -2181,6 +2439,110 @@ export default function Home() {
           target.ctx.arc(local.x, local.y, size / 2, 0, Math.PI * 2);
           target.ctx.clip();
           target.ctx.drawImage(buffer, local.x - source.x, local.y - source.y);
+          target.ctx.restore();
+        }
+      });
+      last.current = p;
+      render();
+    } else if (tool === 'retouch') {
+      const target = targetContext(),
+        buffer = cloneBuffer.current;
+      if (!target || !buffer || editing === 'mask') return;
+      const previous = last.current,
+        distance = Math.hypot(p.x - previous.x, p.y - previous.y),
+        spacing = Math.max(2, size * 0.22),
+        count = Math.max(1, Math.ceil(distance / spacing));
+      withSelection(target.ctx, target.meta, () => {
+        for (let index = 1; index <= count; index++) {
+          const point = {
+              x: previous.x + ((p.x - previous.x) * index) / count,
+              y: previous.y + ((p.y - previous.y) * index) / count,
+            },
+            local = toLayerPoint(target.meta, point),
+            radius = Math.max(2, size / 2),
+            x = Math.max(0, Math.floor(local.x - radius)),
+            y = Math.max(0, Math.floor(local.y - radius)),
+            w = Math.min(doc.w - x, Math.ceil(radius * 2)),
+            h = Math.min(doc.h - y, Math.ceil(radius * 2));
+          if (w <= 0 || h <= 0) continue;
+          target.ctx.save();
+          target.ctx.globalAlpha = opacity / 100;
+          target.ctx.beginPath();
+          target.ctx.arc(local.x, local.y, radius, 0, Math.PI * 2);
+          target.ctx.clip();
+          if (retouchMode === 'healing') {
+            const sourcePoint = toLayerPoint(target.meta, {
+              x: point.x + cloneOffset.current.x,
+              y: point.y + cloneOffset.current.y,
+            });
+            target.ctx.globalAlpha = (opacity / 100) * 0.72;
+            target.ctx.drawImage(
+              buffer,
+              sourcePoint.x - radius,
+              sourcePoint.y - radius,
+              radius * 2,
+              radius * 2,
+              local.x - radius,
+              local.y - radius,
+              radius * 2,
+              radius * 2,
+            );
+          } else if (retouchMode === 'spot') {
+            const ring = Math.max(2, Math.round(radius * 0.35)),
+              sample = buffer
+                .getContext('2d', { willReadFrequently: true })!
+                .getImageData(
+                  Math.max(0, x - ring),
+                  Math.max(0, y - ring),
+                  Math.min(doc.w - Math.max(0, x - ring), w + ring * 2),
+                  Math.min(doc.h - Math.max(0, y - ring), h + ring * 2),
+                ).data;
+            let r = 0,
+              g = 0,
+              b = 0,
+              a = 0,
+              samples = 0;
+            for (let i = 0; i < sample.length; i += 16) {
+              if (!sample[i + 3]) continue;
+              r += sample[i];
+              g += sample[i + 1];
+              b += sample[i + 2];
+              a += sample[i + 3];
+              samples++;
+            }
+            target.ctx.fillStyle = `rgba(${r / Math.max(1, samples)},${g / Math.max(1, samples)},${b / Math.max(1, samples)},${a / Math.max(1, samples) / 255})`;
+            target.ctx.fillRect(x, y, w, h);
+          } else {
+            const patch = makeCanvas(w, h),
+              pc = patch.getContext('2d')!;
+            if (retouchMode === 'smudge')
+              pc.drawImage(
+                buffer,
+                Math.max(0, x - (p.x - previous.x)),
+                Math.max(0, y - (p.y - previous.y)),
+                w,
+                h,
+                0,
+                0,
+                w,
+                h,
+              );
+            else {
+              pc.filter =
+                retouchMode === 'dodge'
+                  ? 'brightness(1.18)'
+                  : retouchMode === 'burn'
+                    ? 'brightness(.82)'
+                    : retouchMode === 'sponge'
+                      ? 'saturate(1.35)'
+                      : retouchMode === 'blur'
+                        ? `blur(${Math.max(1, radius / 6)}px)`
+                        : 'contrast(1.35) saturate(1.08)';
+              pc.drawImage(buffer, x, y, w, h, 0, 0, w, h);
+            }
+            target.ctx.drawImage(patch, x, y);
+            patch.width = patch.height = 1;
+          }
           target.ctx.restore();
         }
       });
@@ -2241,6 +2603,7 @@ export default function Home() {
       (tool === 'brush' ||
         tool === 'eraser' ||
         tool === 'clone' ||
+        tool === 'retouch' ||
         tool === 'move')
     )
       snapshot(
@@ -2248,11 +2611,13 @@ export default function Home() {
           ? 'Move layer'
           : tool === 'clone'
             ? 'Clone stamp'
-            : editing === 'mask'
-              ? 'Paint mask'
-              : tool === 'eraser'
-                ? 'Erase'
-                : 'Brush stroke',
+            : tool === 'retouch'
+              ? `${retouchMode[0].toUpperCase()}${retouchMode.slice(1)} retouch`
+              : editing === 'mask'
+                ? 'Paint mask'
+                : tool === 'eraser'
+                  ? 'Erase'
+                  : 'Brush stroke',
       );
     if (tool === 'marquee' || tool === 'crop') {
       if (dragRect && dragRect.w > 2 && dragRect.h > 2) {
@@ -3331,6 +3696,394 @@ export default function Home() {
     snapshot(labels.join(' + ') || 'Adjustments');
     render();
     setStatus(`${labels.join(', ') || 'Adjustments'} applied`);
+  };
+  const exportBrushPreset = () => {
+    const preset = {
+      format: 'pixelstudio-brush-v1',
+      name: 'Pixel Studio brush',
+      size,
+      hardness,
+      opacity,
+      flow,
+      spacing: brushSpacing,
+      smoothing: brushSmoothing,
+      sizeJitter,
+      hueJitter,
+      scatter: brushScatter,
+      texture: brushTexture,
+      mixer: {
+        enabled: mixerBrush,
+        wet: mixerWet,
+        load: mixerLoad,
+        mix: mixerMix,
+      },
+    };
+    const url = URL.createObjectURL(
+        new Blob([JSON.stringify(preset, null, 2)], {
+          type: 'application/json',
+        }),
+      ),
+      anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'pixel-studio-brush.psbrush.json';
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setStatus('Brush preset exported');
+  };
+  const importBrushPreset = async (file?: File) => {
+    if (!file) return;
+    try {
+      const preset = JSON.parse(await file.text()) as Record<string, unknown>;
+      if (preset.format !== 'pixelstudio-brush-v1')
+        throw Error('Not a Pixel Studio brush preset');
+      const number = (
+        key: string,
+        fallback: number,
+        min: number,
+        max: number,
+      ) => Math.max(min, Math.min(max, Number(preset[key] ?? fallback)));
+      setSize(number('size', size, 1, 300));
+      setHardness(number('hardness', hardness, 0, 100));
+      setOpacity(number('opacity', opacity, 1, 100));
+      setFlow(number('flow', flow, 1, 100));
+      setBrushSpacing(number('spacing', brushSpacing, 1, 200));
+      setBrushSmoothing(number('smoothing', brushSmoothing, 0, 100));
+      setSizeJitter(number('sizeJitter', sizeJitter, 0, 100));
+      setHueJitter(number('hueJitter', hueJitter, 0, 100));
+      setBrushScatter(number('scatter', brushScatter, 0, 300));
+      setBrushTexture(number('texture', brushTexture, 0, 100));
+      const mixer = preset.mixer as Record<string, unknown> | undefined;
+      if (mixer) {
+        setMixerBrush(Boolean(mixer.enabled));
+        setMixerWet(Math.max(0, Math.min(100, Number(mixer.wet ?? 50))));
+        setMixerLoad(Math.max(0, Math.min(100, Number(mixer.load ?? 50))));
+        setMixerMix(Math.max(0, Math.min(100, Number(mixer.mix ?? 50))));
+      }
+      setTool('brush');
+      setStatus('Brush preset imported and applied');
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : 'Brush preset could not be imported',
+      );
+    } finally {
+      if (brushPresetFileRef.current) brushPresetFileRef.current.value = '';
+    }
+  };
+
+  const selectionRepair = (
+    mode: 'patch' | 'remove' | 'fill' | 'move',
+    offsetX: number,
+    offsetY: number,
+  ) => {
+    const target = targetContext(),
+      bounds = selectionRef.current,
+      mask = selectionMask(doc.w, doc.h, 0, 0);
+    if (!target || !bounds || editing === 'mask') {
+      setStatus('Make a selection on an unlocked pixel layer first');
+      return;
+    }
+    const ctx = target.ctx,
+      source = ctx.getImageData(0, 0, doc.w, doc.h),
+      alpha = mask.getContext('2d')!.getImageData(0, 0, doc.w, doc.h).data,
+      output = new ImageData(new Uint8ClampedArray(source.data), doc.w, doc.h),
+      left = Math.max(0, Math.floor(bounds.x)),
+      top = Math.max(0, Math.floor(bounds.y)),
+      right = Math.min(doc.w, Math.ceil(bounds.x + bounds.w)),
+      bottom = Math.min(doc.h, Math.ceil(bounds.y + bounds.h));
+    let br = 0,
+      bg = 0,
+      bb = 0,
+      ba = 0,
+      samples = 0;
+    const ring = Math.max(3, Math.round(Math.min(bounds.w, bounds.h) * 0.08));
+    for (
+      let y = Math.max(0, top - ring);
+      y < Math.min(doc.h, bottom + ring);
+      y++
+    )
+      for (
+        let x = Math.max(0, left - ring);
+        x < Math.min(doc.w, right + ring);
+        x++
+      ) {
+        if (x >= left && x < right && y >= top && y < bottom) continue;
+        const i = (y * doc.w + x) * 4;
+        if (!source.data[i + 3]) continue;
+        br += source.data[i];
+        bg += source.data[i + 1];
+        bb += source.data[i + 2];
+        ba += source.data[i + 3];
+        samples++;
+      }
+    const average = [
+      br / Math.max(1, samples),
+      bg / Math.max(1, samples),
+      bb / Math.max(1, samples),
+      ba / Math.max(1, samples),
+    ];
+    for (let y = top; y < bottom; y++)
+      for (let x = left; x < right; x++) {
+        const i = (y * doc.w + x) * 4,
+          strength = alpha[i + 3] / 255;
+        if (!strength) continue;
+        if (mode === 'patch' || mode === 'move') {
+          const sx = Math.max(0, Math.min(doc.w - 1, x - offsetX)),
+            sy = Math.max(0, Math.min(doc.h - 1, y - offsetY)),
+            si = (sy * doc.w + sx) * 4;
+          for (let channel = 0; channel < 4; channel++)
+            output.data[i + channel] =
+              source.data[i + channel] * (1 - strength) +
+              source.data[si + channel] * strength;
+        } else {
+          const noise =
+            mode === 'fill' ? (((x * 17 + y * 31) % 13) - 6) * 1.5 : 0;
+          for (let channel = 0; channel < 4; channel++)
+            output.data[i + channel] =
+              source.data[i + channel] * (1 - strength) +
+              Math.max(
+                0,
+                Math.min(255, average[channel] + (channel < 3 ? noise : 0)),
+              ) *
+                strength;
+        }
+      }
+    if (mode === 'move') {
+      const copy = makeCanvas(doc.w, doc.h),
+        cc = copy.getContext('2d')!;
+      cc.putImageData(source, 0, 0);
+      cc.globalCompositeOperation = 'destination-in';
+      cc.drawImage(mask, 0, 0);
+      ctx.putImageData(output, 0, 0);
+      ctx.drawImage(copy, offsetX, offsetY);
+      copy.width = copy.height = 1;
+    } else ctx.putImageData(output, 0, 0);
+    mask.width = mask.height = 1;
+    snapshot(
+      mode === 'patch'
+        ? 'Patch selection'
+        : mode === 'remove'
+          ? 'Remove selection'
+          : mode === 'fill'
+            ? 'Content-Aware Fill'
+            : 'Content-Aware Move',
+    );
+    render();
+    setStatus(
+      mode === 'patch'
+        ? 'Selection patched from the chosen offset'
+        : mode === 'remove'
+          ? 'Selection removed and blended from surrounding pixels'
+          : mode === 'fill'
+            ? 'Selection filled from surrounding color and texture'
+            : 'Selection moved and its original area repaired',
+    );
+  };
+  const applyGeometry = (operation: GeometryOperation) => {
+    if (operation.kind === 'transform') {
+      const target = targetContext(),
+        meta = selected();
+      if (!target || !meta || editing === 'mask') {
+        setStatus('Select an unlocked pixel layer first');
+        return;
+      }
+      if (operation.mode === 'content-aware-scale') {
+        const scaleX = Math.max(0.5, Math.min(2, operation.x / 100)),
+          scaleY = Math.max(0.5, Math.min(2, (operation.y || 100) / 100)),
+          original = makeCanvas(doc.w, doc.h),
+          oc = original.getContext('2d')!;
+        oc.drawImage(target.ctx.canvas, 0, 0);
+        target.ctx.clearRect(0, 0, doc.w, doc.h);
+        target.ctx.drawImage(
+          original,
+          (doc.w * (1 - scaleX)) / 2,
+          (doc.h * (1 - scaleY)) / 2,
+          doc.w * scaleX,
+          doc.h * scaleY,
+        );
+        if (selectionRef.current) {
+          const protectedPixels = makeCanvas(doc.w, doc.h),
+            pc = protectedPixels.getContext('2d')!,
+            mask = selectionMask(doc.w, doc.h, 0, 0);
+          pc.drawImage(original, 0, 0);
+          pc.globalCompositeOperation = 'destination-in';
+          pc.drawImage(mask, 0, 0);
+          target.ctx.drawImage(protectedPixels, 0, 0);
+          protectedPixels.width = protectedPixels.height = 1;
+          mask.width = mask.height = 1;
+        }
+        original.width = original.height = 1;
+      } else {
+        transformRasterPixels(
+          target.ctx.canvas,
+          operation.mode,
+          operation.x,
+          operation.y,
+        );
+        const surface = surfacesRef.current.get(meta.id);
+        if (surface?.mask)
+          transformRasterPixels(
+            surface.mask,
+            operation.mode,
+            operation.x,
+            operation.y,
+          );
+      }
+      snapshot(
+        operation.mode
+          .split('-')
+          .map((part) => part[0].toUpperCase() + part.slice(1))
+          .join(' '),
+      );
+      render();
+      setStatus('Advanced transform applied');
+      return;
+    }
+    if (operation.kind === 'crop') {
+      if (operation.mode === 'preset') {
+        const [rw, rh] = operation.preset.split(':').map(Number),
+          ratio = rw / rh;
+        let w = doc.w,
+          h = Math.round(w / ratio);
+        if (h > doc.h) {
+          h = doc.h;
+          w = Math.round(h * ratio);
+        }
+        const chosen = {
+            x: Math.round((doc.w - w) / 2),
+            y: Math.round((doc.h - h) / 2),
+            w,
+            h,
+          },
+          mask = makeCanvas(doc.w, doc.h);
+        mask.getContext('2d')!.fillRect(chosen.x, chosen.y, chosen.w, chosen.h);
+        commitSelectionMask(mask, `${operation.preset} crop preset`);
+        setTool('crop');
+        setStatus(`${operation.preset} crop preset ready — adjust or crop`);
+        return;
+      }
+      const bounds = selectionRef.current;
+      if (!bounds) {
+        setStatus('Make a crop selection first');
+        return;
+      }
+      const w = Math.max(1, Math.round(bounds.w)),
+        h = Math.max(1, Math.round(bounds.h)),
+        composite = makeCanvas(doc.w, doc.h),
+        cropped = makeCanvas(w, h);
+      renderLayers(composite.getContext('2d')!);
+      cropped
+        .getContext('2d')!
+        .drawImage(
+          composite,
+          bounds.x,
+          bounds.y,
+          bounds.w,
+          bounds.h,
+          0,
+          0,
+          w,
+          h,
+        );
+      if (operation.mode === 'straighten') {
+        const rotated = rotateCanvasPixels(cropped, -operation.x);
+        cropped.width = rotated.width;
+        cropped.height = rotated.height;
+        cropped.getContext('2d')!.drawImage(rotated, 0, 0);
+        rotated.width = rotated.height = 1;
+      } else if (operation.mode === 'perspective-crop')
+        transformRasterPixels(
+          cropped,
+          'perspective-warp',
+          operation.x,
+          operation.y,
+        );
+      composite.width = composite.height = 1;
+      const id = crypto.randomUUID();
+      loadImportedDocument(
+        `${fileName} — ${operation.mode === 'crop-copy' ? 'crop copy' : operation.mode}`,
+        cropped.width,
+        cropped.height,
+        [
+          {
+            id,
+            name: 'Cropped pixels',
+            kind: 'pixel',
+            visible: true,
+            opacity: 100,
+            blend: 'source-over',
+            x: 0,
+            y: 0,
+            hasMask: false,
+            maskEnabled: true,
+          },
+        ],
+        new Map([[id, { pixels: cropped }]]),
+        'Create crop copy',
+      );
+      setStatus('Cropped result opened in a new tab; original is unchanged');
+      return;
+    }
+    const degrees = operation.x;
+    if (!permit(layersRef.current.map((layer) => layer.id))) return;
+    const oldW = doc.w,
+      oldH = doc.h,
+      swap = Math.abs(degrees) % 180 === 90,
+      nextW = swap ? oldH : oldW,
+      nextH = swap ? oldW : oldH;
+    for (const [id, surface] of surfacesRef.current) {
+      surface.pixels = rotateCanvasPixels(surface.pixels, degrees);
+      if (surface.mask)
+        surface.mask = rotateCanvasPixels(surface.mask, degrees);
+      surfacesRef.current.set(id, surface);
+    }
+    const angle = (degrees * Math.PI) / 180,
+      cos = Math.cos(angle),
+      sin = Math.sin(angle);
+    syncLayers(
+      layersRef.current.map((layer) => ({
+        ...layer,
+        x: Math.round(layer.x * cos - layer.y * sin),
+        y: Math.round(layer.x * sin + layer.y * cos),
+      })),
+    );
+    setDoc({ w: nextW, h: nextH });
+    snapshot(`Rotate image ${degrees}°`);
+    setStatus(`Image rotated ${degrees}°`);
+    requestAnimationFrame(render);
+  };
+
+  const trimTransparent = () => {
+    const composite = makeCanvas(doc.w, doc.h),
+      ctx = composite.getContext('2d', { willReadFrequently: true })!;
+    renderLayers(ctx);
+    const data = ctx.getImageData(0, 0, doc.w, doc.h).data;
+    let left = doc.w,
+      top = doc.h,
+      right = -1,
+      bottom = -1;
+    for (let y = 0; y < doc.h; y++)
+      for (let x = 0; x < doc.w; x++)
+        if (data[(y * doc.w + x) * 4 + 3]) {
+          left = Math.min(left, x);
+          top = Math.min(top, y);
+          right = Math.max(right, x);
+          bottom = Math.max(bottom, y);
+        }
+    composite.width = composite.height = 1;
+    if (right < left) {
+      setStatus('Nothing to trim — the document is transparent');
+      return;
+    }
+    selectionRef.current = {
+      x: left,
+      y: top,
+      w: right - left + 1,
+      h: bottom - top + 1,
+    };
+    cropToSelection();
+    setStatus('Transparent edges trimmed');
   };
   const selectionMask = (w: number, h: number, ox: number, oy: number) => {
     const mask = makeCanvas(w, h),
@@ -5648,6 +6401,7 @@ export default function Home() {
                   'eyedropper',
                   'brush',
                   'clone',
+                  'retouch',
                   'eraser',
                   'fill',
                   'gradient',
@@ -6061,10 +6815,15 @@ export default function Home() {
               action: startFreeTransform,
               shortcut: '⌘T',
             },
+            {
+              name: 'Advanced Transform…',
+              action: () => setGeometryOpen(true),
+            },
             { name: 'Deselect', action: clearSelection, shortcut: '⌘D' },
           ])}
           {menu('Image', [
             { name: 'Image Size…', action: resizeImage },
+            { name: 'Print resolution…', action: resizeImage },
             { name: 'Canvas Size…', action: resizeCanvas },
             { separator: true },
             { name: 'Auto enhance', action: () => filter('brightness') },
@@ -6077,6 +6836,15 @@ export default function Home() {
             { name: 'Sharpen', action: () => filter('sharpen') },
             { separator: true },
             { name: 'Crop to selection', action: cropToSelection },
+            {
+              name: 'Crop, straighten and perspective…',
+              action: () => setGeometryOpen(true),
+            },
+            { name: 'Trim transparent edges', action: trimTransparent },
+            {
+              name: 'Rotate image…',
+              action: () => setGeometryOpen(true),
+            },
             { name: 'Flatten image', action: flattenImage },
           ])}
           {menu('Layer', [
@@ -6269,6 +7037,50 @@ export default function Home() {
             { name: 'Sharpen', action: () => filter('sharpen') },
             { name: 'Reset layer adjustments', action: resetAdjustments },
           ])}
+          {menu('Retouch', [
+            {
+              name: 'Healing Brush',
+              shortcut: 'J',
+              action: () => {
+                setTool('retouch');
+                setRetouchMode('healing');
+              },
+            },
+            {
+              name: 'Spot Healing Brush',
+              action: () => {
+                setTool('retouch');
+                setRetouchMode('spot');
+              },
+            },
+            { separator: true },
+            {
+              name: 'Patch selection…',
+              action: () => setSelectionRepairOpen('patch'),
+            },
+            {
+              name: 'Remove selection…',
+              action: () => setSelectionRepairOpen('remove'),
+            },
+            {
+              name: 'Content-Aware Fill…',
+              action: () => setSelectionRepairOpen('fill'),
+            },
+            {
+              name: 'Content-Aware Move…',
+              action: () => setSelectionRepairOpen('move'),
+            },
+            { separator: true },
+            ...(
+              ['dodge', 'burn', 'sponge', 'blur', 'sharpen', 'smudge'] as const
+            ).map((mode) => ({
+              name: `${mode[0].toUpperCase()}${mode.slice(1)} tool`,
+              action: () => {
+                setTool('retouch');
+                setRetouchMode(mode);
+              },
+            })),
+          ])}
           {menu('View', [
             {
               name: 'Workspace, shortcuts and presets…',
@@ -6354,11 +7166,19 @@ export default function Home() {
             ? 'Pencil'
             : toolItems.find((x) => x.id === tool)?.label}
         </span>
-        {['brush', 'clone', 'eraser', 'shape', 'fill', 'gradient'].includes(
-          tool,
-        ) && (
+        {[
+          'brush',
+          'clone',
+          'retouch',
+          'eraser',
+          'shape',
+          'fill',
+          'gradient',
+        ].includes(tool) && (
           <>
-            {['brush', 'clone', 'eraser', 'shape'].includes(tool) && (
+            {['brush', 'clone', 'retouch', 'eraser', 'shape'].includes(
+              tool,
+            ) && (
               <>
                 <label>
                   {tool === 'shape' ? 'Stroke' : 'Size'}{' '}
@@ -6519,6 +7339,111 @@ export default function Home() {
                       />
                       %
                     </label>
+                    <label>
+                      Scatter
+                      <input
+                        aria-label="Brush scatter"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="300"
+                        value={brushScatter}
+                        onChange={(event) =>
+                          setBrushScatter(
+                            Math.max(
+                              0,
+                              Math.min(300, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label>
+                      Texture
+                      <input
+                        aria-label="Brush texture"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={brushTexture}
+                        onChange={(event) =>
+                          setBrushTexture(
+                            Math.max(
+                              0,
+                              Math.min(100, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={mixerBrush}
+                        onChange={(event) =>
+                          setMixerBrush(event.target.checked)
+                        }
+                      />
+                      Mixer Brush
+                    </label>
+                    {mixerBrush && (
+                      <div className="mixer-controls">
+                        {[
+                          ['Wet', mixerWet, setMixerWet],
+                          ['Load', mixerLoad, setMixerLoad],
+                          ['Mix', mixerMix, setMixerMix],
+                        ].map(([label, value, setter]) => (
+                          <label key={label as string}>
+                            {label as string}
+                            <input
+                              aria-label={`Mixer ${String(label).toLowerCase()}`}
+                              className="number-option compact-number"
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={value as number}
+                              onChange={(event) =>
+                                (setter as (next: number) => void)(
+                                  Math.max(
+                                    0,
+                                    Math.min(100, +event.target.value || 0),
+                                  ),
+                                )
+                              }
+                            />
+                            %
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <div className="brush-preset-actions">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => brushPresetFileRef.current?.click()}
+                      >
+                        Import brush
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={exportBrushPreset}
+                      >
+                        Export brush
+                      </Button>
+                      <input
+                        ref={brushPresetFileRef}
+                        hidden
+                        type="file"
+                        accept="application/json,.json"
+                        onChange={(event) =>
+                          void importBrushPreset(event.target.files?.[0])
+                        }
+                      />
+                    </div>
                   </div>
                 </details>
               </>
@@ -6564,6 +7489,102 @@ export default function Home() {
                 >
                   Clear source
                 </Button>
+                <details className="brush-dynamics">
+                  <summary>Clone Source</summary>
+                  <div>
+                    {[
+                      ['Offset X', cloneOffsetX, setCloneOffsetX, -2000, 2000],
+                      ['Offset Y', cloneOffsetY, setCloneOffsetY, -2000, 2000],
+                      ['Scale', cloneScale, setCloneScale, 10, 500],
+                      ['Rotation', cloneRotation, setCloneRotation, -180, 180],
+                    ].map(([label, value, setter, min, max]) => (
+                      <label key={label as string}>
+                        {label as string}
+                        <input
+                          aria-label={`Clone ${String(label).toLowerCase()}`}
+                          className="number-option compact-number"
+                          type="number"
+                          min={min as number}
+                          max={max as number}
+                          value={value as number}
+                          onChange={(event) => {
+                            (setter as (next: number) => void)(
+                              +event.target.value || 0,
+                            );
+                            cloneHasOffset.current = false;
+                          }}
+                        />
+                      </label>
+                    ))}
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={cloneFlipX}
+                        onChange={(event) =>
+                          setCloneFlipX(event.target.checked)
+                        }
+                      />
+                      Flip horizontal
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={cloneFlipY}
+                        onChange={(event) =>
+                          setCloneFlipY(event.target.checked)
+                        }
+                      />
+                      Flip vertical
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={cloneOverlay}
+                        onChange={(event) =>
+                          setCloneOverlay(event.target.checked)
+                        }
+                      />
+                      Show source overlay
+                    </label>
+                  </div>
+                </details>
+              </>
+            )}
+            {tool === 'retouch' && (
+              <>
+                <label>
+                  Retouch
+                  <select
+                    aria-label="Retouch tool"
+                    value={retouchMode}
+                    onChange={(event) => {
+                      setRetouchMode(event.target.value as typeof retouchMode);
+                      cloneHasOffset.current = false;
+                    }}
+                  >
+                    <option value="healing">Healing Brush</option>
+                    <option value="spot">Spot Healing Brush</option>
+                    <option value="dodge">Dodge</option>
+                    <option value="burn">Burn</option>
+                    <option value="sponge">Sponge</option>
+                    <option value="blur">Blur</option>
+                    <option value="sharpen">Sharpen</option>
+                    <option value="smudge">Smudge</option>
+                  </select>
+                </label>
+                {retouchMode === 'healing' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      cloneSource.current = null;
+                      cloneHasOffset.current = false;
+                      setStatus('Healing source cleared');
+                    }}
+                  >
+                    Clear source
+                  </Button>
+                )}
               </>
             )}
             <label>
@@ -6577,7 +7598,7 @@ export default function Home() {
               value={opacity}
               onValueChange={(v) => setOpacity(sliderNumber(v))}
             />
-            {!['clone', 'eraser'].includes(tool) && (
+            {!['clone', 'retouch', 'eraser'].includes(tool) && (
               <>
                 <label className="color-label">
                   Foreground
@@ -8548,6 +9569,86 @@ export default function Home() {
           >
             Close
           </Button>
+        </DialogContent>
+      </Dialog>
+      <ProfessionalGeometryDialog
+        open={geometryOpen}
+        onClose={() => setGeometryOpen(false)}
+        onApply={applyGeometry}
+      />
+      <Dialog
+        open={selectionRepairOpen !== null}
+        onOpenChange={(open) => !open && setSelectionRepairOpen(null)}
+      >
+        <DialogContent className="selection-repair-dialog">
+          <DialogTitle>
+            {selectionRepairOpen === 'patch'
+              ? 'Patch selection'
+              : selectionRepairOpen === 'remove'
+                ? 'Remove selection'
+                : selectionRepairOpen === 'fill'
+                  ? 'Content-Aware Fill'
+                  : 'Content-Aware Move'}
+          </DialogTitle>
+          <DialogDescription>
+            Pixel Studio samples the active layer around the selected area. The
+            operation is local, selection-aware, and undoable.
+          </DialogDescription>
+          {(selectionRepairOpen === 'patch' ||
+            selectionRepairOpen === 'move') && (
+            <div className="geometry-number-grid">
+              <label>
+                Horizontal offset
+                <input
+                  aria-label="Repair horizontal offset"
+                  type="number"
+                  min="-4000"
+                  max="4000"
+                  value={repairOffsetX}
+                  onChange={(event) =>
+                    setRepairOffsetX(+event.target.value || 0)
+                  }
+                />
+                px
+              </label>
+              <label>
+                Vertical offset
+                <input
+                  aria-label="Repair vertical offset"
+                  type="number"
+                  min="-4000"
+                  max="4000"
+                  value={repairOffsetY}
+                  onChange={(event) =>
+                    setRepairOffsetY(+event.target.value || 0)
+                  }
+                />
+                px
+              </label>
+            </div>
+          )}
+          <div className="dialog-actions">
+            <Button
+              variant="outline"
+              onClick={() => setSelectionRepairOpen(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!selection}
+              onClick={() => {
+                if (!selectionRepairOpen) return;
+                selectionRepair(
+                  selectionRepairOpen,
+                  repairOffsetX,
+                  repairOffsetY,
+                );
+                setSelectionRepairOpen(null);
+              }}
+            >
+              Apply
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
       <ExportDialog
