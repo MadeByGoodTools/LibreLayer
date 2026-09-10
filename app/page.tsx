@@ -95,6 +95,11 @@ import {
   ProfessionalGeometryDialog,
   type GeometryOperation,
 } from '@/components/professional-geometry-dialog';
+import {
+  LayerStudioDialog,
+  type LayerEffects,
+  type LayerStudioOperation,
+} from '@/components/layer-studio-dialog';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -185,8 +190,44 @@ type SavedPath = {
   name: string;
   points: Point[];
   curved?: boolean;
+  tension?: number;
 };
 type SavedSelection = { id: string; name: string; mask: string };
+type SmartFilter = {
+  id: string;
+  name: 'Blur' | 'Sharpen' | 'Brightness';
+  amount: number;
+  opacity: number;
+  blend: BlendMode;
+  enabled: boolean;
+};
+type SmartObjectData = {
+  kind: 'embedded' | 'linked';
+  sourceName: string;
+  sourceData: string;
+  filters: SmartFilter[];
+  filterMask: boolean;
+};
+type TextLayerData = {
+  content: string;
+  color: string;
+  originX: number;
+  originY: number;
+  paragraph: boolean;
+  width: number;
+  family: string;
+  weight: number;
+  size: number;
+  tracking: number;
+  kerning: boolean;
+  leading: number;
+  baseline: number;
+  align: 'left' | 'center' | 'right' | 'justify';
+  onPath: boolean;
+  warp: number;
+  smallCaps: boolean;
+  ligatures: boolean;
+};
 type LayerKind = 'pixel' | 'group' | 'adjustment';
 type LayerMeta = {
   fill?: number;
@@ -218,6 +259,9 @@ type LayerMeta = {
   kind?: LayerKind;
   parentId?: string;
   collapsed?: boolean;
+  effects?: LayerEffects;
+  smartObject?: SmartObjectData;
+  textLayer?: TextLayerData;
 };
 type LayerSurface = { pixels: HTMLCanvasElement; mask?: HTMLCanvasElement };
 type LayerComp = {
@@ -617,6 +661,65 @@ const rotateCanvasPixels = (source: HTMLCanvasElement, degrees: number) => {
   ctx.drawImage(source, -source.width / 2, -source.height / 2);
   return output;
 };
+const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = value.color;
+  ctx.font = `${value.weight} ${value.size}px ${value.family}`;
+  ctx.fontKerning = value.kerning ? 'normal' : 'none';
+  ctx.fontVariantCaps = value.smallCaps ? 'small-caps' : 'normal';
+  ctx.textBaseline = 'alphabetic';
+  const typed = value.ligatures
+      ? value.content.replaceAll('fi', 'ﬁ').replaceAll('fl', 'ﬂ')
+      : value.content,
+    content = value.smallCaps ? typed.toUpperCase() : typed,
+    lineHeight = value.size * value.leading,
+    lines: string[] = [];
+  if (value.paragraph) {
+    for (const paragraph of content.split('\n')) {
+      let line = '';
+      for (const word of paragraph.split(/\s+/)) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(candidate).width > value.width) {
+          lines.push(line);
+          line = word;
+        } else line = candidate;
+      }
+      lines.push(line);
+    }
+  } else lines.push(...content.split('\n'));
+  lines.forEach((line, lineIndex) => {
+    const width =
+        ctx.measureText(line).width +
+        Math.max(0, line.length - 1) * value.tracking,
+      x =
+        value.align === 'center'
+          ? value.originX - width / 2
+          : value.align === 'right'
+            ? value.originX - width
+            : value.originX,
+      y = value.originY + value.baseline + lineIndex * lineHeight;
+    let cursor = x;
+    const justifyExtra =
+      value.align === 'justify' && value.paragraph
+        ? Math.max(0, value.width - width) /
+          Math.max(1, line.split(' ').length - 1)
+        : 0;
+    for (let index = 0; index < line.length; index++) {
+      const character = line[index],
+        progress = index / Math.max(1, line.length - 1),
+        pathOffset = value.onPath
+          ? -Math.sin(progress * Math.PI) * value.size * 0.45
+          : 0,
+        warpOffset = Math.sin(progress * Math.PI * 2) * value.warp;
+      ctx.fillText(character, cursor, y + pathOffset + warpOffset);
+      cursor +=
+        ctx.measureText(character).width +
+        value.tracking +
+        (character === ' ' ? justifyExtra : 0);
+    }
+  });
+};
 const rawImageCanvas = (output: {
   data: Uint8Array;
   width: number;
@@ -716,6 +819,7 @@ const drawLayer = (
     layer.hasMask &&
     layer.maskEnabled &&
     surface.mask &&
+    !layer.smartObject?.filterMask &&
     layer.maskLinked !== false
   )
     masks.push(maskToAlpha(surface.mask, layer.maskDensity, layer.maskFeather));
@@ -730,6 +834,43 @@ const drawLayer = (
     }
     source = temp;
   }
+  for (const smartFilter of layer.smartObject?.filters ?? []) {
+    if (!smartFilter.enabled) continue;
+    const filtered = makeCanvas(w, h),
+      fc = filtered.getContext('2d')!;
+    fc.filter =
+      smartFilter.name === 'Blur'
+        ? `blur(${Math.max(0, smartFilter.amount)}px)`
+        : smartFilter.name === 'Sharpen'
+          ? `contrast(${100 + smartFilter.amount}%) saturate(${100 + smartFilter.amount / 2}%)`
+          : `brightness(${100 + smartFilter.amount}%)`;
+    fc.drawImage(source, 0, 0);
+    if (
+      layer.smartObject?.filterMask &&
+      layer.hasMask &&
+      layer.maskEnabled &&
+      surface.mask
+    ) {
+      const alpha = maskToAlpha(
+        surface.mask,
+        layer.maskDensity,
+        layer.maskFeather,
+      );
+      fc.globalCompositeOperation = 'destination-in';
+      fc.filter = 'none';
+      fc.drawImage(alpha, 0, 0);
+      alpha.width = alpha.height = 1;
+    }
+    const combined = makeCanvas(w, h),
+      cc = combined.getContext('2d')!;
+    cc.drawImage(source, 0, 0);
+    cc.globalAlpha = smartFilter.opacity / 100;
+    cc.globalCompositeOperation = smartFilter.blend as GlobalCompositeOperation;
+    cc.drawImage(filtered, 0, 0);
+    if (source !== surface.pixels) source.width = source.height = 1;
+    filtered.width = filtered.height = 1;
+    source = combined;
+  }
   const filter =
     (layer.brightness ?? 100) === 100 &&
     (layer.contrast ?? 100) === 100 &&
@@ -741,6 +882,7 @@ const drawLayer = (
     layer.hasMask &&
     layer.maskEnabled &&
     surface.mask &&
+    !layer.smartObject?.filterMask &&
     layer.maskLinked === false
   ) {
     const placed = makeCanvas(w, h),
@@ -767,6 +909,44 @@ const drawLayer = (
     ctx.restore();
     placed.width = placed.height = 1;
   } else {
+    const effects = layer.effects;
+    if (effects) {
+      const drawEffectSource = (
+        effectColor: string,
+        blur: number,
+        offsetX: number,
+        offsetY: number,
+      ) => {
+        ctx.save();
+        ctx.globalAlpha = (layer.opacity / 100) * (effects.opacity / 100);
+        ctx.shadowColor = effectColor;
+        ctx.shadowBlur = blur;
+        ctx.shadowOffsetX = offsetX;
+        ctx.shadowOffsetY = offsetY;
+        ctx.translate(layer.x + w / 2, layer.y + h / 2);
+        ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
+        ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+        ctx.drawImage(source, -w / 2, -h / 2);
+        ctx.restore();
+      };
+      if (effects.dropShadow)
+        drawEffectSource(
+          effects.color,
+          effects.size,
+          effects.distance,
+          effects.distance,
+        );
+      if (effects.outerGlow)
+        drawEffectSource(effects.color, effects.size * 1.6, 0, 0);
+      if (effects.stroke)
+        for (const [dx, dy] of [
+          [-effects.size, 0],
+          [effects.size, 0],
+          [0, -effects.size],
+          [0, effects.size],
+        ])
+          drawEffectSource(effects.color, 0, dx as number, dy as number);
+    }
     ctx.save();
     ctx.globalAlpha = ((layer.opacity / 100) * (layer.fill ?? 100)) / 100;
     ctx.globalCompositeOperation = layer.blend as GlobalCompositeOperation;
@@ -776,6 +956,84 @@ const drawLayer = (
     ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
     ctx.drawImage(source, -w / 2, -h / 2);
     ctx.restore();
+    if (effects) {
+      const overlay = makeCanvas(w, h),
+        oc = overlay.getContext('2d')!;
+      if (effects.colorOverlay) {
+        oc.fillStyle = effects.color;
+        oc.fillRect(0, 0, w, h);
+      } else if (effects.gradientOverlay) {
+        const gradient = oc.createLinearGradient(0, 0, w, h);
+        gradient.addColorStop(0, effects.color);
+        gradient.addColorStop(1, effects.secondaryColor);
+        oc.fillStyle = gradient;
+        oc.fillRect(0, 0, w, h);
+      } else if (effects.patternOverlay) {
+        oc.fillStyle = effects.color;
+        oc.fillRect(0, 0, w, h);
+        oc.fillStyle = effects.secondaryColor;
+        for (let y = 0; y < h; y += Math.max(4, effects.size))
+          for (let x = 0; x < w; x += Math.max(4, effects.size))
+            if (((x + y) / Math.max(4, effects.size)) % 2 < 1)
+              oc.fillRect(
+                x,
+                y,
+                Math.max(2, effects.size / 2),
+                Math.max(2, effects.size / 2),
+              );
+      }
+      if (
+        effects.colorOverlay ||
+        effects.gradientOverlay ||
+        effects.patternOverlay
+      ) {
+        oc.globalCompositeOperation = 'destination-in';
+        oc.drawImage(source, 0, 0);
+        ctx.save();
+        ctx.globalAlpha = effects.opacity / 100;
+        ctx.translate(layer.x + w / 2, layer.y + h / 2);
+        ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
+        ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+        ctx.drawImage(overlay, -w / 2, -h / 2);
+        ctx.restore();
+      }
+      if (
+        effects.innerShadow ||
+        effects.innerGlow ||
+        effects.bevel ||
+        effects.satin
+      ) {
+        const inner = makeCanvas(w, h),
+          ic = inner.getContext('2d')!;
+        ic.drawImage(source, 0, 0);
+        ic.globalCompositeOperation = 'source-atop';
+        ic.globalAlpha = effects.opacity / 100;
+        ic.fillStyle =
+          effects.innerGlow || effects.bevel
+            ? effects.secondaryColor
+            : effects.color;
+        if (effects.satin) {
+          for (let y = 0; y < h; y += Math.max(6, effects.size * 2))
+            ic.fillRect(0, y, w, Math.max(2, effects.size / 2));
+        } else ic.fillRect(0, 0, w, h);
+        ic.globalCompositeOperation = 'destination-in';
+        ic.filter = `blur(${effects.innerGlow ? effects.size : Math.max(1, effects.size / 3)}px)`;
+        ic.drawImage(
+          source,
+          effects.innerShadow ? effects.distance : 0,
+          effects.innerShadow ? effects.distance : 0,
+        );
+        ctx.save();
+        ctx.globalAlpha = effects.opacity / 100;
+        ctx.translate(layer.x + w / 2, layer.y + h / 2);
+        ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
+        ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+        ctx.drawImage(inner, -w / 2, -h / 2);
+        ctx.restore();
+        inner.width = inner.height = 1;
+      }
+      overlay.width = overlay.height = 1;
+    }
   }
   if (source !== surface.pixels) {
     source.width = source.height = 1;
@@ -786,22 +1044,38 @@ const applyAdjustment = (
   layer: LayerMeta,
   w: number,
   h: number,
+  surface?: LayerSurface,
 ) => {
-  const source = makeCanvas(w, h);
+  const source = makeCanvas(w, h),
+    adjusted = makeCanvas(w, h),
+    ac = adjusted.getContext('2d')!;
   source.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
-  ctx.save();
-  ctx.globalAlpha = layer.opacity / 100;
-  ctx.filter =
+  ac.filter =
     (layer.brightness ?? 100) === 100 &&
     (layer.contrast ?? 100) === 100 &&
     (layer.saturation ?? 100) === 100 &&
     !(layer.blur ?? 0)
       ? 'none'
       : `brightness(${layer.brightness ?? 100}%) contrast(${layer.contrast ?? 100}%) saturate(${layer.saturation ?? 100}%) blur(${layer.blur ?? 0}px)`;
-  ctx.drawImage(source, 0, 0);
+  ac.drawImage(source, 0, 0);
+  if (layer.hasMask && layer.maskEnabled && surface?.mask) {
+    const alpha = maskToAlpha(
+      surface.mask,
+      layer.maskDensity,
+      layer.maskFeather,
+    );
+    ac.globalCompositeOperation = 'destination-in';
+    ac.filter = 'none';
+    ac.drawImage(alpha, 0, 0);
+    alpha.width = alpha.height = 1;
+  }
+  ctx.save();
+  ctx.globalAlpha = layer.opacity / 100;
+  ctx.drawImage(adjusted, 0, 0);
   ctx.restore();
   source.width = 1;
   source.height = 1;
+  adjusted.width = adjusted.height = 1;
 };
 
 export default function Home() {
@@ -911,6 +1185,7 @@ export default function Home() {
     [selectMaskOpen, setSelectMaskOpen] = useState(false),
     [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
     [geometryOpen, setGeometryOpen] = useState(false),
+    [layerStudioOpen, setLayerStudioOpen] = useState(false),
     [selectionRepairOpen, setSelectionRepairOpen] = useState<
       'patch' | 'remove' | 'fill' | 'move' | null
     >(null),
@@ -960,6 +1235,8 @@ export default function Home() {
   const cloneOffset = useRef({ x: 0, y: 0 });
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
+  const smartObjectFileRef = useRef<HTMLInputElement>(null);
+  const smartFileAction = useRef<'link' | 'replace' | 'relink'>('link');
   const clipboardRef = useRef<{
     pixels: HTMLCanvasElement;
     x: number;
@@ -1086,7 +1363,30 @@ export default function Home() {
       | 'sharpen'
       | 'smudge'
     >('healing'),
-    [pathCurved, setPathCurved] = useState(false);
+    [pathCurved, setPathCurved] = useState(false),
+    [pathMode, setPathMode] = useState<'straight' | 'curvature' | 'freeform'>(
+      'straight',
+    ),
+    [pathTension, setPathTension] = useState(50),
+    [shapeKind, setShapeKind] = useState<'rectangle' | 'ellipse' | 'polygon'>(
+      'rectangle',
+    ),
+    [polygonSides, setPolygonSides] = useState(5),
+    [textParagraph, setTextParagraph] = useState(false),
+    [textWidth, setTextWidth] = useState(420),
+    [fontFamily, setFontFamily] = useState('Arial'),
+    [fontWeight, setFontWeight] = useState(600),
+    [textTracking, setTextTracking] = useState(0),
+    [textKerning, setTextKerning] = useState(true),
+    [textLeading, setTextLeading] = useState(1.2),
+    [textBaseline, setTextBaseline] = useState(0),
+    [textAlign, setTextAlign] = useState<
+      'left' | 'center' | 'right' | 'justify'
+    >('left'),
+    [textOnPath, setTextOnPath] = useState(false),
+    [textWarp, setTextWarp] = useState(0),
+    [textSmallCaps, setTextSmallCaps] = useState(false),
+    [textLigatures, setTextLigatures] = useState(true);
   const firstDocumentId = useRef(crypto.randomUUID());
   const activeDocumentRef = useRef(firstDocumentId.current);
   const documentStoreRef = useRef(new Map<string, EditorDocument>());
@@ -1200,7 +1500,13 @@ export default function Home() {
     for (const layer of [...treeOrder(stack)].reverse()) {
       if (!visible(layer) || layer.kind === 'group') continue;
       if (layer.kind === 'adjustment') {
-        applyAdjustment(ctx, layer, doc.w, doc.h);
+        applyAdjustment(
+          ctx,
+          layer,
+          doc.w,
+          doc.h,
+          surfacesRef.current.get(layer.id),
+        );
         continue;
       }
       const surface = surfacesRef.current.get(layer.id);
@@ -1874,7 +2180,7 @@ export default function Home() {
       !surface ||
       isLocked(meta.id) ||
       meta.kind === 'group' ||
-      meta.kind === 'adjustment'
+      (meta.kind === 'adjustment' && editing !== 'mask')
     )
       return null;
     if (editing === 'mask' && surface.mask)
@@ -1939,7 +2245,8 @@ export default function Home() {
         id: crypto.randomUUID(),
         name: `Work Path ${paths.length + 1}`,
         points: clean,
-        curved: pathCurved,
+        curved: pathMode === 'curvature' || pathCurved,
+        tension: pathTension,
       };
       setPaths((items) => [next, ...items]);
       setTimeout(() => snapshot('Save work path'), 0);
@@ -1947,6 +2254,87 @@ export default function Home() {
     }
     polygonDraft.current = [];
     setDraftPoints([]);
+  };
+  const updateFrontPath = (
+    label: string,
+    change: (path: SavedPath) => SavedPath,
+  ) => {
+    if (!paths.length) {
+      setStatus('Create or select a saved path first');
+      return;
+    }
+    setPaths((items) => [change(items[0]), ...items.slice(1)]);
+    setTimeout(() => snapshot(label), 0);
+    setStatus(label);
+  };
+  const addPathAnchor = () =>
+    updateFrontPath('Anchor point added', (path) => {
+      const first = path.points[0],
+        last = path.points.at(-1)!;
+      return {
+        ...path,
+        points: [
+          ...path.points,
+          { x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 },
+        ],
+      };
+    });
+  const deletePathAnchor = () =>
+    updateFrontPath('Anchor point deleted', (path) => ({
+      ...path,
+      points: path.points.length > 3 ? path.points.slice(0, -1) : path.points,
+    }));
+  const togglePathPointType = () =>
+    updateFrontPath('Corner and smooth points converted', (path) => ({
+      ...path,
+      curved: !path.curved,
+    }));
+  const nudgePath = (dx: number, dy: number) =>
+    updateFrontPath('Path moved with Direct Selection', (path) => ({
+      ...path,
+      points: path.points.map((point) => ({
+        x: point.x + dx,
+        y: point.y + dy,
+      })),
+    }));
+  const fillStrokePath = (fillPath: boolean) => {
+    const path = paths[0],
+      target = targetContext();
+    if (!path || !target || path.points.length < 2) {
+      setStatus('Select a saved path and an unlocked pixel layer first');
+      return;
+    }
+    const points = path.points.map((point) => toLayerPoint(target.meta, point));
+    withSelection(target.ctx, target.meta, () => {
+      target.ctx.save();
+      target.ctx.beginPath();
+      target.ctx.moveTo(points[0].x, points[0].y);
+      if (path.curved && points.length > 2) {
+        const tension = (path.tension ?? 50) / 100;
+        for (let index = 1; index < points.length; index++) {
+          const previous = points[index - 1],
+            current = points[index],
+            cx = previous.x + (current.x - previous.x) * tension,
+            cy = previous.y + (current.y - previous.y) * tension;
+          target.ctx.quadraticCurveTo(cx, cy, current.x, current.y);
+        }
+      } else
+        points.slice(1).forEach((point) => target.ctx.lineTo(point.x, point.y));
+      target.ctx.closePath();
+      target.ctx.globalAlpha = opacity / 100;
+      if (fillPath) {
+        target.ctx.fillStyle = color;
+        target.ctx.fill();
+      } else {
+        target.ctx.strokeStyle = color;
+        target.ctx.lineWidth = size;
+        target.ctx.stroke();
+      }
+      target.ctx.restore();
+    });
+    snapshot(fillPath ? 'Fill path' : 'Stroke path');
+    render();
+    setStatus(fillPath ? 'Path filled' : 'Path stroked');
   };
   const movingLayers = () => {
     const roots = selectedRoots(),
@@ -2114,7 +2502,10 @@ export default function Home() {
         moving.map((l) => [l.id, { x: l.x, y: l.y }]),
       );
     }
-    if ((tool === 'lasso' && lassoMode === 'polygonal') || tool === 'path') {
+    if (
+      (tool === 'lasso' && lassoMode === 'polygonal') ||
+      (tool === 'path' && pathMode !== 'freeform')
+    ) {
       const next = [...polygonDraft.current, p];
       polygonDraft.current = next;
       setDraftPoints(next);
@@ -2124,6 +2515,10 @@ export default function Home() {
       return;
     }
     if (tool === 'lasso') {
+      polygonDraft.current = [p];
+      setDraftPoints([p]);
+    }
+    if (tool === 'path' && pathMode === 'freeform') {
       polygonDraft.current = [p];
       setDraftPoints([p]);
     }
@@ -2229,6 +2624,16 @@ export default function Home() {
       if (dx * dx + dy * dy >= 9) {
         const nextPoint = lassoMode === 'magnetic' ? magneticPoint(p) : p;
         polygonDraft.current = [...polygonDraft.current, nextPoint];
+        setDraftPoints(polygonDraft.current);
+      }
+      return;
+    }
+    if (tool === 'path' && pathMode === 'freeform') {
+      const previous = polygonDraft.current.at(-1) ?? p,
+        dx = p.x - previous.x,
+        dy = p.y - previous.y;
+      if (dx * dx + dy * dy >= 9) {
+        polygonDraft.current = [...polygonDraft.current, p];
         setDraftPoints(polygonDraft.current);
       }
       return;
@@ -2598,6 +3003,11 @@ export default function Home() {
       render();
       return;
     }
+    if (tool === 'path' && pathMode === 'freeform') {
+      finishPolygon('path');
+      render();
+      return;
+    }
     if (
       !quickMaskRef.current &&
       (tool === 'brush' ||
@@ -2755,7 +3165,29 @@ export default function Home() {
       target.ctx.save();
       target.ctx.globalAlpha = opacity / 100;
       target.ctx.beginPath();
-      target.ctx.roundRect(x, y, width, height, radius);
+      if (shapeKind === 'ellipse')
+        target.ctx.ellipse(
+          x + width / 2,
+          y + height / 2,
+          width / 2,
+          height / 2,
+          0,
+          0,
+          Math.PI * 2,
+        );
+      else if (shapeKind === 'polygon') {
+        const sides = Math.max(3, Math.min(24, polygonSides)),
+          cx = x + width / 2,
+          cy = y + height / 2;
+        for (let index = 0; index < sides; index++) {
+          const angle = -Math.PI / 2 + (index * Math.PI * 2) / sides,
+            px = cx + (Math.cos(angle) * width) / 2,
+            py = cy + (Math.sin(angle) * height) / 2;
+          if (index) target.ctx.lineTo(px, py);
+          else target.ctx.moveTo(px, py);
+        }
+        target.ctx.closePath();
+      } else target.ctx.roundRect(x, y, width, height, radius);
       if (shapeFill) {
         target.ctx.fillStyle = foreground;
         target.ctx.fill();
@@ -2765,7 +3197,15 @@ export default function Home() {
       target.ctx.stroke();
       target.ctx.restore();
     });
-    snapshot(shapeRadius ? 'Rounded rectangle' : 'Rectangle');
+    snapshot(
+      shapeKind === 'ellipse'
+        ? 'Ellipse'
+        : shapeKind === 'polygon'
+          ? `${polygonSides}-sided polygon`
+          : shapeRadius
+            ? 'Rounded rectangle'
+            : 'Rectangle',
+    );
     render();
   };
   const applyGradient = (r: Rect) => {
@@ -2802,16 +3242,91 @@ export default function Home() {
     render();
   };
   const placeText = (p: { x: number; y: number }) => {
-    const target = targetContext();
-    if (!target || editing === 'mask') return;
-    target.ctx.save();
-    target.ctx.fillStyle = color;
-    target.ctx.globalAlpha = opacity / 100;
-    target.ctx.font = `600 ${fontSize}px Arial`;
-    target.ctx.fillText(text, p.x - target.meta.x, p.y - target.meta.y);
-    target.ctx.restore();
-    snapshot('Text');
+    if (editing === 'mask') return;
+    const id = createLayer('Text layer');
+    if (!id) return;
+    const meta = layersRef.current.find((layer) => layer.id === id),
+      surface = surfacesRef.current.get(id);
+    if (!meta || !surface) return;
+    const textLayer: TextLayerData = {
+      content: text,
+      color,
+      originX: p.x,
+      originY: p.y,
+      paragraph: textParagraph,
+      width: textWidth,
+      family: fontFamily,
+      weight: fontWeight,
+      size: fontSize,
+      tracking: textTracking,
+      kerning: textKerning,
+      leading: textLeading,
+      baseline: textBaseline,
+      align: textAlign,
+      onPath: textOnPath,
+      warp: textWarp,
+      smallCaps: textSmallCaps,
+      ligatures: textLigatures,
+    };
+    drawEditableText(surface.pixels, textLayer);
+    patchLayer(id, { textLayer }, 'Create editable text layer');
+    snapshot('Create editable text layer');
     render();
+    setStatus('Editable text layer created');
+  };
+  const updateSelectedText = () => {
+    const meta = selected(),
+      surface = meta && surfacesRef.current.get(meta.id);
+    if (!meta?.textLayer || !surface || isLocked(meta.id)) {
+      setStatus('Select an editable text layer first');
+      return;
+    }
+    const textLayer: TextLayerData = {
+      ...meta.textLayer,
+      content: text,
+      color,
+      paragraph: textParagraph,
+      width: textWidth,
+      family: fontFamily,
+      weight: fontWeight,
+      size: fontSize,
+      tracking: textTracking,
+      kerning: textKerning,
+      leading: textLeading,
+      baseline: textBaseline,
+      align: textAlign,
+      onPath: textOnPath,
+      warp: textWarp,
+      smallCaps: textSmallCaps,
+      ligatures: textLigatures,
+    };
+    drawEditableText(surface.pixels, textLayer);
+    patchLayer(meta.id, { textLayer }, 'Edit text layer');
+    render();
+    setStatus('Text layer updated');
+  };
+  const convertTextToShapes = () => {
+    const meta = selected();
+    if (!meta?.textLayer) return;
+    const t = meta.textLayer,
+      width = Math.min(
+        doc.w - t.originX,
+        Math.max(20, t.content.length * (t.size * 0.62 + t.tracking)),
+      ),
+      path: SavedPath = {
+        id: crypto.randomUUID(),
+        name: `${meta.name} outline`,
+        curved: false,
+        points: [
+          { x: t.originX, y: t.originY - t.size },
+          { x: t.originX + width, y: t.originY - t.size },
+          { x: t.originX + width, y: t.originY + t.size * t.leading },
+          { x: t.originX, y: t.originY + t.size * t.leading },
+        ],
+      };
+    setPaths((items) => [path, ...items]);
+    patchLayer(meta.id, { textLayer: undefined }, 'Convert text to shape');
+    setStatus('Text converted to an editable outline path');
   };
   const magneticPoint = (p: Point) => {
     const surface = surfacesRef.current.get(selectedRef.current),
@@ -3040,13 +3555,7 @@ export default function Home() {
   };
   const addMask = () => {
     const meta = selected();
-    if (
-      !meta ||
-      isLocked(meta.id) ||
-      meta.kind === 'group' ||
-      meta.kind === 'adjustment'
-    )
-      return;
+    if (!meta || isLocked(meta.id) || meta.kind === 'group') return;
     const surface = surfacesRef.current.get(meta.id)!;
     if (!surface.mask) {
       if (!hasRoom(doc.w * doc.h)) return;
@@ -3186,6 +3695,27 @@ export default function Home() {
         : [...selectedIdsRef.current, id];
       if (ids.length) selectMany(ids, id);
     } else select(id);
+    const textValue = layersRef.current.find(
+      (layer) => layer.id === id,
+    )?.textLayer;
+    if (textValue) {
+      setText(textValue.content);
+      setColor(textValue.color);
+      setTextParagraph(textValue.paragraph);
+      setTextWidth(textValue.width);
+      setFontFamily(textValue.family);
+      setFontWeight(textValue.weight);
+      setFontSize(textValue.size);
+      setTextTracking(textValue.tracking);
+      setTextKerning(textValue.kerning);
+      setTextLeading(textValue.leading);
+      setTextBaseline(textValue.baseline);
+      setTextAlign(textValue.align);
+      setTextOnPath(textValue.onPath);
+      setTextWarp(textValue.warp);
+      setTextSmallCaps(textValue.smallCaps);
+      setTextLigatures(textValue.ligatures);
+    }
     setEditing('pixels');
   };
   const createGroup = () => {
@@ -3696,6 +4226,396 @@ export default function Home() {
     snapshot(labels.join(' + ') || 'Adjustments');
     render();
     setStatus(`${labels.join(', ') || 'Adjustments'} applied`);
+  };
+  const applyLayerStudio = (operation: LayerStudioOperation) => {
+    if (operation.kind === 'effects') {
+      const meta = selected();
+      if (
+        !meta ||
+        meta.kind === 'group' ||
+        meta.kind === 'adjustment' ||
+        isLocked(meta.id)
+      ) {
+        setStatus(
+          'Select an unlocked pixel, text, shape, or Smart Object layer',
+        );
+        return;
+      }
+      patchLayer(meta.id, { effects: operation.effects }, 'Layer effects');
+      render();
+      setStatus('Editable layer effects applied');
+      return;
+    }
+    if (operation.kind === 'fill') {
+      const id = createLayer(
+        operation.mode === 'solid'
+          ? 'Solid Color Fill'
+          : operation.mode === 'gradient'
+            ? 'Gradient Fill'
+            : 'Pattern Fill',
+      );
+      if (!id) return;
+      const surface = surfacesRef.current.get(id)!,
+        ctx = surface.pixels.getContext('2d')!;
+      if (operation.mode === 'solid') {
+        ctx.fillStyle = operation.color;
+        ctx.fillRect(0, 0, doc.w, doc.h);
+      } else if (operation.mode === 'gradient') {
+        const gradient = ctx.createLinearGradient(0, 0, doc.w, doc.h);
+        gradient.addColorStop(0, operation.color);
+        gradient.addColorStop(1, operation.color2);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, doc.w, doc.h);
+      } else {
+        const unit = Math.max(8, Math.round(Math.min(doc.w, doc.h) / 30));
+        for (let y = 0; y < doc.h; y += unit)
+          for (let x = 0; x < doc.w; x += unit) {
+            ctx.fillStyle =
+              (x / unit + y / unit) & 1 ? operation.color : operation.color2;
+            ctx.fillRect(x, y, unit, unit);
+          }
+      }
+      if (operation.masked) {
+        surface.mask = makeCanvas(doc.w, doc.h);
+        const mask = surface.mask.getContext('2d')!;
+        mask.fillStyle = 'white';
+        mask.fillRect(0, 0, doc.w, doc.h);
+        patchLayer(id, {
+          hasMask: true,
+          maskEnabled: true,
+          maskDensity: 100,
+          maskFeather: 0,
+          maskLinked: true,
+        });
+      }
+      snapshot(`Create ${operation.mode} fill layer`);
+      render();
+      setStatus(
+        `${operation.mode[0].toUpperCase()}${operation.mode.slice(1)} fill layer created`,
+      );
+      return;
+    }
+    const target = targetContext();
+    if (!target || editing === 'mask') {
+      setStatus('Select an unlocked pixel layer to apply this adjustment');
+      return;
+    }
+    const ctx = target.ctx,
+      image = ctx.getImageData(0, 0, doc.w, doc.h),
+      amount = operation.amount,
+      second = operation.secondary,
+      c1 = [1, 3, 5].map((at) =>
+        parseInt(operation.color.slice(at, at + 2), 16),
+      ),
+      c2 = [1, 3, 5].map((at) =>
+        parseInt(operation.color2.slice(at, at + 2), 16),
+      );
+    for (let i = 0; i < image.data.length; i += 4) {
+      let r = image.data[i],
+        g = image.data[i + 1],
+        b = image.data[i + 2];
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (operation.mode === 'channel-mixer') {
+        r += (g * amount + b * second) / 100;
+        g += (b * amount + r * second) / 100;
+        b += (r * amount + g * second) / 100;
+      } else if (operation.mode === 'selective-color') {
+        const max = Math.max(r, g, b),
+          weight = max ? (max - Math.min(r, g, b)) / max : 0;
+        if (r === max) r += amount * weight;
+        if (g === max) g += second * weight;
+        if (b === max) b -= amount * weight;
+      } else if (
+        operation.mode === 'gradient-map' ||
+        operation.mode === 'color-lookup'
+      ) {
+        const t = luma / 255,
+          strength =
+            operation.mode === 'color-lookup' ? Math.abs(amount) / 100 : 1;
+        r = r * (1 - strength) + (c1[0] * (1 - t) + c2[0] * t) * strength;
+        g = g * (1 - strength) + (c1[1] * (1 - t) + c2[1] * t) * strength;
+        b = b * (1 - strength) + (c1[2] * (1 - t) + c2[2] * t) * strength;
+      } else if (operation.mode === 'posterize') {
+        const levels = Math.max(2, Math.min(32, Math.round(amount))),
+          step = 255 / (levels - 1);
+        r = Math.round(r / step) * step;
+        g = Math.round(g / step) * step;
+        b = Math.round(b / step) * step;
+      } else if (operation.mode === 'threshold') {
+        r = g = b = luma >= Math.max(0, Math.min(255, amount)) ? 255 : 0;
+      } else if (operation.mode === 'clarity' || operation.mode === 'dehaze') {
+        const strength = amount / 100,
+          center = operation.mode === 'dehaze' ? 150 : 128;
+        r = center + (r - center) * (1 + strength * 0.8);
+        g = center + (g - center) * (1 + strength * 0.8);
+        b = center + (b - center) * (1 + strength * 0.8);
+        if (operation.mode === 'dehaze') {
+          r -= strength * 8;
+          b += strength * 10;
+        }
+      } else {
+        const grain = ((((i / 4) * 1103515245 + 12345) >>> 16) & 255) - 128,
+          noise = grain * (Math.abs(amount) / 100) * 0.55;
+        r += noise;
+        g += noise;
+        b += noise;
+      }
+      image.data[i] = Math.max(0, Math.min(255, r));
+      image.data[i + 1] = Math.max(0, Math.min(255, g));
+      image.data[i + 2] = Math.max(0, Math.min(255, b));
+    }
+    ctx.putImageData(image, 0, 0);
+    snapshot(
+      operation.mode
+        .split('-')
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join(' '),
+    );
+    render();
+    setStatus('Layer Studio adjustment applied');
+  };
+  const convertToSmartObject = () => {
+    const meta = selected(),
+      surface = meta && surfacesRef.current.get(meta.id);
+    if (
+      !meta ||
+      !surface ||
+      meta.kind === 'group' ||
+      meta.kind === 'adjustment' ||
+      isLocked(meta.id)
+    )
+      return;
+    patchLayer(
+      meta.id,
+      {
+        smartObject: {
+          kind: 'embedded',
+          sourceName: meta.name,
+          sourceData: surface.pixels.toDataURL('image/png'),
+          filters: [],
+          filterMask: false,
+        },
+      },
+      'Convert to Smart Object',
+    );
+    setStatus('Embedded Smart Object created; transforms are non-destructive');
+  };
+  const chooseSmartFile = (action: 'link' | 'replace' | 'relink') => {
+    smartFileAction.current = action;
+    smartObjectFileRef.current?.click();
+  };
+  const applySmartFile = async (file?: File) => {
+    if (!file) return;
+    const action = smartFileAction.current;
+    try {
+      const image = new Image(),
+        url = URL.createObjectURL(file);
+      image.src = url;
+      await image.decode();
+      const pixels = makeCanvas(doc.w, doc.h),
+        ctx = pixels.getContext('2d')!;
+      const scale = Math.min(
+          doc.w / image.naturalWidth,
+          doc.h / image.naturalHeight,
+        ),
+        w = image.naturalWidth * scale,
+        h = image.naturalHeight * scale;
+      ctx.drawImage(image, (doc.w - w) / 2, (doc.h - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+      let meta = selected();
+      if (action === 'link') {
+        const id = createLayer(file.name);
+        meta = id
+          ? layersRef.current.find((layer) => layer.id === id)
+          : undefined;
+      }
+      if (!meta || meta.kind === 'group' || meta.kind === 'adjustment')
+        throw Error('Select a pixel or Smart Object layer first');
+      const surface = surfacesRef.current.get(meta.id)!;
+      surface.pixels = pixels;
+      const previous = meta.smartObject;
+      patchLayer(
+        meta.id,
+        {
+          smartObject: {
+            kind:
+              action === 'link' || action === 'relink'
+                ? 'linked'
+                : (previous?.kind ?? 'embedded'),
+            sourceName: file.name,
+            sourceData: pixels.toDataURL('image/png'),
+            filters: previous?.filters ?? [],
+            filterMask: previous?.filterMask ?? false,
+          },
+        },
+        action === 'replace'
+          ? 'Replace Smart Object contents'
+          : action === 'relink'
+            ? 'Relink Smart Object'
+            : 'Place linked Smart Object',
+      );
+      render();
+      setStatus(
+        action === 'replace'
+          ? 'Smart Object contents replaced'
+          : action === 'relink'
+            ? 'Linked Smart Object relinked'
+            : 'Linked Smart Object placed with an embedded fallback',
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : 'Smart Object file could not be opened',
+      );
+    } finally {
+      if (smartObjectFileRef.current) smartObjectFileRef.current.value = '';
+    }
+  };
+  const editSmartContents = () => {
+    const smart = selected()?.smartObject;
+    if (!smart) return;
+    const image = new Image();
+    image.src = smart.sourceData;
+    image.onload = () => {
+      const pixels = makeCanvas(image.naturalWidth, image.naturalHeight);
+      pixels.getContext('2d')!.drawImage(image, 0, 0);
+      const id = crypto.randomUUID();
+      loadImportedDocument(
+        `${smart.sourceName} — Smart Object contents`,
+        pixels.width,
+        pixels.height,
+        [
+          {
+            id,
+            name: smart.sourceName,
+            kind: 'pixel',
+            visible: true,
+            opacity: 100,
+            blend: 'source-over',
+            x: 0,
+            y: 0,
+            hasMask: false,
+            maskEnabled: true,
+          },
+        ],
+        new Map([[id, { pixels }]]),
+        'Open Smart Object contents',
+      );
+      setStatus('Smart Object contents opened in a separate editable tab');
+    };
+  };
+  const addSmartFilter = (name: SmartFilter['name']) => {
+    const meta = selected();
+    if (!meta?.smartObject || isLocked(meta.id)) {
+      setStatus('Select an unlocked Smart Object first');
+      return;
+    }
+    patchLayer(
+      meta.id,
+      {
+        smartObject: {
+          ...meta.smartObject,
+          filters: [
+            ...meta.smartObject.filters,
+            {
+              id: crypto.randomUUID(),
+              name,
+              amount: name === 'Blur' ? 4 : 20,
+              opacity: 100,
+              blend: 'source-over',
+              enabled: true,
+            },
+          ],
+        },
+      },
+      `Add Smart Filter ${name}`,
+    );
+    render();
+    setStatus(`${name} added as an editable Smart Filter`);
+  };
+  const addSmartFilterMask = () => {
+    const meta = selected();
+    if (!meta?.smartObject) return;
+    if (!meta.hasMask) addMask();
+    patchLayer(
+      meta.id,
+      {
+        smartObject: { ...meta.smartObject, filterMask: true },
+      },
+      'Add Smart Filter mask',
+    );
+    setEditing('mask');
+    setStatus('Smart Filter mask ready for painting');
+  };
+  const configureSmartFilter = () => {
+    const meta = selected(),
+      filter = meta?.smartObject?.filters.at(-1);
+    if (!meta?.smartObject || !filter) return;
+    const opacityValue = Number(
+        window.prompt('Smart Filter opacity (0–100)', String(filter.opacity)),
+      ),
+      blend = window.prompt('Blend mode', filter.blend) as BlendMode | null;
+    if (
+      !Number.isFinite(opacityValue) ||
+      opacityValue < 0 ||
+      opacityValue > 100 ||
+      !blend ||
+      !(blend in blendLabels)
+    ) {
+      setStatus('Smart Filter settings were not changed');
+      return;
+    }
+    patchLayer(
+      meta.id,
+      {
+        smartObject: {
+          ...meta.smartObject,
+          filters: meta.smartObject.filters.map((item) =>
+            item.id === filter.id
+              ? { ...item, opacity: opacityValue, blend }
+              : item,
+          ),
+        },
+      },
+      'Smart Filter blend settings',
+    );
+    render();
+    setStatus('Smart Filter blend settings updated');
+  };
+  const rasterizeSmartObject = () => {
+    const meta = selected(),
+      surface = meta && surfacesRef.current.get(meta.id);
+    if (!meta?.smartObject || !surface || isLocked(meta.id)) return;
+    const pixels = makeCanvas(doc.w, doc.h);
+    drawLayer(
+      pixels.getContext('2d')!,
+      {
+        ...meta,
+        effects: undefined,
+        blend: 'source-over',
+        opacity: 100,
+        fill: 100,
+      },
+      surface,
+      doc.w,
+      doc.h,
+    );
+    surface.pixels = pixels;
+    patchLayer(
+      meta.id,
+      {
+        smartObject: undefined,
+        x: 0,
+        y: 0,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+      },
+      'Rasterize Smart Object',
+    );
+    render();
+    setStatus('Smart Object rasterized; layer effects remain editable');
   };
   const exportBrushPreset = () => {
     const preset = {
@@ -6853,6 +7773,41 @@ export default function Home() {
             { name: 'Ungroup layers', action: ungroup },
             { name: 'Rename layer…', action: renameLayer },
             { name: 'New adjustment layer', action: createAdjustment },
+            { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
+            { separator: true },
+            { name: 'Convert to Smart Object', action: convertToSmartObject },
+            {
+              name: 'Place linked Smart Object…',
+              action: () => chooseSmartFile('link'),
+            },
+            { name: 'Edit Smart Object contents', action: editSmartContents },
+            {
+              name: 'Replace Smart Object contents…',
+              action: () => chooseSmartFile('replace'),
+            },
+            {
+              name: 'Relink Smart Object…',
+              action: () => chooseSmartFile('relink'),
+            },
+            {
+              name: 'Add Blur Smart Filter',
+              action: () => addSmartFilter('Blur'),
+            },
+            {
+              name: 'Add Sharpen Smart Filter',
+              action: () => addSmartFilter('Sharpen'),
+            },
+            {
+              name: 'Add Brightness Smart Filter',
+              action: () => addSmartFilter('Brightness'),
+            },
+            { name: 'Add Smart Filter mask', action: addSmartFilterMask },
+            {
+              name: 'Smart Filter blend settings…',
+              action: configureSmartFilter,
+            },
+            { name: 'Rasterize Smart Object', action: rasterizeSmartObject },
+            { name: 'Convert text to shape path', action: convertTextToShapes },
             { separator: true },
             { name: 'Duplicate layer', action: duplicate, shortcut: '⌘J' },
             { name: 'Add layer mask', action: addMask },
@@ -7025,6 +7980,7 @@ export default function Home() {
           ])}
           {menu('Filter', [
             { name: 'New adjustment layer', action: createAdjustment },
+            { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
             { name: 'AI Remove Background', action: aiRemoveBackground },
             { separator: true },
             { name: 'Auto enhance', action: () => filter('brightness') },
@@ -7712,13 +8668,16 @@ export default function Home() {
                 Pen
                 <select
                   aria-label="Pen path type"
-                  value={pathCurved ? 'curved' : 'straight'}
-                  onChange={(event) =>
-                    setPathCurved(event.target.value === 'curved')
-                  }
+                  value={pathMode}
+                  onChange={(event) => {
+                    const mode = event.target.value as typeof pathMode;
+                    setPathMode(mode);
+                    setPathCurved(mode === 'curvature');
+                  }}
                 >
                   <option value="straight">Straight anchors</option>
-                  <option value="curved">Smooth curve</option>
+                  <option value="curvature">Curvature Pen</option>
+                  <option value="freeform">Freeform Pen</option>
                 </select>
               </label>
             )}
@@ -7740,6 +8699,63 @@ export default function Home() {
             >
               Cancel points
             </Button>
+            {tool === 'path' && (
+              <>
+                <label>
+                  Bézier tension
+                  <input
+                    aria-label="Bezier handle tension"
+                    className="number-option compact-number"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={pathTension}
+                    onChange={(event) =>
+                      setPathTension(
+                        Math.max(0, Math.min(100, +event.target.value || 0)),
+                      )
+                    }
+                  />
+                </label>
+                <Button size="sm" variant="ghost" onClick={addPathAnchor}>
+                  Add point
+                </Button>
+                <Button size="sm" variant="ghost" onClick={deletePathAnchor}>
+                  Delete point
+                </Button>
+                <Button size="sm" variant="ghost" onClick={togglePathPointType}>
+                  Corner / smooth
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => nudgePath(-1, 0)}
+                >
+                  Direct select ←
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => nudgePath(1, 0)}
+                >
+                  Direct select →
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => fillStrokePath(true)}
+                >
+                  Fill path
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => fillStrokePath(false)}
+                >
+                  Stroke path
+                </Button>
+              </>
+            )}
           </>
         )}
         {tool === 'text' && (
@@ -7784,6 +8800,189 @@ export default function Home() {
                 }}
               />
             </label>
+            <details className="brush-dynamics type-controls">
+              <summary>Character & paragraph</summary>
+              <div>
+                <label>
+                  Type mode
+                  <select
+                    aria-label="Text layer mode"
+                    value={textParagraph ? 'paragraph' : 'point'}
+                    onChange={(event) =>
+                      setTextParagraph(event.target.value === 'paragraph')
+                    }
+                  >
+                    <option value="point">Point text</option>
+                    <option value="paragraph">Paragraph text</option>
+                  </select>
+                </label>
+                {textParagraph && (
+                  <label>
+                    Paragraph width
+                    <input
+                      aria-label="Paragraph width"
+                      type="number"
+                      min="40"
+                      max={doc.w}
+                      value={textWidth}
+                      onChange={(event) =>
+                        setTextWidth(
+                          Math.max(
+                            40,
+                            Math.min(doc.w, +event.target.value || 40),
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                )}
+                <label>
+                  Font
+                  <select
+                    aria-label="Font family"
+                    value={fontFamily}
+                    onChange={(event) => setFontFamily(event.target.value)}
+                  >
+                    <option value="Arial">Arial</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                    <option value="Courier New">Courier New</option>
+                    <option value="Verdana">Verdana</option>
+                    <option value="system-ui">System UI</option>
+                  </select>
+                </label>
+                <label>
+                  Weight
+                  <select
+                    aria-label="Font weight"
+                    value={fontWeight}
+                    onChange={(event) => setFontWeight(+event.target.value)}
+                  >
+                    {[300, 400, 500, 600, 700, 800, 900].map((weight) => (
+                      <option key={weight} value={weight}>
+                        {weight}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Tracking
+                  <input
+                    aria-label="Text tracking"
+                    type="number"
+                    min="-20"
+                    max="100"
+                    value={textTracking}
+                    onChange={(event) =>
+                      setTextTracking(+event.target.value || 0)
+                    }
+                  />
+                </label>
+                <label>
+                  Leading
+                  <input
+                    aria-label="Text leading"
+                    type="number"
+                    min="0.5"
+                    max="4"
+                    step="0.1"
+                    value={textLeading}
+                    onChange={(event) =>
+                      setTextLeading(
+                        Math.max(0.5, Math.min(4, +event.target.value || 1.2)),
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Baseline shift
+                  <input
+                    aria-label="Text baseline shift"
+                    type="number"
+                    min="-200"
+                    max="200"
+                    value={textBaseline}
+                    onChange={(event) =>
+                      setTextBaseline(+event.target.value || 0)
+                    }
+                  />
+                </label>
+                <label>
+                  Alignment
+                  <select
+                    aria-label="Paragraph alignment"
+                    value={textAlign}
+                    onChange={(event) =>
+                      setTextAlign(event.target.value as typeof textAlign)
+                    }
+                  >
+                    <option value="left">Left</option>
+                    <option value="center">Center</option>
+                    <option value="right">Right</option>
+                    <option value="justify">Justify</option>
+                  </select>
+                </label>
+                <label>
+                  Warp
+                  <input
+                    aria-label="Text warp"
+                    type="number"
+                    min="-200"
+                    max="200"
+                    value={textWarp}
+                    onChange={(event) => setTextWarp(+event.target.value || 0)}
+                  />
+                </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={textKerning}
+                    onChange={(event) => setTextKerning(event.target.checked)}
+                  />
+                  Kerning
+                </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={textOnPath}
+                    onChange={(event) => setTextOnPath(event.target.checked)}
+                  />
+                  Text on path
+                </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={textSmallCaps}
+                    onChange={(event) => setTextSmallCaps(event.target.checked)}
+                  />
+                  OpenType small caps
+                </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={textLigatures}
+                    onChange={(event) => setTextLigatures(event.target.checked)}
+                  />
+                  OpenType ligatures
+                </label>
+                <div className="brush-preset-actions">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={updateSelectedText}
+                  >
+                    Update selected text
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={convertTextToShapes}
+                  >
+                    Convert to shapes
+                  </Button>
+                </div>
+              </div>
+            </details>
           </>
         )}
         {tool === 'crop' && (
@@ -7949,24 +9148,58 @@ export default function Home() {
         </section>
       )}
       {tool === 'shape' && (
-        <section className="advanced-options" aria-label="Rectangle options">
+        <section className="advanced-options" aria-label="Shape options">
           <label>
-            Corner radius
-            <input
-              className="number-option compact-number"
-              aria-label="Rectangle corner radius"
-              type="number"
-              min="0"
-              max="500"
-              value={shapeRadius}
+            Shape
+            <select
+              aria-label="Shape kind"
+              value={shapeKind}
               onChange={(event) =>
-                setShapeRadius(
-                  Math.max(0, Math.min(500, +event.target.value || 0)),
-                )
+                setShapeKind(event.target.value as typeof shapeKind)
               }
-            />
-            px
+            >
+              <option value="rectangle">Rectangle</option>
+              <option value="ellipse">Ellipse</option>
+              <option value="polygon">Polygon</option>
+            </select>
           </label>
+          {shapeKind === 'rectangle' && (
+            <label>
+              Corner radius
+              <input
+                className="number-option compact-number"
+                aria-label="Rectangle corner radius"
+                type="number"
+                min="0"
+                max="500"
+                value={shapeRadius}
+                onChange={(event) =>
+                  setShapeRadius(
+                    Math.max(0, Math.min(500, +event.target.value || 0)),
+                  )
+                }
+              />
+              px
+            </label>
+          )}
+          {shapeKind === 'polygon' && (
+            <label>
+              Sides
+              <input
+                className="number-option compact-number"
+                aria-label="Polygon sides"
+                type="number"
+                min="3"
+                max="24"
+                value={polygonSides}
+                onChange={(event) =>
+                  setPolygonSides(
+                    Math.max(3, Math.min(24, +event.target.value || 3)),
+                  )
+                }
+              />
+            </label>
+          )}
           <label className="inline-check">
             <input
               type="checkbox"
@@ -9575,6 +10808,18 @@ export default function Home() {
         open={geometryOpen}
         onClose={() => setGeometryOpen(false)}
         onApply={applyGeometry}
+      />
+      <LayerStudioDialog
+        open={layerStudioOpen}
+        onClose={() => setLayerStudioOpen(false)}
+        onApply={applyLayerStudio}
+      />
+      <input
+        ref={smartObjectFileRef}
+        hidden
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={(event) => void applySmartFile(event.target.files?.[0])}
       />
       <Dialog
         open={selectionRepairOpen !== null}
