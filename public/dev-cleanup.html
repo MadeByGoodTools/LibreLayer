@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pixel Studio preview cleanup</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        color: #d5d7dc;
+        background: #111318;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Refreshing the Pixel Studio preview…</p>
+    <script>
+      (async () => {
+        const local = ['localhost', '127.0.0.1'].includes(location.hostname);
+        if (local && 'serviceWorker' in navigator) {
+          const registrations =
+            await navigator.serviceWorker.getRegistrations();
+          await Promise.all(
+            registrations.map((registration) => registration.unregister()),
+          );
+          const cacheKeys = await caches.keys();
+          await Promise.all(
+            cacheKeys
+              .filter((key) => key.startsWith('pixel-studio-shell-'))
+              .map((key) => caches.delete(key)),
+          );
+        }
+        location.replace(local ? '/?preview=clean' : '/');
+      })();
+    </script>
+  </body>
+</html>

@@ -1,9 +1,20 @@
-const CACHE = 'pixel-studio-shell-v26';
+const CACHE = 'pixel-studio-shell-v28';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/offline.html'];
+const LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1'].includes(
+  self.location.hostname,
+);
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
-  self.skipWaiting();
+  if (LOCAL_DEVELOPMENT) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(SHELL))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -12,48 +23,57 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)),
+          keys
+            .filter((key) =>
+              LOCAL_DEVELOPMENT
+                ? key.startsWith('pixel-studio-shell-')
+                : key !== CACHE,
+            )
+            .map((key) => caches.delete(key)),
         ),
+      )
+      .then(() => self.clients.claim())
+      .then(() =>
+        LOCAL_DEVELOPMENT ? self.registration.unregister() : undefined,
       ),
   );
-  self.clients.claim();
 });
 
+async function networkFirstNavigation(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE);
+      await cache.put('/', response.clone());
+    }
+    return response;
+  } catch {
+    return (await caches.match('/')) || caches.match('/offline.html');
+  }
+}
+
+async function cacheFirstAsset(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (
+    response.ok &&
+    ['script', 'style', 'font', 'image'].includes(request.destination)
+  ) {
+    const cache = await caches.open(CACHE);
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
 self.addEventListener('fetch', (event) => {
+  if (LOCAL_DEVELOPMENT) return;
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) return;
   if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put('/', copy));
-          return response;
-        })
-        .catch(
-          async () =>
-            (await caches.match('/')) || caches.match('/offline.html'),
-        ),
-    );
+    event.respondWith(networkFirstNavigation(event.request));
     return;
   }
-  event.respondWith(
-    caches.match(event.request).then(
-      (cached) =>
-        cached ||
-        fetch(event.request).then((response) => {
-          if (
-            response.ok &&
-            ['script', 'style', 'font', 'image'].includes(
-              event.request.destination,
-            )
-          ) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        }),
-    ),
-  );
+  event.respondWith(cacheFirstAsset(event.request));
 });

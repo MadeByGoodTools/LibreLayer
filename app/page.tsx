@@ -1237,8 +1237,39 @@ export default function Home() {
       .catch(() => setRecent([]));
   }, []);
   useEffect(() => {
-    if ('serviceWorker' in navigator)
-      void navigator.serviceWorker.register('/sw.js').catch(() => {});
+    if ('serviceWorker' in navigator) {
+      if (process.env.NODE_ENV === 'production') {
+        void navigator.serviceWorker.register('/sw.js').catch(() => {});
+      } else {
+        // A production service worker left on localhost can cache Vite's
+        // development client and break hot reload with repeated send errors.
+        void navigator.serviceWorker
+          .register('/sw.js?dev-cleanup=v28')
+          .then(() => navigator.serviceWorker.getRegistrations())
+          .then(async (registrations) => {
+            const wasControlled = Boolean(navigator.serviceWorker.controller);
+            await Promise.all(
+              registrations.map((registration) => registration.unregister()),
+            );
+            const cacheKeys = await caches.keys();
+            await Promise.all(
+              cacheKeys
+                .filter((key) => key.startsWith('pixel-studio-shell-'))
+                .map((key) => caches.delete(key)),
+            );
+            if (
+              wasControlled &&
+              sessionStorage.getItem('pixel-studio-dev-sw-cleaned') !== 'true'
+            ) {
+              sessionStorage.setItem('pixel-studio-dev-sw-cleaned', 'true');
+              window.location.reload();
+            } else {
+              sessionStorage.removeItem('pixel-studio-dev-sw-cleaned');
+            }
+          })
+          .catch(() => {});
+      }
+    }
     const capture = (event: Event) => {
       event.preventDefault();
       setInstallPrompt(event as InstallPromptEvent);
