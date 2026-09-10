@@ -3,7 +3,7 @@ import test from 'node:test';
 import { packProject, unpackProject } from '../lib/project-format.ts';
 
 const fixture = {
-  format: 'pixel-studio',
+  format: 'librelayer',
   version: 2,
   name: 'Integrity test',
   width: 2,
@@ -13,7 +13,16 @@ const fixture = {
 
 void test('a packaged project round-trips with a verified checksum', async () => {
   const packed = await packProject(fixture);
+  assert.equal(JSON.parse(await packed.text()).format, 'librelayer-package');
   const result = await unpackProject<typeof fixture>(await packed.text());
+  assert.deepEqual(result.project, fixture);
+  assert.equal(result.verified, true);
+});
+
+void test('Pixel Studio package envelopes remain readable after rebranding', async () => {
+  const packed = JSON.parse(await (await packProject(fixture)).text());
+  packed.format = 'pixel-studio-package';
+  const result = await unpackProject<typeof fixture>(JSON.stringify(packed));
   assert.deepEqual(result.project, fixture);
   assert.equal(result.verified, true);
 });

@@ -89,7 +89,7 @@ export function WorkspaceSettings({
         <DialogTitle>Workspace settings</DialogTitle>
         <DialogDescription>
           Saved on this browser profile. These settings remain after you close
-          Pixel Studio.
+          LibreLayer.
         </DialogDescription>
         <Tabs defaultValue="layout">
           <TabsList>

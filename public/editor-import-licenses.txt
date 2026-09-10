@@ -1,4 +1,4 @@
-Pixel Studio third-party notices
+LibreLayer third-party notices
 
 TIFF decoding uses UTIF.js (Photopea).
 PDF rendering uses PDF.js (Mozilla Foundation and contributors).

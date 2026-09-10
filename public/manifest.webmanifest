@@ -1,13 +1,13 @@
 {
-  "name": "Pixel Studio",
-  "short_name": "Pixel Studio",
+  "name": "LibreLayer",
+  "short_name": "LibreLayer",
   "description": "A familiar, device-local image editing workspace in your browser.",
   "id": "/",
   "start_url": "/?source=installed",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#101114",
-  "theme_color": "#1f8fff",
+  "background_color": "#101513",
+  "theme_color": "#22b884",
   "categories": ["graphics", "photo", "productivity"],
   "icons": [
     {
@@ -21,7 +21,12 @@
     {
       "action": "/?source=file",
       "accept": {
-        "application/octet-stream": [".pixelstudio", ".psd", ".psb"],
+        "application/octet-stream": [
+          ".librelayer",
+          ".pixelstudio",
+          ".psd",
+          ".psb"
+        ],
         "image/png": [".png"],
         "image/jpeg": [".jpg", ".jpeg"],
         "image/webp": [".webp"],

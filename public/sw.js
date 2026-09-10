@@ -1,4 +1,4 @@
-const CACHE = 'pixel-studio-shell-v28';
+const CACHE = 'librelayer-shell-v30';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/offline.html'];
 const LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1'].includes(
   self.location.hostname,
@@ -26,7 +26,8 @@ self.addEventListener('activate', (event) => {
           keys
             .filter((key) =>
               LOCAL_DEVELOPMENT
-                ? key.startsWith('pixel-studio-shell-')
+                ? key.startsWith('pixel-studio-shell-') ||
+                  key.startsWith('librelayer-shell-')
                 : key !== CACHE,
             )
             .map((key) => caches.delete(key)),

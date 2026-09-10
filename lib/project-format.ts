@@ -1,5 +1,5 @@
 export type ProjectEnvelope<T> = {
-  format: 'pixel-studio-package';
+  format: 'librelayer-package' | 'pixel-studio-package';
   version: 1;
   checksum: { algorithm: 'SHA-256'; value: string };
   payload: T;
@@ -18,7 +18,7 @@ const digestText = async (text: string) => {
 export async function packProject<T>(project: T): Promise<Blob> {
   const payloadText = JSON.stringify(project);
   const envelope: ProjectEnvelope<T> = {
-    format: 'pixel-studio-package',
+    format: 'librelayer-package',
     version: 1,
     checksum: {
       algorithm: 'SHA-256',
@@ -27,7 +27,7 @@ export async function packProject<T>(project: T): Promise<Blob> {
     payload: project,
   };
   return new Blob([JSON.stringify(envelope)], {
-    type: 'application/vnd.pixel-studio.project+json',
+    type: 'application/vnd.librelayer.project+json',
   });
 }
 
@@ -39,7 +39,7 @@ export async function unpackProject<T>(
     !parsed ||
     typeof parsed !== 'object' ||
     !('format' in parsed) ||
-    parsed.format !== 'pixel-studio-package'
+    !['librelayer-package', 'pixel-studio-package'].includes(parsed.format)
   )
     return { project: parsed as T, verified: false };
   if (
@@ -48,7 +48,7 @@ export async function unpackProject<T>(
     !/^[0-9a-f]{64}$/.test(parsed.checksum.value) ||
     !parsed.payload
   )
-    throw Error('This Pixel Studio package header is invalid.');
+    throw Error('This LibreLayer package header is invalid.');
   const actual = await digestText(JSON.stringify(parsed.payload));
   if (actual !== parsed.checksum.value)
     throw Error(

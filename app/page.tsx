@@ -1286,7 +1286,7 @@ export default function Home() {
         // A production service worker left on localhost can cache Vite's
         // development client and break hot reload with repeated send errors.
         void navigator.serviceWorker
-          .register('/sw.js?dev-cleanup=v28')
+          .register('/sw.js?dev-cleanup=v30')
           .then(() => navigator.serviceWorker.getRegistrations())
           .then(async (registrations) => {
             const wasControlled = Boolean(navigator.serviceWorker.controller);
@@ -1296,7 +1296,11 @@ export default function Home() {
             const cacheKeys = await caches.keys();
             await Promise.all(
               cacheKeys
-                .filter((key) => key.startsWith('pixel-studio-shell-'))
+                .filter(
+                  (key) =>
+                    key.startsWith('pixel-studio-shell-') ||
+                    key.startsWith('librelayer-shell-'),
+                )
                 .map((key) => caches.delete(key)),
             );
             if (
@@ -4817,8 +4821,8 @@ export default function Home() {
   };
   const exportBrushPreset = () => {
     const preset = {
-      format: 'pixelstudio-brush-v1',
-      name: 'Pixel Studio brush',
+      format: 'librelayer-brush-v1',
+      name: 'LibreLayer brush',
       size,
       hardness,
       opacity,
@@ -4843,7 +4847,7 @@ export default function Home() {
       ),
       anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'pixel-studio-brush.psbrush.json';
+    anchor.download = 'librelayer-brush.psbrush.json';
     anchor.click();
     URL.revokeObjectURL(url);
     setStatus('Brush preset exported');
@@ -4852,8 +4856,12 @@ export default function Home() {
     if (!file) return;
     try {
       const preset = JSON.parse(await file.text()) as Record<string, unknown>;
-      if (preset.format !== 'pixelstudio-brush-v1')
-        throw Error('Not a Pixel Studio brush preset');
+      if (
+        !['librelayer-brush-v1', 'pixelstudio-brush-v1'].includes(
+          String(preset.format),
+        )
+      )
+        throw Error('Not a LibreLayer brush preset');
       const number = (
         key: string,
         fallback: number,
@@ -5853,7 +5861,7 @@ export default function Home() {
           }
           const url = URL.createObjectURL(blob),
             a = document.createElement('a');
-          a.download = `${fileName.replace(/\.[^.]+$/, '') || 'pixel-studio'}.${ext}`;
+          a.download = `${fileName.replace(/\.[^.]+$/, '') || 'librelayer'}.${ext}`;
           a.href = url;
           document.body.appendChild(a);
           a.click();
@@ -6273,9 +6281,9 @@ export default function Home() {
         });
       }
       const project = {
-        format: 'pixel-studio',
+        format: 'librelayer',
         version: 2,
-        createdWith: 'Pixel Studio web',
+        createdWith: 'LibreLayer web',
         name: fileName,
         width: doc.w,
         height: doc.h,
@@ -6293,7 +6301,7 @@ export default function Home() {
       };
       const blob = await packProject(project);
       checkFileSize(blob.size);
-      const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}.pixelstudio`;
+      const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}.librelayer`;
       let savedToFolder = false;
       if (directory && folderPermission === 'granted') {
         let writable:
@@ -6358,7 +6366,7 @@ export default function Home() {
       const unpacked = await unpackProject<any>(await file.text()),
         data = unpacked.project;
       if (
-        data.format !== 'pixel-studio' ||
+        !['librelayer', 'pixel-studio'].includes(data.format) ||
         ![1, 2].includes(data.version) ||
         !Number.isInteger(data.width) ||
         !Number.isInteger(data.height) ||
@@ -6604,7 +6612,7 @@ export default function Home() {
       setPsdError(
         e instanceof Error
           ? e.message
-          : 'Could not open this project. Use a valid Pixel Studio project (up to 64 megapixels and 100 layers).',
+          : 'Could not open this project. Use a valid LibreLayer project (up to 64 megapixels and 100 layers).',
       );
       return false;
     } finally {
@@ -6641,7 +6649,7 @@ export default function Home() {
         } catch {}
         if (
           await openProject(
-            new File([record.json], `${record.name}.pixelstudio`, {
+            new File([record.json], `${record.name}.librelayer`, {
               type: 'application/json',
             }),
             { id: record.id, saved, skipPersist: true },
@@ -7259,7 +7267,7 @@ export default function Home() {
       setStatus('RAW preview ready for development');
     } catch (error) {
       setPsdError(
-        `${error instanceof Error ? error.message : 'RAW preview could not be decoded.'} Pixel Studio develops the full-size embedded JPEG preview and never changes the sensor file.`,
+        `${error instanceof Error ? error.message : 'RAW preview could not be decoded.'} LibreLayer develops the full-size embedded JPEG preview and never changes the sensor file.`,
       );
     } finally {
       if (url) URL.revokeObjectURL(url);
@@ -7340,7 +7348,7 @@ export default function Home() {
       setPagedFile(file);
       return;
     }
-    if (file.name.toLowerCase().endsWith('.pixelstudio')) {
+    if (/\.(librelayer|pixelstudio)$/i.test(file.name)) {
       void openProject(file);
       return;
     }
@@ -7354,7 +7362,7 @@ export default function Home() {
     }
     if (!file.type.startsWith('image/')) {
       setStatus(
-        'Unsupported image format. Open PNG, JPEG, WebP, PSD, PSB or a Pixel Studio project.',
+        'Unsupported image format. Open PNG, JPEG, WebP, PSD, PSB or a LibreLayer project.',
       );
       return;
     }
@@ -7428,9 +7436,10 @@ export default function Home() {
         multiple: false,
         types: [
           {
-            description: 'Pixel Studio and image files',
+            description: 'LibreLayer and image files',
             accept: {
               'application/octet-stream': [
+                '.librelayer',
                 '.pixelstudio',
                 '.psd',
                 '.psb',
@@ -7480,7 +7489,7 @@ export default function Home() {
   const installWebApp = async () => {
     if (!installPrompt) {
       setRecoveryStatus(
-        'Use your browser menu to install Pixel Studio or add it to the desktop',
+        'Use your browser menu to install LibreLayer or add it to the desktop',
       );
       return;
     }
@@ -7488,7 +7497,7 @@ export default function Home() {
     const choice = await installPrompt.userChoice;
     if (choice.outcome === 'accepted')
       setRecoveryStatus(
-        'Pixel Studio installed — the web version stays available',
+        'LibreLayer installed — the web version stays available',
       );
     setInstallPrompt(null);
   };
@@ -7751,7 +7760,7 @@ export default function Home() {
           name: 'configure_editor_tool',
           title: 'Configure editor tool',
           description:
-            'Select a visible Pixel Studio tool and optionally configure brush size, opacity, and color.',
+            'Select a visible LibreLayer tool and optionally configure brush size, opacity, and color.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -7988,9 +7997,9 @@ export default function Home() {
           });
         }
         const json = JSON.stringify({
-          format: 'pixel-studio',
+          format: 'librelayer',
           version: 2,
-          createdWith: 'Pixel Studio web',
+          createdWith: 'LibreLayer web',
           name: d.name,
           saved: d.saved,
           width: d.doc.w,
@@ -8896,8 +8905,10 @@ export default function Home() {
     >
       <header className="app-bar">
         <div className="brand">
-          <span className="brand-mark">P</span>
-          <strong>Pixel Studio</strong>
+          <span className="brand-mark" aria-hidden="true">
+            L
+          </span>
+          <strong>LibreLayer</strong>
         </div>
         <nav className="menus" aria-label="Application menu">
           {menu('File', [
@@ -8955,7 +8966,7 @@ export default function Home() {
             },
             { separator: true },
             {
-              name: 'Install Pixel Studio web app…',
+              name: 'Install LibreLayer web app…',
               action: () => void installWebApp(),
             },
             { name: 'Export PNG', action: exportPng },
@@ -9371,7 +9382,7 @@ export default function Home() {
             ref={fileRef}
             hidden
             type="file"
-            accept="application/pdf,.pdf,.tif,.tiff,image/*,.psd,.psb,.pixelstudio,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2"
+            accept="application/pdf,.pdf,.tif,.tiff,image/*,.psd,.psb,.librelayer,.pixelstudio,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2"
             onChange={(e) => openImage(e.target.files?.[0])}
           />
         </div>
@@ -10813,7 +10824,7 @@ export default function Home() {
             </div>
             <p className="smart-note">
               AI runs in your browser. The free model downloads once; no image
-              is uploaded by Pixel Studio.
+              is uploaded by LibreLayer.
             </p>
           </section>
           <section className="panel grow">
@@ -12310,7 +12321,7 @@ export default function Home() {
                   : 'Content-Aware Move'}
           </DialogTitle>
           <DialogDescription>
-            Pixel Studio samples the active layer around the selected area. The
+            LibreLayer samples the active layer around the selected area. The
             operation is local, selection-aware, and undoable.
           </DialogDescription>
           {(selectionRepairOpen === 'patch' ||
@@ -12458,7 +12469,7 @@ export default function Home() {
                 onClick={async () => {
                   setRecoveries(null);
                   await openProject(
-                    new File([record.json], record.name + '.pixelstudio'),
+                    new File([record.json], record.name + '.librelayer'),
                   );
                   setSaved(false);
                 }}
@@ -12521,7 +12532,7 @@ export default function Home() {
                     await openProject(
                       new File(
                         [record.json],
-                        `${record.name} — ${new Date(record.updated).toLocaleString()}.pixelstudio`,
+                        `${record.name} — ${new Date(record.updated).toLocaleString()}.librelayer`,
                       ),
                     )
                   )

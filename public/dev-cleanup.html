@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Pixel Studio preview cleanup</title>
+    <title>LibreLayer preview cleanup</title>
     <style>
       body {
         margin: 0;
@@ -19,7 +19,7 @@
     </style>
   </head>
   <body>
-    <p>Refreshing the Pixel Studio preview…</p>
+    <p>Refreshing the LibreLayer preview…</p>
     <script>
       (async () => {
         const local = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -32,7 +32,11 @@
           const cacheKeys = await caches.keys();
           await Promise.all(
             cacheKeys
-              .filter((key) => key.startsWith('pixel-studio-shell-'))
+              .filter(
+                (key) =>
+                  key.startsWith('pixel-studio-shell-') ||
+                  key.startsWith('librelayer-shell-'),
+              )
               .map((key) => caches.delete(key)),
           );
         }

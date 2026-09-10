@@ -30,7 +30,7 @@ export function ProSuiteDialog({
   const [amount, setAmount] = useState(50),
     [secondary, setSecondary] = useState(40),
     [color, setColor] = useState('#6d8cff'),
-    [text, setText] = useState('Pixel Studio'),
+    [text, setText] = useState('LibreLayer'),
     [report, setReport] = useState('');
   const options = { amount, secondary, color, text };
   const sliderNumber = (value: number | readonly number[]) =>

@@ -26,24 +26,24 @@
   --radius-lg: 9px;
 }
 :root {
-  --background: #17181b;
-  --foreground: #f4f4f5;
-  --card: #232429;
-  --card-foreground: #f4f4f5;
-  --popover: #232429;
-  --popover-foreground: #f4f4f5;
-  --primary: #6d6ff7;
-  --primary-foreground: white;
-  --secondary: #34353b;
-  --secondary-foreground: #fafafa;
-  --muted: #303136;
-  --muted-foreground: #a1a1aa;
-  --accent: #34353b;
-  --accent-foreground: #fafafa;
+  --background: #151a18;
+  --foreground: #f3f7f5;
+  --card: #202724;
+  --card-foreground: #f3f7f5;
+  --popover: #202724;
+  --popover-foreground: #f3f7f5;
+  --primary: #32bd88;
+  --primary-foreground: #07150f;
+  --secondary: #303936;
+  --secondary-foreground: #f7faf9;
+  --muted: #2b322f;
+  --muted-foreground: #a3ada8;
+  --accent: #303936;
+  --accent-foreground: #f7faf9;
   --destructive: #ef4444;
-  --border: #393a40;
-  --input: #45464d;
-  --ring: #8b8df9;
+  --border: #35413c;
+  --input: #414e49;
+  --ring: #62d5ab;
 }
 * {
   box-sizing: border-box;
@@ -53,7 +53,7 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #17181b;
+  background: #151a18;
   color: #eee;
   font-family: Arial, Helvetica, sans-serif;
 }
@@ -64,15 +64,15 @@ button {
   height: 100vh;
   display: grid;
   grid-template-rows: 46px 42px minmax(0, 1fr) 30px;
-  background: #1d1e22;
+  background: #1b211f;
 }
 .app-bar {
   display: flex;
   align-items: center;
   gap: 22px;
   padding: 0 10px 0 14px;
-  background: #202126;
-  border-bottom: 1px solid #0f1012;
+  background: #1d2421;
+  border-bottom: 1px solid #0d1210;
 }
 .brand {
   display: flex;
@@ -80,17 +80,39 @@ button {
   gap: 9px;
   font-size: 14px;
   min-width: max-content;
+  letter-spacing: -0.01em;
 }
 .brand-mark {
+  position: relative;
   display: grid;
   place-items: center;
   width: 27px;
   height: 27px;
   border-radius: 7px;
-  background: linear-gradient(145deg, #7c7df9, #a15ff0);
-  color: white;
+  background: linear-gradient(145deg, #43dba4, #269fbf);
+  color: #06140f;
   font-weight: 800;
-  box-shadow: inset 0 0 0 1px #ffffff2c;
+  box-shadow:
+    inset 0 0 0 1px #d9fff04a,
+    0 0 18px #30c9941f;
+  isolation: isolate;
+}
+.brand-mark::before,
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  width: 11px;
+  height: 8px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.45;
+  z-index: -1;
+}
+.brand-mark::before {
+  transform: translate(-3px, -3px);
+}
+.brand-mark::after {
+  transform: translate(3px, 3px);
 }
 .menus {
   display: flex;
@@ -182,9 +204,9 @@ button {
   color: #fff !important;
 }
 .tool-button.active {
-  background: #6d6ff7 !important;
-  color: white !important;
-  box-shadow: 0 0 0 1px #a4a5ff inset;
+  background: #32bd88 !important;
+  color: #06140f !important;
+  box-shadow: 0 0 0 1px #78e2ba inset;
 }
 .tool-divider {
   height: 1px;
@@ -245,7 +267,7 @@ button {
   height: 7px;
   border-radius: 50%;
   margin-right: 5px;
-  background: #6d6ff7;
+  background: #32bd88;
 }
 .saved {
   background: #6b6c74;
@@ -389,7 +411,7 @@ button {
 }
 .layer-row.selected {
   background: #3b3c43;
-  box-shadow: inset 3px 0 #7779fb;
+  box-shadow: inset 3px 0 #32bd88;
 }
 .layer-row button {
   background: none;
@@ -411,7 +433,7 @@ button {
   display: grid;
   place-items: center;
   border-radius: 3px;
-  background: linear-gradient(145deg, #6769f4, #df719b);
+  background: linear-gradient(145deg, #2bb47f, #299ec0);
 }
 .layer-thumb svg {
   color: white;
@@ -562,7 +584,7 @@ button {
   pointer-events: none;
   border: 1px solid #fff;
   outline: 1px dashed #111;
-  box-shadow: 0 0 0 1px #7b7df8;
+  box-shadow: 0 0 0 1px #34c990;
 }
 .selection-box {
   animation: march 1s linear infinite;
@@ -573,8 +595,8 @@ button {
     linear-gradient(0deg, #fff 50%, #111 0) right/1px 8px repeat-y;
 }
 .drag-box {
-  border: 2px solid #8e90ff;
-  background: #7375ff18;
+  border: 2px solid #62d5ab;
+  background: #32bd8818;
 }
 @keyframes march {
   to {
@@ -641,7 +663,7 @@ button {
   color: #27282d !important;
 }
 .mask-thumb.active {
-  box-shadow: 0 0 0 2px #8587ff !important;
+  box-shadow: 0 0 0 2px #55d4a4 !important;
 }
 .layer-actions {
   display: flex;
@@ -655,7 +677,7 @@ button {
 .history-list button.current {
   background: #555660;
   color: white;
-  box-shadow: inset 3px 0 #7b7df8;
+  box-shadow: inset 3px 0 #34c990;
 }
 .tool-rail {
   overflow: auto;
@@ -869,14 +891,14 @@ button {
   overflow: visible;
 }
 .polygon-overlay polygon {
-  fill: #7375ff18;
+  fill: #32bd8818;
   stroke: #fff;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
 .polygon-overlay polygon.draft {
   fill: none;
-  stroke: #8e90ff;
+  stroke: #62d5ab;
   stroke-dasharray: 7 5;
 }
 .polygon-overlay polygon.closed {
@@ -898,7 +920,7 @@ button {
   position: absolute;
   width: 100%;
   height: 100%;
-  border: 1px solid #8e90ff;
+  border: 1px solid #62d5ab;
   transform-origin: center;
   pointer-events: none;
   box-shadow: 0 0 0 1px #fff8 inset;
@@ -938,14 +960,14 @@ button {
   transform: translateX(-50%);
   border-radius: 50%;
   cursor: grab;
-  background: #8e90ff;
+  background: #62d5ab;
 }
 .rotate-handle:before {
   content: '';
   position: absolute;
   width: 1px;
   height: 19px;
-  background: #8e90ff;
+  background: #62d5ab;
   left: 4px;
   top: 10px;
 }
@@ -1009,7 +1031,7 @@ button {
   cursor: pointer;
 }
 .channel-list > button.active {
-  border-color: #8587ff;
+  border-color: #55d4a4;
   background: #3a3b45;
 }
 .channel-list strong {
@@ -1661,16 +1683,16 @@ button {
   gap: 5px;
 }
 .layer-row input[type='checkbox'] {
-  accent-color: #7779fb;
+  accent-color: #32bd88;
 }
 .layer-row[data-drop='before'] {
-  border-top: 2px solid #8e90ff;
+  border-top: 2px solid #62d5ab;
 }
 .layer-row[data-drop='after'] {
-  border-bottom: 2px solid #8e90ff;
+  border-bottom: 2px solid #62d5ab;
 }
 .layer-row[data-drop='inside'] {
-  outline: 2px solid #8e90ff;
+  outline: 2px solid #62d5ab;
   outline-offset: -2px;
 }
 .blend-if-controls {
@@ -1745,7 +1767,7 @@ button {
   padding: 5px 24px 5px 7px;
 }
 .advanced-options .inline-check input {
-  accent-color: #7779fb;
+  accent-color: #32bd88;
 }
 .advanced-options .option-slider {
   width: 110px !important;
