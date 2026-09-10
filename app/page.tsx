@@ -93,6 +93,17 @@ import type { Layer as PsdLayer } from 'ag-psd';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import { packProject, unpackProject } from '@/lib/project-format';
 import {
+  applyColorGradeToPixels,
+  colorGradeIsNeutral,
+  createDefaultColorGrade,
+  neutralChannelLevels,
+  resolveColorGrade,
+  type ChannelLevelKey,
+  type ColorGrade,
+  type GradeOffsetKey,
+  type GradeRange,
+} from '@/lib/channel-grade';
+import {
   Dialog,
   DialogContent,
   DialogTitle,
@@ -284,6 +295,7 @@ type LayerMeta = {
   effects?: LayerEffects;
   smartObject?: SmartObjectData;
   textLayer?: TextLayerData;
+  colorGrade?: ColorGrade;
 };
 type LayerSurface = { pixels: HTMLCanvasElement; mask?: HTMLCanvasElement };
 type LayerComp = {
@@ -839,6 +851,31 @@ const maskToAlpha = (mask: HTMLCanvasElement, density = 100, feather = 0) => {
 };
 const sliderNumber = (value: number | readonly number[]) =>
   Number(Array.isArray(value) ? value[0] : value);
+const colorGradedCanvas = (
+  source: HTMLCanvasElement,
+  grade: ColorGrade | undefined,
+  w: number,
+  h: number,
+) => {
+  if (colorGradeIsNeutral(grade)) return source;
+  const output = makeCanvas(w, h),
+    outputContext = output.getContext('2d')!,
+    tile = makeCanvas(Math.min(256, w), Math.min(256, h));
+  for (let y = 0; y < h; y += 256)
+    for (let x = 0; x < w; x += 256) {
+      const width = Math.min(256, w - x),
+        height = Math.min(256, h - y),
+        tileContext = tile.getContext('2d', { willReadFrequently: true })!;
+      tileContext.clearRect(0, 0, tile.width, tile.height);
+      tileContext.drawImage(source, x, y, width, height, 0, 0, width, height);
+      const pixels = tileContext.getImageData(0, 0, width, height);
+      applyColorGradeToPixels(pixels.data, grade);
+      tileContext.putImageData(pixels, 0, 0);
+      outputContext.drawImage(tile, 0, 0, width, height, x, y, width, height);
+    }
+  tile.width = tile.height = 1;
+  return output;
+};
 const drawLayer = (
   ctx: CanvasRenderingContext2D,
   layer: LayerMeta,
@@ -914,6 +951,11 @@ const drawLayer = (
     if (source !== surface.pixels) source.width = source.height = 1;
     filtered.width = filtered.height = 1;
     source = combined;
+  }
+  const graded = colorGradedCanvas(source, layer.colorGrade, w, h);
+  if (graded !== source) {
+    if (source !== surface.pixels) source.width = source.height = 1;
+    source = graded;
   }
   const filter =
     (layer.brightness ?? 100) === 100 &&
@@ -1472,6 +1514,7 @@ export default function Home() {
   const [channelView, setChannelView] = useState<
     'rgb' | 'red' | 'green' | 'blue' | 'alpha'
   >('rgb');
+  const [soloChannel, setSoloChannel] = useState(false);
   const [text, setText] = useState('Your text');
   const [fontSize, setFontSize] = useState(64);
   const [fileName, setFileName] = useState('Untitled artwork');
@@ -1709,7 +1752,7 @@ export default function Home() {
     if (out.height !== doc.h) out.height = doc.h;
     const ctx = out.getContext('2d', { willReadFrequently: true })!;
     renderLayers(ctx);
-    if (channelView !== 'rgb') {
+    if (soloChannel && channelView !== 'rgb') {
       const image = ctx.getImageData(0, 0, doc.w, doc.h);
       for (let i = 0; i < image.data.length; i += 4) {
         const value =
@@ -1761,7 +1804,16 @@ export default function Home() {
       ctx.stroke();
       ctx.restore();
     }
-  }, [doc, channelView, cloneOverlay, tool, retouchMode, zoom, size]);
+  }, [
+    doc,
+    channelView,
+    soloChannel,
+    cloneOverlay,
+    tool,
+    retouchMode,
+    zoom,
+    size,
+  ]);
   useEffect(() => {
     render();
   }, [layers, render]);
@@ -8748,6 +8800,48 @@ export default function Home() {
     );
   };
   const active = selected();
+  const activeColorGrade = resolveColorGrade(active?.colorGrade);
+  const canGradeActive =
+    !!active &&
+    active.kind !== 'group' &&
+    active.kind !== 'adjustment' &&
+    !isLocked(active.id);
+  const commitColorGrade = (grade: ColorGrade, record?: string) => {
+    if (!active || !canGradeActive) {
+      setStatus('Select an unlocked pixel layer to adjust its channels.');
+      return;
+    }
+    patchLayer(active.id, { colorGrade: resolveColorGrade(grade) }, record);
+    render();
+    setStatus(`Editing ${channelView.toUpperCase()} channel grade`);
+  };
+  const updateChannelLevel = (key: ChannelLevelKey, value: number) => {
+    const grade = resolveColorGrade(active?.colorGrade);
+    grade.levels[channelView] = resolveColorGrade({
+      levels: {
+        ...grade.levels,
+        [channelView]: { ...grade.levels[channelView], [key]: value },
+      },
+    }).levels[channelView];
+    commitColorGrade(grade);
+  };
+  const updateGradeAmount = (
+    key: 'temperature' | 'tint' | 'vibrance',
+    value: number,
+  ) => {
+    const grade = resolveColorGrade(active?.colorGrade);
+    grade[key] = value;
+    commitColorGrade(grade);
+  };
+  const updateGradeOffset = (
+    range: GradeRange,
+    key: GradeOffsetKey,
+    value: number,
+  ) => {
+    const grade = resolveColorGrade(active?.colorGrade);
+    grade[range] = { ...grade[range], [key]: value };
+    commitColorGrade(grade);
+  };
   const selectionStyle = selection
     ? {
         left: `${(selection.x / doc.w) * 100}%`,
@@ -11562,9 +11656,11 @@ export default function Home() {
                   id: 'channels',
                   title: 'Channels',
                   content: (
-                    <div className="panel-content channel-list">
-                      {(['rgb', 'red', 'green', 'blue', 'alpha'] as const).map(
-                        (channel) => (
+                    <div className="panel-content channel-panel">
+                      <div className="channel-list">
+                        {(
+                          ['rgb', 'red', 'green', 'blue', 'alpha'] as const
+                        ).map((channel) => (
                           <button
                             key={channel}
                             className={channelView === channel ? 'active' : ''}
@@ -11578,11 +11674,215 @@ export default function Home() {
                             </strong>
                             <small>
                               {channelView === channel
-                                ? 'Visible'
-                                : 'Click to inspect'}
+                                ? 'Editing channel'
+                                : 'Select to edit'}
                             </small>
                           </button>
-                        ),
+                        ))}
+                      </div>
+                      <label className="inline-check channel-solo-toggle">
+                        <input
+                          type="checkbox"
+                          checked={soloChannel}
+                          disabled={channelView === 'rgb'}
+                          onChange={(event) =>
+                            setSoloChannel(event.target.checked)
+                          }
+                        />
+                        Solo channel preview
+                      </label>
+                      {!canGradeActive ? (
+                        <p className="channel-empty">
+                          Select an unlocked pixel layer to colour grade it.
+                        </p>
+                      ) : (
+                        <>
+                          <section className="channel-grade-section">
+                            <div className="channel-grade-heading">
+                              <strong>
+                                {channelView.toUpperCase()} levels
+                              </strong>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  const grade = resolveColorGrade(
+                                    active.colorGrade,
+                                  );
+                                  grade.levels[channelView] =
+                                    neutralChannelLevels();
+                                  commitColorGrade(
+                                    grade,
+                                    `Reset ${channelView.toUpperCase()} levels`,
+                                  );
+                                }}
+                              >
+                                Reset channel
+                              </Button>
+                            </div>
+                            {(
+                              [
+                                ['Input black', 'inputBlack', 0, 254, 1],
+                                ['Input white', 'inputWhite', 1, 255, 1],
+                                ['Gamma', 'gamma', 0.1, 9.99, 0.01],
+                                ['Output black', 'outputBlack', 0, 255, 1],
+                                ['Output white', 'outputWhite', 0, 255, 1],
+                              ] as const
+                            ).map(([label, key, min, max, step]) => (
+                              <label
+                                className="channel-grade-control"
+                                key={key}
+                              >
+                                <span>{label}</span>
+                                <input
+                                  aria-label={`${channelView} ${label}`}
+                                  type="number"
+                                  min={min}
+                                  max={max}
+                                  step={step}
+                                  value={
+                                    activeColorGrade.levels[channelView][key]
+                                  }
+                                  onChange={(event) =>
+                                    updateChannelLevel(key, +event.target.value)
+                                  }
+                                  onBlur={() =>
+                                    snapshot(
+                                      `${channelView.toUpperCase()} ${label}`,
+                                    )
+                                  }
+                                />
+                                <Slider
+                                  aria-label={`${channelView} ${label} slider`}
+                                  min={min}
+                                  max={max}
+                                  step={step}
+                                  value={
+                                    activeColorGrade.levels[channelView][key]
+                                  }
+                                  onValueChange={(next) =>
+                                    updateChannelLevel(key, sliderNumber(next))
+                                  }
+                                  onValueCommitted={() =>
+                                    snapshot(
+                                      `${channelView.toUpperCase()} ${label}`,
+                                    )
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </section>
+                          <details className="channel-grade-section" open>
+                            <summary>Colour grading</summary>
+                            {(
+                              [
+                                ['Temperature', 'temperature'],
+                                ['Tint', 'tint'],
+                                ['Vibrance', 'vibrance'],
+                              ] as const
+                            ).map(([label, key]) => (
+                              <label
+                                className="channel-grade-control"
+                                key={key}
+                              >
+                                <span>{label}</span>
+                                <input
+                                  aria-label={label}
+                                  type="number"
+                                  min="-100"
+                                  max="100"
+                                  value={activeColorGrade[key]}
+                                  onChange={(event) =>
+                                    updateGradeAmount(key, +event.target.value)
+                                  }
+                                  onBlur={() => snapshot(`Grade ${label}`)}
+                                />
+                                <Slider
+                                  aria-label={`${label} slider`}
+                                  min={-100}
+                                  max={100}
+                                  value={activeColorGrade[key]}
+                                  onValueChange={(next) =>
+                                    updateGradeAmount(key, sliderNumber(next))
+                                  }
+                                  onValueCommitted={() =>
+                                    snapshot(`Grade ${label}`)
+                                  }
+                                />
+                              </label>
+                            ))}
+                            {(
+                              [
+                                ['Shadows', 'shadows'],
+                                ['Midtones', 'midtones'],
+                                ['Highlights', 'highlights'],
+                              ] as const
+                            ).map(([label, range]) => (
+                              <fieldset className="grade-range" key={range}>
+                                <legend>{label}</legend>
+                                {(
+                                  [
+                                    ['Red', 'red'],
+                                    ['Green', 'green'],
+                                    ['Blue', 'blue'],
+                                  ] as const
+                                ).map(([channelLabel, key]) => (
+                                  <label
+                                    className={`grade-offset ${key}`}
+                                    key={key}
+                                  >
+                                    <span>{channelLabel}</span>
+                                    <input
+                                      aria-label={`${label} ${channelLabel}`}
+                                      type="number"
+                                      min="-100"
+                                      max="100"
+                                      value={activeColorGrade[range][key]}
+                                      onChange={(event) =>
+                                        updateGradeOffset(
+                                          range,
+                                          key,
+                                          +event.target.value,
+                                        )
+                                      }
+                                      onBlur={() =>
+                                        snapshot(`${label} ${channelLabel}`)
+                                      }
+                                    />
+                                    <Slider
+                                      aria-label={`${label} ${channelLabel} slider`}
+                                      min={-100}
+                                      max={100}
+                                      value={activeColorGrade[range][key]}
+                                      onValueChange={(next) =>
+                                        updateGradeOffset(
+                                          range,
+                                          key,
+                                          sliderNumber(next),
+                                        )
+                                      }
+                                      onValueCommitted={() =>
+                                        snapshot(`${label} ${channelLabel}`)
+                                      }
+                                    />
+                                  </label>
+                                ))}
+                              </fieldset>
+                            ))}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                commitColorGrade(
+                                  createDefaultColorGrade(),
+                                  'Reset colour grade',
+                                )
+                              }
+                            >
+                              Reset complete grade
+                            </Button>
+                          </details>
+                        </>
                       )}
                     </div>
                   ),
