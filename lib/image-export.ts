@@ -1,4 +1,5 @@
 export type ExportFormat='png'|'jpeg'|'webp'|'tiff'|'pdf';
+import {checkDimensions} from './document-limits';
 export function encodeTiff(image:ImageData):ArrayBuffer {
   const tags=12,ifdEnd=8+2+tags*12+4,bitsOffset=ifdEnd,pixelsOffset=ifdEnd+8;
   const buffer=new ArrayBuffer(pixelsOffset+image.data.length),v=new DataView(buffer);
@@ -24,7 +25,7 @@ function encodePdf(jpeg:Uint8Array,width:number,height:number):Blob {
 export async function encodeImage(source:HTMLCanvasElement,format:ExportFormat,quality:number,scale:number,matte:string):Promise<Blob> {
   if(!Number.isFinite(scale)||scale<.1||scale>2||!Number.isFinite(quality)||quality<1||quality>100)throw Error('Choose a valid size and quality.');
   const w=Math.max(1,Math.round(source.width*scale)),h=Math.max(1,Math.round(source.height*scale));
-  if(w>8192||h>8192||w*h>24000000)throw Error('Export exceeds 8,192 pixels per side or 24 megapixels.');
+  checkDimensions(w,h);
   const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d')!;
   if(format==='jpeg'||format==='pdf'||matte!=='transparent'){ctx.fillStyle=matte==='transparent'?'#ffffff':matte;ctx.fillRect(0,0,w,h)}
   ctx.imageSmoothingQuality='high';ctx.drawImage(source,0,0,w,h);

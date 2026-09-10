@@ -1,14 +1,16 @@
 import { readPsd, writePsd, initializeCanvas, getLayerImageData, getLayerMaskImageData, getCompositeImageData, type Layer, type Psd } from 'ag-psd';
+import {MAX_DOCUMENT_PIXELS,MAX_SIDE,MAX_WORKING_PIXELS,checkFileSize} from './document-limits';
+import {pixelTransfers} from './pixel-transfers';
 
 initializeCanvas((w,h)=>new OffscreenCanvas(w,h) as unknown as HTMLCanvasElement,(w,h)=>new ImageData(w,h));
 
 const supported = new Set(['normal','multiply','screen','overlay','darken','lighten','color dodge','color burn','hard light','soft light','difference','exclusion','hue','saturation','color','luminosity']);
-const MAX_PIXELS = 24_000_000;
+const MAX_PIXELS = MAX_DOCUMENT_PIXELS;
 function bounds(w:number,h:number) {
-  if (!Number.isInteger(w)||!Number.isInteger(h)||w<0||h<0||w>8192||h>8192||w*h>MAX_PIXELS) throw Error('PSD dimensions exceed the supported 8,192-pixel / 24-megapixel limits.');
+  if (!Number.isInteger(w)||!Number.isInteger(h)||w<0||h<0||w>MAX_SIDE||h>MAX_SIDE||w*h>MAX_PIXELS) throw Error('PSD/PSB dimensions exceed 16,384 pixels per side or 64 megapixels. No resizing was applied.');
 }
 function decode(buffer:ArrayBuffer) {
-  if(buffer.byteLength<26||buffer.byteLength>128*1024*1024) throw Error('Choose a PSD smaller than 128 MB.');
+  if(buffer.byteLength<26)throw Error('Incomplete PSD/PSB header.');checkFileSize(buffer.byteLength);
   const header=new DataView(buffer);
   if(header.getUint32(0)!==0x38425053||![1,2].includes(header.getUint16(4))) throw Error('Choose a valid PSD or PSB file.');
   bounds(header.getUint32(18),header.getUint32(14));
@@ -20,7 +22,7 @@ function decode(buffer:ArrayBuffer) {
     if(++count>100||depth>20) throw Error('PSD files may contain at most 100 layers and 20 nested groups.');
     bounds((layer.right??0)-(layer.left??0),(layer.bottom??0)-(layer.top??0));
     expandedPixels+=psd.width*psd.height*(layer.mask?2:1);
-    if(expandedPixels>32_000_000) throw Error('This layered PSD needs too much memory. Reduce its size or layer count before importing.');
+    if(expandedPixels>MAX_WORKING_PIXELS) throw Error('This layered file exceeds 96 million layer/mask pixels. Reduce the number of layers or dimensions in a copy.');
     if(layer.mask) bounds((layer.mask.right??0)-(layer.mask.left??0),(layer.mask.bottom??0)-(layer.mask.top??0));
     if(layer.effects||layer.adjustment||layer.clipping||layer.vectorMask||layer.vectorFill||layer.vectorStroke||layer.placedLayer||layer.text||layer.fillOpacity!==undefined&&layer.fillOpacity!==1) warnings.add('Live text, smart objects, clipping, effects, vector content or adjustment layers');
     if(layer.realMask||layer.knockout||layer.artboard) warnings.add('Additional masks, knockout blending or artboards');
@@ -44,7 +46,7 @@ function decode(buffer:ArrayBuffer) {
 }
 self.onmessage=(event:MessageEvent<{action:'read';buffer:ArrayBuffer}|{action:'write';psd:Psd;psb?:boolean}>)=>{
   try {
-    if(event.data.action==='read') self.postMessage({ok:true,result:decode(event.data.buffer)});
+    if(event.data.action==='read') {const result=decode(event.data.buffer);self.postMessage({ok:true,result},{transfer:pixelTransfers(result)});}
     else {const result=writePsd(event.data.psd,{generateThumbnail:false,noBackground:true,trimImageData:false,psb:event.data.psb});self.postMessage({ok:true,result},{transfer:[result]});}
   } catch(error) {self.postMessage({ok:false,error:error instanceof Error?error.message:'PSD processing failed.'});}
 };
