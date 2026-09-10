@@ -213,8 +213,8 @@ export function applySuitePixelOperation(
     if (!d[i + 3]) continue;
     let r = d[i],
       g = d[i + 1],
-      b = d[i + 2],
-      l = (r + g + b) / 3;
+      b = d[i + 2];
+    const l = (r + g + b) / 3;
     if (command === 'desaturate' || command === 'rgb-cmyk-gray') r = g = b = l;
     else if (command === 'auto-contrast' || command === 'equalize') {
       const stretch = (v: number) => ((v - min) / Math.max(1, max - min)) * 255;

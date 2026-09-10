@@ -108,7 +108,6 @@ import {
   type SuiteOptions,
 } from '@/lib/pro-suite';
 import { Slider } from '@/components/ui/slider';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -2746,17 +2745,17 @@ export default function Home() {
             }
             const radius = dabSize / 2,
               inner = radius * Math.max(0, Math.min(1, hardness / 100)),
-              g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius);
+              g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius),
+              transparentPaint = dabPaint.startsWith('#')
+                ? `${dabPaint}00`
+                : dabPaint.startsWith('rgb(')
+                  ? dabPaint.replace(/^rgb\((.*)\)$/, 'rgba($1,0)')
+                  : dabPaint === 'white'
+                    ? 'rgba(255,255,255,0)'
+                    : 'rgba(0,0,0,0)';
             g.addColorStop(0, dabPaint);
             g.addColorStop(Math.min(0.999, inner / radius), dabPaint);
-            g.addColorStop(
-              1,
-              dabPaint === 'white'
-                ? 'rgba(255,255,255,0)'
-                : dabPaint === 'black'
-                  ? 'rgba(0,0,0,0)'
-                  : `${dabPaint}00`,
-            );
+            g.addColorStop(1, transparentPaint);
             ctx.save();
             ctx.translate(x, y);
             if (tilt) {
@@ -7475,30 +7474,6 @@ export default function Home() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const projectData = () => ({
-    format: 'pixel-studio',
-    version: 1,
-    name: fileName,
-    width: doc.w,
-    height: doc.h,
-    selectedId: selectedRef.current,
-    selectedIds: [...selectedIdsRef.current],
-    layerComps: layerCompsRef.current,
-    zoom,
-    view,
-    layers: layersRef.current.map((layer) => {
-      const s = surfacesRef.current.get(layer.id)!;
-      return {
-        ...layer,
-        pixels: s.pixels.toDataURL('image/png'),
-        mask: s.mask?.toDataURL('image/png'),
-      };
-    }),
-    paths,
-    selection: selectionRef.current,
-    selectionPath: selectionPathRef.current,
-    feather,
-  });
   const showExport = () => {
     const canvas = makeCanvas(doc.w, doc.h);
     renderLayers(canvas.getContext('2d')!);
@@ -7643,7 +7618,8 @@ export default function Home() {
             r = i % 2 ? radius * 0.45 : radius,
             x = cx + Math.cos(a) * r,
             y = cy + Math.sin(a) * r;
-          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          if (i) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
         }
         ctx.closePath();
       } else {
@@ -8100,7 +8076,9 @@ export default function Home() {
         if (pixels[i + 3]) {
           count++;
           const l = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-          l < 85 ? dark++ : l > 170 ? light++ : mid++;
+          if (l < 85) dark++;
+          else if (l > 170) light++;
+          else mid++;
           if (Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) > 245) out++;
         }
       canvas.width = canvas.height = 1;
