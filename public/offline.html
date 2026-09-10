@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#1f8fff" />
+    <title>Pixel Studio — Offline</title>
+    <style>
+      html {
+        color-scheme: dark;
+        font:
+          16px system-ui,
+          sans-serif;
+        background: #101114;
+        color: #eef3f8;
+      }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(30rem, calc(100% - 3rem));
+        padding: 2rem;
+        border: 1px solid #343941;
+        border-radius: 0.75rem;
+        background: #191b20;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.35rem;
+      }
+      p {
+        color: #b9c0ca;
+        line-height: 1.55;
+      }
+      button {
+        border: 0;
+        border-radius: 0.45rem;
+        padding: 0.7rem 1rem;
+        color: white;
+        background: #187bd1;
+        font: inherit;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Pixel Studio is offline</h1>
+      <p>
+        Your device-local projects and recovery copies are safe. Reconnect once
+        to load the editor, then its working files will remain available for
+        later offline starts.
+      </p>
+      <button onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

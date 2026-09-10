@@ -70,15 +70,24 @@ import {
 } from '@/lib/editor-shortcuts';
 import {
   clearDefaultSaveDirectory,
+  deleteVersion,
+  forgetRecentFile,
   getDefaultSaveDirectory,
   loadWorkspaceState,
+  recentFiles,
   recoveryRecords,
+  rememberRecentFile,
   saveRecovery,
+  saveVersion,
   saveWorkspaceState,
   setDefaultSaveDirectory,
   deleteRecovery,
   type LocalDirectoryHandle,
+  type LocalFileHandle,
+  type RecentFileRecord,
   type RecoveryRecord,
+  type VersionRecord,
+  versionRecords,
 } from '@/lib/recovery';
 import type { Layer as PsdLayer } from 'ag-psd';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
@@ -334,6 +343,11 @@ type EditorDocument = {
   savedSelections?: SavedSelection[];
 };
 
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+};
+
 const embeddedJpeg = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
   let best: Uint8Array | null = null;
@@ -450,6 +464,23 @@ const makeCanvas = (w: number, h: number) => {
   c.height = h;
   return c;
 };
+
+const canvasPngDataUrl = (canvas: HTMLCanvasElement) =>
+  new Promise<string>((resolve, reject) =>
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(Error('A document surface could not be encoded.'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? Error('Encoding failed.'));
+      reader.onload = () =>
+        typeof reader.result === 'string'
+          ? resolve(reader.result)
+          : reject(Error('Encoding returned an invalid result.'));
+      reader.readAsDataURL(blob);
+    }, 'image/png'),
+  );
 const maskGray = (hex: string) => {
   const rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)),
     gray = Math.round(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]);
@@ -1102,10 +1133,18 @@ export default function Home() {
   );
   const [pagedFile, setPagedFile] = useState<File | null>(null);
   const [recoveries, setRecoveries] = useState<RecoveryRecord[] | null>(null),
+    [versions, setVersions] = useState<VersionRecord[] | null>(null),
+    [recent, setRecent] = useState<RecentFileRecord[]>([]),
     [recoveryStatus, setRecoveryStatus] = useState(''),
-    [saveLocationName, setSaveLocationName] = useState('Downloads');
-  const recoveryTick = useRef<() => void>(() => {}),
+    [storageStatus, setStorageStatus] = useState('Checking browser storage…'),
+    [saveLocationName, setSaveLocationName] = useState('Downloads'),
+    [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(
+      null,
+    );
+  const recoveryTick = useRef<(manual?: boolean) => void>(() => {}),
     recoveryWriting = useRef(false),
+    recoveryFingerprints = useRef(new Map<string, string>()),
+    lastVersionAt = useRef(new Map<string, number>()),
     workspaceRestore = useRef<() => Promise<void>>(async () => {}),
     workspaceRestored = useRef(false);
   useEffect(() => {
@@ -1153,10 +1192,63 @@ export default function Home() {
         });
     } catch {}
   }, []);
+  const refreshStorageStatus = async () => {
+    if (!navigator.storage?.estimate) {
+      setStorageStatus('Storage details are unavailable in this browser');
+      return;
+    }
+    const [estimate, protectedStorage] = await Promise.all([
+      navigator.storage.estimate(),
+      navigator.storage.persisted?.() ?? Promise.resolve(false),
+    ]);
+    const used = Math.round((estimate.usage ?? 0) / 1048576),
+      quota = Math.round((estimate.quota ?? 0) / 1048576);
+    setStorageStatus(
+      `${used.toLocaleString()} MB used of ${quota.toLocaleString()} MB${protectedStorage ? ' · protected' : ''}`,
+    );
+  };
+  useEffect(() => {
+    void refreshStorageStatus().catch(() =>
+      setStorageStatus('Storage details are unavailable in this browser'),
+    );
+  }, []);
+  const protectLocalStorage = async () => {
+    try {
+      const protectedStorage = await navigator.storage?.persist?.();
+      await refreshStorageStatus();
+      setRecoveryStatus(
+        protectedStorage
+          ? 'Local working storage is protected from automatic cleanup'
+          : 'The browser kept its normal storage policy; project files remain the safest copy',
+      );
+    } catch {
+      setRecoveryStatus(
+        'The browser could not change its local storage policy',
+      );
+    }
+  };
   useEffect(() => {
     void getDefaultSaveDirectory()
       .then((handle) => setSaveLocationName(handle?.name ?? 'Downloads'))
       .catch(() => setSaveLocationName('Downloads'));
+    void recentFiles()
+      .then(setRecent)
+      .catch(() => setRecent([]));
+  }, []);
+  useEffect(() => {
+    if ('serviceWorker' in navigator)
+      void navigator.serviceWorker.register('/sw.js').catch(() => {});
+    const capture = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const installed = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', capture);
+    window.addEventListener('appinstalled', installed);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', capture);
+      window.removeEventListener('appinstalled', installed);
+    };
   }, []);
   const updatePreferences = (p: EditorPreferences) => {
     setPreferences(p);
@@ -6087,9 +6179,19 @@ export default function Home() {
       } catch {
         folderPermission = 'denied';
       }
+      const savedLayers = [];
+      for (const layer of layersRef.current) {
+        const surface = surfacesRef.current.get(layer.id)!;
+        savedLayers.push({
+          ...layer,
+          pixels: await canvasPngDataUrl(surface.pixels),
+          mask: surface.mask ? await canvasPngDataUrl(surface.mask) : undefined,
+        });
+      }
       const project = {
         format: 'pixel-studio',
-        version: 1,
+        version: 2,
+        createdWith: 'Pixel Studio web',
         name: fileName,
         width: doc.w,
         height: doc.h,
@@ -6098,14 +6200,7 @@ export default function Home() {
         layerComps: layerCompsRef.current,
         zoom,
         view,
-        layers: layersRef.current.map((layer) => {
-          const s = surfacesRef.current.get(layer.id)!;
-          return {
-            ...layer,
-            pixels: s.pixels.toDataURL('image/png'),
-            mask: s.mask?.toDataURL('image/png'),
-          };
-        }),
+        layers: savedLayers,
         paths,
         savedSelections,
         selection: selectionRef.current,
@@ -6126,6 +6221,8 @@ export default function Home() {
             writable = await handle.createWritable();
           await writable.write(blob);
           await writable.close();
+          await rememberRecentFile(handle);
+          setRecent(await recentFiles());
           savedToFolder = true;
         } catch {}
       }
@@ -6138,6 +6235,9 @@ export default function Home() {
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
       setSaved(true);
+      recoveryFingerprints.current.delete(activeDocumentRef.current);
+      lastVersionAt.current.delete(activeDocumentRef.current);
+      setTimeout(() => recoveryTick.current(true), 0);
       setStatus(
         savedToFolder
           ? `Layered project saved to ${directory?.name}`
@@ -6163,7 +6263,7 @@ export default function Home() {
       const data = JSON.parse(await file.text());
       if (
         data.format !== 'pixel-studio' ||
-        data.version !== 1 ||
+        ![1, 2].includes(data.version) ||
         !Number.isInteger(data.width) ||
         !Number.isInteger(data.height) ||
         data.width < 1 ||
@@ -7212,6 +7312,108 @@ export default function Home() {
       }
     })();
   };
+  const openWithPicker = async () => {
+    const picker = (
+      window as unknown as {
+        showOpenFilePicker?: (options: {
+          multiple: boolean;
+          types: { description: string; accept: Record<string, string[]> }[];
+        }) => Promise<LocalFileHandle[]>;
+      }
+    ).showOpenFilePicker;
+    if (!picker) {
+      fileRef.current?.click();
+      return;
+    }
+    try {
+      const handles = await picker.call(window, {
+        multiple: false,
+        types: [
+          {
+            description: 'Pixel Studio and image files',
+            accept: {
+              'application/octet-stream': [
+                '.pixelstudio',
+                '.psd',
+                '.psb',
+                '.cr2',
+                '.cr3',
+                '.nef',
+                '.arw',
+                '.dng',
+                '.raf',
+                '.orf',
+                '.rw2',
+              ],
+              'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.tif', '.tiff'],
+              'application/pdf': ['.pdf'],
+            },
+          },
+        ],
+      });
+      const handle = handles[0];
+      if (!handle) return;
+      await rememberRecentFile(handle);
+      setRecent(await recentFiles());
+      openImage(await handle.getFile());
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setRecoveryStatus('The selected file could not be opened');
+    }
+  };
+  const openRecentFile = async (record: RecentFileRecord) => {
+    try {
+      let permission = await record.handle.queryPermission?.({ mode: 'read' });
+      if (permission !== 'granted')
+        permission = await record.handle.requestPermission?.({ mode: 'read' });
+      if (permission !== undefined && permission !== 'granted') {
+        setRecoveryStatus(`Permission is needed to reopen ${record.name}`);
+        return;
+      }
+      openImage(await record.handle.getFile());
+      await rememberRecentFile(record.handle);
+      setRecent(await recentFiles());
+    } catch {
+      setRecoveryStatus(
+        `${record.name} is unavailable. Reconnect its drive or open it again.`,
+      );
+    }
+  };
+  const installWebApp = async () => {
+    if (!installPrompt) {
+      setRecoveryStatus(
+        'Use your browser menu to install Pixel Studio or add it to the desktop',
+      );
+      return;
+    }
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === 'accepted')
+      setRecoveryStatus(
+        'Pixel Studio installed — the web version stays available',
+      );
+    setInstallPrompt(null);
+  };
+  useEffect(() => {
+    const launchQueue = (
+      window as unknown as {
+        launchQueue?: {
+          setConsumer: (
+            consumer: (params: { files: LocalFileHandle[] }) => void,
+          ) => void;
+        };
+      }
+    ).launchQueue;
+    launchQueue?.setConsumer(({ files }) => {
+      const handle = files[0];
+      if (!handle) return;
+      void (async () => {
+        await rememberRecentFile(handle);
+        setRecent(await recentFiles());
+        openImage(await handle.getFile());
+      })();
+    });
+  }, []);
   const aiRemoveBackground = async () => {
     const meta = selected(),
       surface = meta && surfacesRef.current.get(meta.id);
@@ -7626,9 +7828,16 @@ export default function Home() {
       setRecoveryStatus('Recovery storage is unavailable in this browser');
     }
   };
-  recoveryTick.current = () => {
+  const showVersions = async () => {
+    try {
+      setVersions(await versionRecords(activeDocumentRef.current));
+    } catch {
+      setRecoveryStatus('Version history is unavailable in this browser');
+    }
+  };
+  recoveryTick.current = (manual = false) => {
     if (
-      !preferences.autosave ||
+      (!preferences.autosave && !manual) ||
       !layersRef.current.length ||
       recoveryWriting.current ||
       psdBusy ||
@@ -7637,15 +7846,53 @@ export default function Home() {
     )
       return;
     persistActiveDocument();
-    const pending = [...documentStoreRef.current.values()];
-    if (!pending.length) return;
+    const allDocuments = [...documentStoreRef.current.values()],
+      fingerprints = new Map(
+        allDocuments.map((d) => [
+          d.id,
+          [
+            d.historyIndex,
+            d.history.length,
+            d.saved ? 1 : 0,
+            d.layers.length,
+            d.name,
+            d.zoom,
+            JSON.stringify(d.view ?? {}),
+            d.selectedId,
+          ].join(':'),
+        ]),
+      ),
+      pending = allDocuments.filter(
+        (d) =>
+          recoveryFingerprints.current.get(d.id) !== fingerprints.get(d.id),
+      );
+    if (!allDocuments.length) return;
+    if (!pending.length) {
+      void saveWorkspaceState({
+        documentIds: allDocuments.map((d) => d.id),
+        activeId: activeDocumentRef.current,
+      });
+      return;
+    }
     recoveryWriting.current = true;
     void (async () => {
       let count = 0;
       for (const d of pending) {
+        const savedLayers = [];
+        for (const layer of d.layers) {
+          const surface = d.surfaces.get(layer.id)!;
+          savedLayers.push({
+            ...layer,
+            pixels: await canvasPngDataUrl(surface.pixels),
+            mask: surface.mask
+              ? await canvasPngDataUrl(surface.mask)
+              : undefined,
+          });
+        }
         const json = JSON.stringify({
           format: 'pixel-studio',
-          version: 1,
+          version: 2,
+          createdWith: 'Pixel Studio web',
           name: d.name,
           saved: d.saved,
           width: d.doc.w,
@@ -7655,14 +7902,7 @@ export default function Home() {
           layerComps: d.layerComps,
           zoom: d.zoom,
           view: d.view,
-          layers: d.layers.map((layer) => {
-            const surface = d.surfaces.get(layer.id)!;
-            return {
-              ...layer,
-              pixels: surface.pixels.toDataURL('image/png'),
-              mask: surface.mask?.toDataURL('image/png'),
-            };
-          }),
+          layers: savedLayers,
           paths: d.paths ?? [],
           savedSelections: d.savedSelections ?? [],
           selection: d.selection,
@@ -7675,14 +7915,28 @@ export default function Home() {
           updated: Date.now(),
           json,
         });
+        recoveryFingerprints.current.set(d.id, fingerprints.get(d.id)!);
+        const now = Date.now(),
+          previousVersion = lastVersionAt.current.get(d.id) ?? 0;
+        if (manual || now - previousVersion >= 120000) {
+          await saveVersion({
+            id: `${d.id}:${now}`,
+            documentId: d.id,
+            name: d.name,
+            updated: now,
+            reason: manual ? 'manual' : 'autosave',
+            json,
+          });
+          lastVersionAt.current.set(d.id, now);
+        }
         count++;
       }
       await saveWorkspaceState({
-        documentIds: pending.map((d) => d.id),
+        documentIds: allDocuments.map((d) => d.id),
         activeId: activeDocumentRef.current,
       });
       setRecoveryStatus(
-        `${count} open ${count === 1 ? 'document' : 'documents'} saved on this browser profile`,
+        `${count} changed ${count === 1 ? 'document' : 'documents'} saved locally`,
       );
     })()
       .catch(() =>
@@ -8510,9 +8764,24 @@ export default function Home() {
             { name: 'New document', action: makeBlankDocument, shortcut: '⌘N' },
             {
               name: 'Open image, PSD, PSB or project…',
-              action: () => fileRef.current?.click(),
+              action: () => void openWithPicker(),
               shortcut: '⌘O',
             },
+            ...recent.slice(0, 5).map((record) => ({
+              name: `Open Recent — ${record.name}`,
+              action: () => void openRecentFile(record),
+            })),
+            ...(recent.length
+              ? [
+                  {
+                    name: 'Clear recent file list',
+                    action: () =>
+                      void Promise.all(
+                        recent.map((record) => forgetRecentFile(record.id)),
+                      ).then(() => setRecent([])),
+                  },
+                ]
+              : []),
             { separator: true },
             {
               name: 'Save layered project',
@@ -8535,9 +8804,19 @@ export default function Home() {
             },
             { name: 'Export image…', action: showExport },
             { name: 'Recover documents…', action: showRecoveries },
+            { name: 'Version history…', action: showVersions },
             {
               name: 'Save recovery copies now',
-              action: () => recoveryTick.current(),
+              action: () => {
+                recoveryFingerprints.current.clear();
+                lastVersionAt.current.clear();
+                recoveryTick.current(true);
+              },
+            },
+            { separator: true },
+            {
+              name: 'Install Pixel Studio web app…',
+              action: () => void installWebApp(),
             },
             { name: 'Export PNG', action: exportPng },
             {
@@ -8930,11 +9209,20 @@ export default function Home() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => void openWithPicker()}
           >
             <ImagePlus />
             Open
           </Button>
+          {installPrompt && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void installWebApp()}
+            >
+              Install web app
+            </Button>
+          )}
           <Button size="sm" onClick={showExport}>
             <Download />
             Export
@@ -11782,7 +12070,9 @@ export default function Home() {
         value={preferences}
         onChange={updatePreferences}
         saveLocationName={saveLocationName}
+        storageStatus={storageStatus}
         onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
+        onProtectStorage={() => void protectLocalStorage()}
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}
@@ -11853,6 +12143,62 @@ export default function Home() {
           ))}
           <p>{recoveryStatus}</p>
           <Button variant="outline" onClick={() => setRecoveries(null)}>
+            Close
+          </Button>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={versions !== null}
+        onOpenChange={(open) => {
+          if (!open) setVersions(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogTitle>Version history</DialogTitle>
+          <DialogDescription>
+            Dated, device-local restore points for this document. Restore opens
+            a separate tab so the current version remains untouched.
+          </DialogDescription>
+          {versions?.length === 0 && (
+            <p>
+              No restore points yet. A version is kept as you work, and Save
+              recovery copies now creates one immediately.
+            </p>
+          )}
+          {versions?.map((record) => (
+            <div key={record.id} className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  setVersions(null);
+                  if (
+                    await openProject(
+                      new File(
+                        [record.json],
+                        `${record.name} — ${new Date(record.updated).toLocaleString()}.pixelstudio`,
+                      ),
+                    )
+                  )
+                    setSaved(false);
+                }}
+              >
+                {new Date(record.updated).toLocaleString()} ·{' '}
+                {record.reason === 'manual' ? 'Saved' : 'Auto'}
+              </Button>
+              <Button
+                variant="ghost"
+                aria-label={`Delete version from ${new Date(record.updated).toLocaleString()}`}
+                onClick={async () => {
+                  await deleteVersion(record.id);
+                  setVersions(await versionRecords(activeDocumentRef.current));
+                }}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <p>{recoveryStatus}</p>
+          <Button variant="outline" onClick={() => setVersions(null)}>
             Close
           </Button>
         </DialogContent>

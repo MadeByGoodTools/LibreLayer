@@ -52,7 +52,9 @@ export function WorkspaceSettings({
   current,
   onApply,
   saveLocationName,
+  storageStatus,
   onChooseSaveLocation,
+  onProtectStorage,
   onResetSaveLocation,
 }: {
   commands: { name: string; shortcut: string }[];
@@ -64,7 +66,9 @@ export function WorkspaceSettings({
   current: Omit<ToolPreset, 'name'>;
   onApply: (p: ToolPreset) => void;
   saveLocationName: string;
+  storageStatus: string;
   onChooseSaveLocation: () => void;
+  onProtectStorage: () => void;
   onResetSaveLocation: () => void;
 }) {
   const [name, setName] = useState(''),
@@ -141,9 +145,20 @@ export function WorkspaceSettings({
             </label>
             <p>
               Open documents, layers, masks, tabs and views are saved locally
-              every 10 seconds and when the page is hidden. Browser storage can
-              still be cleared, so keep important layered project files too.
+              every 10 seconds and when the page is hidden. Only changed
+              documents are rewritten, and dated restore points are kept.
             </p>
+            <div className="grid gap-2 rounded border p-3">
+              <strong>Local working storage</strong>
+              <span>{storageStatus}</span>
+              <Button variant="outline" onClick={onProtectStorage}>
+                Protect local working storage
+              </Button>
+              <p>
+                This asks the browser to protect recovery data from automatic
+                cleanup. Important projects should still be saved as files.
+              </p>
+            </div>
             <div className="grid gap-2 rounded border p-3">
               <strong>Default project save location</strong>
               <span>{saveLocationName}</span>

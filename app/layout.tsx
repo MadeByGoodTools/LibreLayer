@@ -14,7 +14,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'Pixel Studio — Online Image Editor',
-  description: 'A fast, familiar image editing workspace that runs in your browser.',
+  description:
+    'A fast, familiar image editing workspace that runs in your browser.',
+  manifest: '/manifest.webmanifest',
+  icons: { icon: '/favicon.svg', apple: '/favicon.svg' },
+  applicationName: 'Pixel Studio',
 };
 
 export default function RootLayout({
@@ -23,7 +27,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" style={{ backgroundColor: '#101114' }}>
+      <head>
+        <meta name="theme-color" content="#1f8fff" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

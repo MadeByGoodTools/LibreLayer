@@ -1,0 +1,32 @@
+{
+  "name": "Pixel Studio",
+  "short_name": "Pixel Studio",
+  "description": "A familiar, device-local image editing workspace in your browser.",
+  "id": "/",
+  "start_url": "/?source=installed",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101114",
+  "theme_color": "#1f8fff",
+  "categories": ["graphics", "photo", "productivity"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "/?source=file",
+      "accept": {
+        "application/octet-stream": [".pixelstudio", ".psd", ".psb"],
+        "image/png": [".png"],
+        "image/jpeg": [".jpg", ".jpeg"],
+        "image/webp": [".webp"],
+        "image/tiff": [".tif", ".tiff"]
+      }
+    }
+  ]
+}
