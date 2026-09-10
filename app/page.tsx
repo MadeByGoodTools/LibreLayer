@@ -69,9 +69,15 @@ import {
   shortcutLabel,
 } from '@/lib/editor-shortcuts';
 import {
+  clearDefaultSaveDirectory,
+  getDefaultSaveDirectory,
+  loadWorkspaceState,
   recoveryRecords,
   saveRecovery,
+  saveWorkspaceState,
+  setDefaultSaveDirectory,
   deleteRecovery,
+  type LocalDirectoryHandle,
   type RecoveryRecord,
 } from '@/lib/recovery';
 import type { Layer as PsdLayer } from 'ag-psd';
@@ -1096,9 +1102,12 @@ export default function Home() {
   );
   const [pagedFile, setPagedFile] = useState<File | null>(null);
   const [recoveries, setRecoveries] = useState<RecoveryRecord[] | null>(null),
-    [recoveryStatus, setRecoveryStatus] = useState('');
+    [recoveryStatus, setRecoveryStatus] = useState(''),
+    [saveLocationName, setSaveLocationName] = useState('Downloads');
   const recoveryTick = useRef<() => void>(() => {}),
-    recoveryWriting = useRef(false);
+    recoveryWriting = useRef(false),
+    workspaceRestore = useRef<() => Promise<void>>(async () => {}),
+    workspaceRestored = useRef(false);
   useEffect(() => {
     try {
       const p = JSON.parse(
@@ -1144,6 +1153,11 @@ export default function Home() {
         });
     } catch {}
   }, []);
+  useEffect(() => {
+    void getDefaultSaveDirectory()
+      .then((handle) => setSaveLocationName(handle?.name ?? 'Downloads'))
+      .catch(() => setSaveLocationName('Downloads'));
+  }, []);
   const updatePreferences = (p: EditorPreferences) => {
     setPreferences(p);
     try {
@@ -1156,19 +1170,15 @@ export default function Home() {
     }
   };
   useEffect(() => {
-    const id = setInterval(() => recoveryTick.current(), 30000);
+    const id = setInterval(() => recoveryTick.current(), 10000);
     const saveOnHide = () => {
       if (document.visibilityState === 'hidden') recoveryTick.current();
     };
     document.addEventListener('visibilitychange', saveOnHide);
-    void recoveryRecords()
-      .then((records) => {
-        if (records.length)
-          setRecoveryStatus(
-            `${records.length} recovery copies available — File → Recover documents`,
-          );
-      })
-      .catch(() => setRecoveryStatus('Device recovery storage is unavailable'));
+    if (!workspaceRestored.current) {
+      workspaceRestored.current = true;
+      void workspaceRestore.current();
+    }
     return () => {
       clearInterval(id);
       document.removeEventListener('visibilitychange', saveOnHide);
@@ -2022,6 +2032,7 @@ export default function Home() {
     name,
     w,
     h,
+    resolution,
     background,
   }: NewDocumentOptions) => {
     requireRoom(w, h, w * h);
@@ -2067,6 +2078,7 @@ export default function Home() {
       historyIndex: 0,
       zoom: Math.max(10, Math.min(100, Math.floor((760 / w) * 100))),
       selection: null,
+      view: { ...defaultView, resolution },
     };
     documentStoreRef.current.set(id, next);
     setDocuments((items) => [...items, { id, name: next.name, saved: false }]);
@@ -2086,6 +2098,7 @@ export default function Home() {
       return;
     const remaining = documents.filter((x) => x.id !== id);
     documentStoreRef.current.delete(id);
+    void deleteRecovery(id);
     if (remaining.length === 0) {
       const layerId = crypto.randomUUID(),
         pixels = makeCanvas(1200, 800),
@@ -2130,6 +2143,7 @@ export default function Home() {
       documentStoreRef.current.set(nextId, next);
       setDocuments([{ id: nextId, name: next.name, saved: false }]);
       loadDocument(next);
+      setTimeout(() => recoveryTick.current(), 0);
       return;
     }
     setDocuments(remaining);
@@ -2140,6 +2154,7 @@ export default function Home() {
         );
       if (next) loadDocument(next);
     }
+    setTimeout(() => recoveryTick.current(), 0);
   };
   const renameDocument = (id: string) => {
     if (id === activeDocumentRef.current) persistActiveDocument();
@@ -5689,6 +5704,7 @@ export default function Home() {
     nextLayers: LayerMeta[],
     nextSurfaces: Map<string, LayerSurface>,
     label: string,
+    restore?: { id: string; saved: boolean; skipPersist: boolean },
   ) => {
     nextLayers = treeOrder(nextLayers);
     requireRoom(
@@ -5702,8 +5718,8 @@ export default function Home() {
         0,
       ),
     );
-    persistActiveDocument();
-    const documentId = crypto.randomUUID(),
+    if (!restore?.skipPersist) persistActiveDocument();
+    const documentId = restore?.id ?? crypto.randomUUID(),
       selectedLayer =
         nextLayers.find((x) => x.kind !== 'group') ?? nextLayers[0],
       snap: Snapshot = {
@@ -5724,7 +5740,7 @@ export default function Home() {
       next: EditorDocument = {
         id: documentId,
         name,
-        saved: true,
+        saved: restore?.saved ?? true,
         doc: { w, h },
         layers: nextLayers,
         surfaces: nextSurfaces,
@@ -5736,7 +5752,10 @@ export default function Home() {
         paths: [],
       };
     documentStoreRef.current.set(documentId, next);
-    setDocuments((items) => [...items, { id: documentId, name, saved: true }]);
+    setDocuments((items) => [
+      ...items,
+      { id: documentId, name, saved: restore?.saved ?? true },
+    ]);
     loadDocument(next);
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -6010,7 +6029,38 @@ export default function Home() {
     }
   };
 
-  const saveProject = () => {
+  const chooseDefaultSaveDirectory = async () => {
+    const picker = (
+      window as unknown as {
+        showDirectoryPicker?: () => Promise<LocalDirectoryHandle>;
+      }
+    ).showDirectoryPicker;
+    if (!picker) {
+      setRecoveryStatus(
+        'Folder selection is not supported here; projects will use Downloads',
+      );
+      return;
+    }
+    try {
+      const handle = await picker.call(window);
+      await setDefaultSaveDirectory(handle);
+      setSaveLocationName(handle.name);
+      setRecoveryStatus(`Default save location set to ${handle.name}`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setRecoveryStatus('The default save location could not be changed');
+    }
+  };
+  const resetDefaultSaveDirectory = async () => {
+    try {
+      await clearDefaultSaveDirectory();
+      setSaveLocationName('Downloads');
+      setRecoveryStatus('Default save location reset to Downloads');
+    } catch {
+      setRecoveryStatus('The default save location could not be reset');
+    }
+  };
+  const saveProject = async () => {
     try {
       if (
         doc.w * doc.h > MAX_DOCUMENT_PIXELS ||
@@ -6020,6 +6070,22 @@ export default function Home() {
           'Layered projects support up to 64 megapixels and 100 layers. Reduce the document before saving.',
         );
         return;
+      }
+      let directory: LocalDirectoryHandle | null = null;
+      let folderPermission: PermissionState = 'denied';
+      try {
+        directory = await getDefaultSaveDirectory();
+        if (directory) {
+          folderPermission = await directory.queryPermission({
+            mode: 'readwrite',
+          });
+          if (folderPermission === 'prompt')
+            folderPermission = await directory.requestPermission({
+              mode: 'readwrite',
+            });
+        }
+      } catch {
+        folderPermission = 'denied';
       }
       const project = {
         format: 'pixel-studio',
@@ -6050,15 +6116,33 @@ export default function Home() {
         type: 'application/json',
       });
       checkFileSize(blob.size);
-      const url = URL.createObjectURL(blob),
-        a = document.createElement('a');
-      a.href = url;
-      a.download =
-        (fileName.replace(/\.[^.]+$/, '') || 'Artwork') + '.pixelstudio';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}.pixelstudio`;
+      let savedToFolder = false;
+      if (directory && folderPermission === 'granted') {
+        try {
+          const handle = await directory.getFileHandle(projectName, {
+              create: true,
+            }),
+            writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          savedToFolder = true;
+        } catch {}
+      }
+      if (!savedToFolder) {
+        const url = URL.createObjectURL(blob),
+          a = document.createElement('a');
+        a.href = url;
+        a.download = projectName;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
       setSaved(true);
-      setStatus('Layered project saved — reopen with File > Open');
+      setStatus(
+        savedToFolder
+          ? `Layered project saved to ${directory?.name}`
+          : 'Layered project saved to Downloads — reopen with File > Open',
+      );
     } catch (e) {
       setPsdError(
         e instanceof Error
@@ -6067,8 +6151,11 @@ export default function Home() {
       );
     }
   };
-  const openProject = async (file: File) => {
-    if (psdBusyRef.current) return;
+  const openProject = async (
+    file: File,
+    restore?: { id: string; saved: boolean; skipPersist: boolean },
+  ) => {
+    if (psdBusyRef.current) return false;
     psdBusyRef.current = true;
     setPsdBusy(true);
     try {
@@ -6247,6 +6334,7 @@ export default function Home() {
         metas,
         surfaces,
         'Open layered project',
+        restore,
       );
       setPaths(importedPaths);
       setSavedSelections(
@@ -6309,18 +6397,70 @@ export default function Home() {
       if (Number.isFinite(data.zoom)) setZoom(clampZoom(data.zoom));
       setView(readView(data.view));
       setStatus(
-        'Layered project reopened — layers, masks, paths and comps restored',
+        restore
+          ? 'Workspace restored from this browser profile'
+          : 'Layered project reopened — layers, masks, paths and comps restored',
       );
+      return true;
     } catch (e) {
       setPsdError(
         e instanceof Error
           ? e.message
           : 'Could not open this project. Use a valid Pixel Studio project (up to 64 megapixels and 100 layers).',
       );
+      return false;
     } finally {
       psdBusyRef.current = false;
       setPsdBusy(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+  workspaceRestore.current = async () => {
+    try {
+      const [workspace, records] = await Promise.all([
+        loadWorkspaceState(),
+        recoveryRecords(),
+      ]);
+      if (!workspace?.documentIds.length) {
+        if (records.length)
+          setRecoveryStatus(
+            `${records.length} older recovery copies available — File → Recover documents`,
+          );
+        return;
+      }
+      const byId = new Map(records.map((record) => [record.id, record])),
+        ordered = workspace.documentIds
+          .map((id) => byId.get(id))
+          .filter((record): record is RecoveryRecord => Boolean(record));
+      if (!ordered.length) return;
+      documentStoreRef.current.clear();
+      setDocuments([]);
+      let restored = 0;
+      for (const record of ordered) {
+        let saved = false;
+        try {
+          saved = JSON.parse(record.json).saved === true;
+        } catch {}
+        if (
+          await openProject(
+            new File([record.json], `${record.name}.pixelstudio`, {
+              type: 'application/json',
+            }),
+            { id: record.id, saved, skipPersist: true },
+          )
+        )
+          restored++;
+      }
+      const active = documentStoreRef.current.get(workspace.activeId);
+      if (active) loadDocument(active);
+      if (restored)
+        setRecoveryStatus(
+          `${restored} open ${restored === 1 ? 'document' : 'documents'} restored from this browser profile`,
+        );
+    } catch {
+      setRecoveryStatus(
+        'The previous workspace could not be restored; recovery copies are still available in File',
+      );
     }
   };
   const selectionToMask = () => {
@@ -7497,28 +7637,17 @@ export default function Home() {
     )
       return;
     persistActiveDocument();
-    const pending = [...documentStoreRef.current.values()].filter(
-      (d) => !d.saved,
-    );
+    const pending = [...documentStoreRef.current.values()];
     if (!pending.length) return;
     recoveryWriting.current = true;
     void (async () => {
-      let count = 0,
-        skipped = 0;
+      let count = 0;
       for (const d of pending) {
-        if (
-          d.doc.w *
-            d.doc.h *
-            d.layers.reduce((n, l) => n + (l.hasMask ? 2 : 1), 0) >
-          16000000
-        ) {
-          skipped++;
-          continue;
-        }
         const json = JSON.stringify({
           format: 'pixel-studio',
           version: 1,
           name: d.name,
+          saved: d.saved,
           width: d.doc.w,
           height: d.doc.h,
           selectedId: d.selectedId,
@@ -7548,8 +7677,12 @@ export default function Home() {
         });
         count++;
       }
+      await saveWorkspaceState({
+        documentIds: pending.map((d) => d.id),
+        activeId: activeDocumentRef.current,
+      });
       setRecoveryStatus(
-        `${count} recovery ${count === 1 ? 'copy' : 'copies'} saved on this device${skipped ? '; ' + skipped + ' too large — download projects' : ''}`,
+        `${count} open ${count === 1 ? 'document' : 'documents'} saved on this browser profile`,
       );
     })()
       .catch(() =>
@@ -8383,8 +8516,16 @@ export default function Home() {
             { separator: true },
             {
               name: 'Save layered project',
-              action: saveProject,
+              action: () => void saveProject(),
               shortcut: '⌘S',
+            },
+            {
+              name: `Choose default save folder… (${saveLocationName})`,
+              action: () => void chooseDefaultSaveDirectory(),
+            },
+            {
+              name: 'Reset save location to Downloads',
+              action: () => void resetDefaultSaveDirectory(),
             },
             { name: 'Export layered PSD', action: () => exportPsd() },
             { name: 'Export flattened PSD', action: () => exportPsd(true) },
@@ -11640,6 +11781,9 @@ export default function Home() {
         onClose={() => setSettingsOpen(false)}
         value={preferences}
         onChange={updatePreferences}
+        saveLocationName={saveLocationName}
+        onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
+        onResetSaveLocation={() => void resetDefaultSaveDirectory()}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}
         onApply={(p) => {
@@ -11665,9 +11809,9 @@ export default function Home() {
           </DialogDescription>
           {recoveries?.length === 0 && (
             <p>
-              No recovery copies yet. All unsaved open documents are copied
-              every 30 seconds when enabled. Copies stay on this device until
-              you remove them.
+              No recovery copies yet. Open documents are copied every 10 seconds
+              when local workspace restore is enabled. Copies stay on this
+              browser profile until you remove them or close the document.
             </p>
           )}
           {recoveries?.map((record) => (
