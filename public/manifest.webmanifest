@@ -1,7 +1,7 @@
 {
-  "name": "LibreLayer",
+  "name": "LibreLayer by Good Tools",
   "short_name": "LibreLayer",
-  "description": "A familiar, device-local image editing workspace in your browser.",
+  "description": "A free, familiar, device-local image editor from Good Tools.",
   "id": "/",
   "start_url": "/?source=installed",
   "scope": "/",

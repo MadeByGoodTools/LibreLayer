@@ -8909,6 +8909,14 @@ export default function Home() {
             L
           </span>
           <strong>LibreLayer</strong>
+          <a
+            className="brand-publisher"
+            href="https://goodtools.ca/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            by Good Tools
+          </a>
         </div>
         <nav className="menus" aria-label="Application menu">
           {menu('File', [

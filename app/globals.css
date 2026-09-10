@@ -114,6 +114,24 @@ button {
 .brand-mark::after {
   transform: translate(3px, 3px);
 }
+.brand-publisher {
+  margin-left: -3px;
+  color: #93a39c;
+  font-size: 11px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.brand-publisher:hover {
+  color: #76dfb8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.brand-publisher:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid #62d5ab;
+  outline-offset: 3px;
+}
 .menus {
   display: flex;
   align-items: center;

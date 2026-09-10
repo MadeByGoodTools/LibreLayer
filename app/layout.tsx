@@ -13,12 +13,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'LibreLayer — Online Image Editor',
-  description:
-    'A fast, familiar image editing workspace that runs in your browser.',
+  title: 'LibreLayer by Good Tools — Online Image Editor',
+  description: 'A free, familiar browser-based image editor from Good Tools.',
   manifest: '/manifest.webmanifest',
   icons: { icon: '/favicon.svg', apple: '/favicon.svg' },
-  applicationName: 'LibreLayer',
+  applicationName: 'LibreLayer by Good Tools',
 };
 
 export default function RootLayout({
