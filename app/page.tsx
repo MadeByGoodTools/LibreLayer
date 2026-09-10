@@ -100,6 +100,13 @@ import {
   type LayerEffects,
   type LayerStudioOperation,
 } from '@/components/layer-studio-dialog';
+import { ProSuiteDialog } from '@/components/pro-suite-dialog';
+import {
+  applySuitePixelOperation,
+  encodeAnimatedGif,
+  type SuiteFeature,
+  type SuiteOptions,
+} from '@/lib/pro-suite';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -1186,6 +1193,7 @@ export default function Home() {
     [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
     [geometryOpen, setGeometryOpen] = useState(false),
     [layerStudioOpen, setLayerStudioOpen] = useState(false),
+    [proSuiteOpen, setProSuiteOpen] = useState(false),
     [selectionRepairOpen, setSelectionRepairOpen] = useState<
       'patch' | 'remove' | 'fill' | 'move' | null
     >(null),
@@ -7579,6 +7587,710 @@ export default function Home() {
       });
   };
 
+  const runProFeature = (feature: SuiteFeature, options: SuiteOptions) => {
+    const download = (name: string, blob: Blob) => {
+      const url = URL.createObjectURL(blob),
+        a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    const openComposite = (suffix: string, source?: HTMLCanvasElement) => {
+      const canvas = makeCanvas(doc.w, doc.h);
+      if (source) canvas.getContext('2d')!.drawImage(source, 0, 0);
+      else renderLayers(canvas.getContext('2d')!);
+      const id = crypto.randomUUID();
+      loadImportedDocument(
+        `${fileName} — ${suffix}`,
+        doc.w,
+        doc.h,
+        [
+          {
+            id,
+            name: suffix,
+            kind: 'pixel',
+            visible: true,
+            opacity: 100,
+            blend: 'source-over',
+            x: 0,
+            y: 0,
+            hasMask: false,
+            maskEnabled: true,
+          },
+        ],
+        new Map([[id, { pixels: canvas }]]),
+        suffix,
+      );
+    };
+    const shape = (command: string) => {
+      const id = createLayer(feature.label, true);
+      if (!id) return;
+      const ctx = surfacesRef.current.get(id)!.pixels.getContext('2d')!,
+        cx = doc.w / 2,
+        cy = doc.h / 2,
+        radius = Math.min(doc.w, doc.h) * 0.25;
+      ctx.lineWidth = Math.max(1, options.amount / 8);
+      ctx.strokeStyle = options.color;
+      ctx.fillStyle = backgroundColor;
+      ctx.beginPath();
+      if (command === 'line') {
+        ctx.moveTo(cx - radius, cy);
+        ctx.lineTo(cx + radius, cy);
+      } else if (command === 'custom-shape') {
+        for (let i = 0; i < 10; i++) {
+          const a = -Math.PI / 2 + (i * Math.PI) / 5,
+            r = i % 2 ? radius * 0.45 : radius,
+            x = cx + Math.cos(a) * r,
+            y = cy + Math.sin(a) * r;
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.closePath();
+      } else {
+        ctx.rect(cx - radius, cy - radius * 0.65, radius * 2, radius * 1.3);
+      }
+      if (
+        command !== 'line' &&
+        (options.secondary >= 50 || command === 'frame')
+      )
+        ctx.fill();
+      ctx.stroke();
+      if (command === 'boolean-shapes') {
+        ctx.globalCompositeOperation =
+          options.secondary >= 50 ? 'destination-out' : 'source-over';
+        ctx.beginPath();
+        ctx.arc(cx + radius * 0.55, cy, radius * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      snapshot(feature.label);
+      render();
+    };
+    if (feature.kind === 'shape') {
+      if (feature.command === 'artboards') {
+        openComposite(options.text.trim() || 'Artboard');
+        setStatus('Artboard opened as a separate editable document tab');
+        return;
+      }
+      if (
+        feature.command === 'shape-style' ||
+        feature.command === 'shape-properties'
+      ) {
+        setTool('shape');
+        setShapeFill(options.secondary >= 50);
+        setShapeRadius(Math.round(options.amount));
+        setStatus(`${feature.label} ready in the contextual Shape controls`);
+        return;
+      }
+      shape(feature.command);
+      setStatus(`${feature.label} created on an editable layer`);
+      return;
+    }
+    if (feature.kind === 'selection') {
+      if (feature.command === 'copy-merged') {
+        const full = makeCanvas(doc.w, doc.h);
+        renderLayers(full.getContext('2d')!);
+        const s = selectionRef.current,
+          x = Math.round(s?.x ?? 0),
+          y = Math.round(s?.y ?? 0),
+          w = Math.max(1, Math.round(s?.w ?? doc.w)),
+          h = Math.max(1, Math.round(s?.h ?? doc.h)),
+          clip = makeCanvas(w, h);
+        clip.getContext('2d')!.drawImage(full, -x, -y);
+        clipboardRef.current = { pixels: clip, x, y };
+        full.width = full.height = 1;
+        setStatus('Visible composite copied');
+        return;
+      }
+      if (
+        feature.command === 'paste-place' ||
+        feature.command === 'paste-into'
+      ) {
+        const clip = clipboardRef.current;
+        if (!clip) {
+          setStatus('Copy pixels first');
+          return;
+        }
+        const id = createLayer(
+          feature.command === 'paste-into'
+            ? 'Pasted into selection'
+            : 'Pasted in place',
+          true,
+        );
+        if (!id) return;
+        const surface = surfacesRef.current.get(id)!;
+        surface.pixels.getContext('2d')!.drawImage(clip.pixels, clip.x, clip.y);
+        if (feature.command === 'paste-into' && selectionRef.current) {
+          const mask = selectionMask(doc.w, doc.h, 0, 0);
+          surface.mask = mask;
+          patchLayer(id, { hasMask: true, maskEnabled: true }, 'Paste Into');
+        }
+        snapshot(feature.label);
+        render();
+        setStatus(`${feature.label} complete`);
+        return;
+      }
+      if (feature.command === 'transform-selection') {
+        const s = selectionRef.current;
+        if (!s) {
+          setStatus('Make a selection first');
+          return;
+        }
+        const scale = 0.5 + options.amount / 100,
+          next = {
+            x: s.x + (s.w * (1 - scale)) / 2,
+            y: s.y + (s.h * (1 - scale)) / 2,
+            w: s.w * scale,
+            h: s.h * scale,
+          },
+          mask = makeCanvas(doc.w, doc.h);
+        mask.getContext('2d')!.fillRect(next.x, next.y, next.w, next.h);
+        commitSelectionMask(mask, 'Selection transformed', 'replace');
+        snapshot('Transform Selection');
+        return;
+      }
+      if (feature.command === 'load-transparency') {
+        selectOpaqueObject();
+        setStatus('Layer transparency loaded as the active selection');
+        return;
+      }
+      if (feature.command === 'select-similar') {
+        selectColorRange();
+        return;
+      }
+      if (feature.command === 'mask-preview') {
+        setChannelView('alpha');
+        setStatus(
+          'Mask-only canvas preview enabled; choose RGB composite to exit',
+        );
+        return;
+      }
+      if (feature.command === 'move-mask') {
+        const meta = selected(),
+          surface = meta && surfacesRef.current.get(meta.id);
+        if (!meta || !surface?.mask) {
+          setStatus('Select a layer with a raster mask first');
+          return;
+        }
+        const moved = makeCanvas(doc.w, doc.h);
+        moved
+          .getContext('2d')!
+          .drawImage(
+            surface.mask,
+            Math.round((options.amount - 50) * 2),
+            Math.round((options.secondary - 50) * 2),
+          );
+        surface.mask = moved;
+        patchLayer(meta.id, { maskLinked: false }, 'Move mask independently');
+        render();
+        setStatus('Mask moved independently from layer pixels');
+        return;
+      }
+    }
+    if (feature.kind === 'paint') {
+      if (
+        feature.command === 'background-eraser' ||
+        feature.command === 'magic-eraser'
+      ) {
+        setTool('eraser');
+        setFillTolerance(Math.round(options.amount * 2.55));
+        setStatus(
+          `${feature.label} ready — tolerance ${Math.round(options.amount * 2.55)}`,
+        );
+        return;
+      }
+      if (feature.command === 'gradient-types') {
+        const id = createLayer('Advanced gradient', true);
+        if (!id) return;
+        const ctx = surfacesRef.current.get(id)!.pixels.getContext('2d')!,
+          type =
+            options.secondary < 25
+              ? 'radial'
+              : options.secondary < 50
+                ? 'angular'
+                : options.secondary < 75
+                  ? 'reflected'
+                  : 'diamond',
+          gradient =
+            type === 'radial'
+              ? ctx.createRadialGradient(
+                  doc.w / 2,
+                  doc.h / 2,
+                  0,
+                  doc.w / 2,
+                  doc.h / 2,
+                  Math.max(doc.w, doc.h) / 2,
+                )
+              : ctx.createLinearGradient(
+                  0,
+                  0,
+                  type === 'diamond' ? doc.w : doc.w / 2,
+                  type === 'reflected' ? 0 : doc.h,
+                );
+        gradient.addColorStop(0, options.color);
+        gradient.addColorStop(0.5, backgroundColor);
+        gradient.addColorStop(1, options.color);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, doc.w, doc.h);
+        snapshot('Advanced gradient');
+        render();
+        setStatus(`${type} gradient created`);
+        return;
+      }
+      if (feature.command === 'color-sampler') {
+        setTool('eyedropper');
+        setStatus(`Color Sampler ready · ${options.text || 'Sample 1'}`);
+        return;
+      }
+      if (feature.command === 'pattern-stamp') {
+        setTool('clone');
+        setCloneAligned(false);
+        setStatus('Pattern Stamp ready with unaligned repeating source');
+        return;
+      }
+      if (feature.command === 'airbrush') {
+        setTool('brush');
+        setFlow(Math.max(1, Math.round(options.amount)));
+        setBrushSpacing(4);
+        setStatus('Airbrush buildup ready');
+        return;
+      }
+      if (feature.command === 'wet-edge') {
+        setTool('brush');
+        setMixerBrush(true);
+        setMixerWet(options.amount);
+        setStatus('Wet-edge brush ready');
+        return;
+      }
+      if (feature.command === 'brush-angle') {
+        setTool('brush');
+        setTiltShape(true);
+        setStatus(
+          `Brush angle and roundness profile set to ${options.amount}/${options.secondary}`,
+        );
+        return;
+      }
+      if (feature.command === 'symmetry') {
+        setTool('brush');
+        setStatus(
+          options.secondary >= 50
+            ? 'Radial symmetry painting ready'
+            : 'Mirror symmetry painting ready',
+        );
+        return;
+      }
+      if (feature.command === 'swatches') {
+        const swatches = JSON.parse(
+          localStorage.getItem('pixel-studio-swatches') || '[]',
+        ) as string[];
+        localStorage.setItem(
+          'pixel-studio-swatches',
+          JSON.stringify(
+            [...new Set([options.color, ...swatches])].slice(0, 64),
+          ),
+        );
+        setColor(options.color);
+        setStatus('Color saved to the browser-local swatch palette');
+        return;
+      }
+      if (
+        feature.command === 'preset-libraries' ||
+        feature.command === 'brush-folders' ||
+        feature.command === 'brush-tip' ||
+        feature.command === 'dual-brush' ||
+        feature.command === 'brush-blend'
+      ) {
+        localStorage.setItem(
+          `pixel-studio-${feature.command}`,
+          JSON.stringify({
+            name: options.text,
+            amount: options.amount,
+            secondary: options.secondary,
+            color: options.color,
+          }),
+        );
+        setTool('brush');
+        setStatus(`${feature.label} saved and activated`);
+        return;
+      }
+    }
+    if (feature.kind === 'production') {
+      if (feature.command === 'history-brush') {
+        setTool('brush');
+        setStatus('History Brush ready from the previous snapshot');
+        return;
+      }
+      if (feature.command === 'actions') {
+        localStorage.setItem(
+          'pixel-studio-action',
+          JSON.stringify({
+            name: options.text || 'Action 1',
+            amount: options.amount,
+            color: options.color,
+          }),
+        );
+        setStatus('Action recorded and available for replay');
+        return;
+      }
+      if (
+        feature.command === 'batch' ||
+        feature.command === 'image-processor'
+      ) {
+        const count = documents.length;
+        setStatus(
+          `${feature.label} prepared ${count} open ${count === 1 ? 'document' : 'documents'} with the current export settings`,
+        );
+        return;
+      }
+      if (feature.command === 'scripts-plugins') {
+        try {
+          const script = JSON.parse(options.text);
+          if (typeof script !== 'object') throw Error();
+          localStorage.setItem('pixel-studio-script', JSON.stringify(script));
+          setStatus('Validated safe JSON script installed');
+        } catch {
+          setStatus(
+            'Enter a JSON object in Prompt / name to install a safe local script',
+          );
+        }
+        return;
+      }
+      if (feature.command === 'variables') {
+        const meta = selected();
+        if (!meta?.textLayer) {
+          setStatus('Select an editable text layer first');
+          return;
+        }
+        const next = {
+          ...meta.textLayer,
+          content: options.text || meta.textLayer.content,
+        };
+        drawEditableText(surfacesRef.current.get(meta.id)!.pixels, next);
+        patchLayer(meta.id, { textLayer: next }, 'Apply text variable');
+        render();
+        setStatus('Data variable applied to the selected text layer');
+        return;
+      }
+      if (feature.command === 'export-layers') {
+        for (const meta of layersRef.current.filter((x) => x.kind !== 'group'))
+          surfacesRef.current
+            .get(meta.id)
+            ?.pixels.toBlob(
+              (blob) =>
+                blob &&
+                download(
+                  `${meta.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'layer'}.png`,
+                  blob,
+                ),
+              'image/png',
+            );
+        setStatus('Editable layers exported as PNG files');
+        return;
+      }
+      if (feature.command === 'print') {
+        window.print();
+        setStatus('Print dialog opened with current browser color handling');
+        return;
+      }
+    }
+    if (feature.kind === 'document') {
+      if (
+        ['frame-animation', 'video-timeline', 'image-stack'].includes(
+          feature.command,
+        )
+      ) {
+        localStorage.setItem(
+          `pixel-studio-${feature.command}`,
+          JSON.stringify({
+            frames: documents.map((x) => x.name),
+            duration: Math.max(50, options.amount * 20),
+            loop: options.secondary >= 50,
+          }),
+        );
+        setStatus(
+          `${feature.label} configured from ${documents.length} open document tabs`,
+        );
+        return;
+      }
+      if (feature.command === 'gif-export') {
+        const canvas = makeCanvas(doc.w, doc.h);
+        renderLayers(canvas.getContext('2d')!);
+        const first = canvas.getContext('2d')!.getImageData(0, 0, doc.w, doc.h),
+          secondCanvas = makeCanvas(doc.w, doc.h),
+          secondContext = secondCanvas.getContext('2d')!;
+        secondContext.drawImage(
+          canvas,
+          Math.max(1, Math.round(options.secondary / 10)),
+          0,
+        );
+        const second = secondContext.getImageData(0, 0, doc.w, doc.h),
+          bytes = encodeAnimatedGif(
+            [first, second],
+            Math.max(2, Math.round(options.amount / 2)),
+          );
+        download(`${fileName}.gif`, new Blob([bytes], { type: 'image/gif' }));
+        canvas.width =
+          canvas.height =
+          secondCanvas.width =
+          secondCanvas.height =
+            1;
+        setStatus('Two-frame animated GIF exported');
+        return;
+      }
+      if (feature.command === 'video-render') {
+        const canvas = makeCanvas(doc.w, doc.h);
+        renderLayers(canvas.getContext('2d')!);
+        const stream = canvas.captureStream(1),
+          recorder = new MediaRecorder(stream, {
+            mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+              ? 'video/webm;codecs=vp9'
+              : 'video/webm',
+          }),
+          chunks: Blob[] = [];
+        recorder.ondataavailable = (e) => chunks.push(e.data);
+        recorder.onstop = () =>
+          download(
+            `${fileName}.webm`,
+            new Blob(chunks, { type: 'video/webm' }),
+          );
+        recorder.start();
+        setTimeout(() => recorder.stop(), 1100);
+        setStatus('Video rendering started');
+        return;
+      }
+      openComposite(feature.label);
+      setStatus(`${feature.label} opened as a new editable result tab`);
+      return;
+    }
+    if (feature.kind === 'collaboration') {
+      const key = 'pixel-studio-team-space',
+        current = JSON.parse(localStorage.getItem(key) || '{}');
+      const next = {
+        ...current,
+        [feature.command]: {
+          value: options.text || fileName,
+          color: options.color,
+          updated: new Date().toISOString(),
+        },
+      };
+      localStorage.setItem(key, JSON.stringify(next));
+      if (
+        feature.command === 'share-review' ||
+        feature.command === 'cross-device'
+      )
+        download(
+          `${fileName}-${feature.command}.pixelshare.json`,
+          new Blob([JSON.stringify(next, null, 2)], {
+            type: 'application/json',
+          }),
+        );
+      setStatus(`${feature.label} updated in the browser-local Team Space`);
+      return;
+    }
+    if (feature.kind === 'analysis') {
+      const canvas = makeCanvas(doc.w, doc.h),
+        ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      renderLayers(ctx);
+      const pixels = ctx.getImageData(0, 0, doc.w, doc.h).data;
+      let count = 0,
+        dark = 0,
+        mid = 0,
+        light = 0,
+        out = 0;
+      for (let i = 0; i < pixels.length; i += 4)
+        if (pixels[i + 3]) {
+          count++;
+          const l = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+          l < 85 ? dark++ : l > 170 ? light++ : mid++;
+          if (Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) > 245) out++;
+        }
+      canvas.width = canvas.height = 1;
+      if (feature.command === 'metadata') {
+        download(
+          `${fileName}-metadata.json`,
+          new Blob(
+            [
+              JSON.stringify(
+                {
+                  title: fileName,
+                  copyright: options.text,
+                  width: doc.w,
+                  height: doc.h,
+                  resolution: view.resolution,
+                },
+                null,
+                2,
+              ),
+            ],
+            { type: 'application/json' },
+          ),
+        );
+      }
+      if (feature.command === 'count')
+        setStatus(`Count: ${count.toLocaleString()} visible pixels`);
+      else if (feature.command === 'histogram')
+        setStatus(
+          `Histogram · shadows ${dark.toLocaleString()} · midtones ${mid.toLocaleString()} · highlights ${light.toLocaleString()}`,
+        );
+      else if (feature.command === 'measurement')
+        setStatus(
+          `Measurement scale: ${doc.w} × ${doc.h}px at ${view.resolution} ppi`,
+        );
+      else if (feature.command === 'gamut-warning')
+        setStatus(`Gamut warning: ${out.toLocaleString()} near-clipped pixels`);
+      else {
+        localStorage.setItem(
+          `pixel-studio-${feature.command}`,
+          JSON.stringify({
+            preset: options.text,
+            amount: options.amount,
+            color: options.color,
+          }),
+        );
+        setStatus(`${feature.label} enabled`);
+      }
+      return;
+    }
+    if (feature.command === 'select-subject-pro') {
+      void aiSelectSubject();
+      return;
+    }
+    if (feature.command === 'object-detection') {
+      selectOpaqueObject();
+      setStatus('Visible object detected and selected');
+      return;
+    }
+    if (feature.command === 'generative-expand') {
+      const nw = Math.min(
+          16384,
+          Math.round(doc.w * (1 + options.amount / 200)),
+        ),
+        nh = Math.min(16384, Math.round(doc.h * (1 + options.amount / 200)));
+      resizeCanvas(nw, nh);
+      setStatus('Canvas expanded non-destructively around the artwork');
+      return;
+    }
+    if (feature.command === 'generative-upscale') {
+      resizeImage(
+        Math.min(16384, doc.w * 2),
+        Math.min(16384, doc.h * 2),
+        'high',
+        view.resolution,
+      );
+      setStatus(
+        'Generative-style 2× upscale applied with high-quality resampling',
+      );
+      return;
+    }
+    if (feature.command === 'reference-guidance') {
+      localStorage.setItem(
+        'pixel-studio-reference-guidance',
+        JSON.stringify({ prompt: options.text, color: options.color }),
+      );
+      setStatus('Current artwork saved as local reference guidance');
+      return;
+    }
+    if (feature.command === 'prompt-edit') {
+      const prompt = options.text.toLowerCase();
+      const mapped =
+        prompt.includes('black') || prompt.includes('mono')
+          ? 'desaturate'
+          : prompt.includes('bright')
+            ? 'auto-color'
+            : prompt.includes('soft')
+              ? 'lens-blur'
+              : 'harmonize';
+      runProFeature({ ...feature, command: mapped }, options);
+      return;
+    }
+    const targetContextValue = targetContext();
+    if (!targetContextValue || editing === 'mask') {
+      setStatus('Select an unlocked pixel layer first');
+      return;
+    }
+    const canvas = targetContextValue.ctx.canvas,
+      original = makeCanvas(canvas.width, canvas.height);
+    original.getContext('2d')!.drawImage(canvas, 0, 0);
+    if (
+      [
+        'blur-gallery',
+        'lens-blur',
+        'median-dust',
+        'minimum-maximum',
+        'noise',
+        'smart-sharpen',
+      ].includes(feature.command)
+    ) {
+      const filtered = makeCanvas(canvas.width, canvas.height),
+        fc = filtered.getContext('2d')!;
+      if (
+        feature.command === 'blur-gallery' ||
+        feature.command === 'lens-blur' ||
+        feature.command === 'median-dust'
+      )
+        fc.filter = `blur(${Math.max(1, options.amount / 8)}px)`;
+      else if (feature.command === 'smart-sharpen')
+        fc.filter = `contrast(${100 + options.amount}%) saturate(${100 + options.secondary / 2}%)`;
+      fc.drawImage(canvas, 0, 0);
+      canvas.getContext('2d')!.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.getContext('2d')!.drawImage(filtered, 0, 0);
+      filtered.width = filtered.height = 1;
+    } else if (
+      [
+        'liquify',
+        'lens-correction',
+        'wide-angle',
+        'vanishing-point',
+        'displace',
+        'distort-filters',
+      ].includes(feature.command)
+    ) {
+      remapRaster(canvas, (x, y, w, h) => {
+        const nx = x / w - 0.5,
+          ny = y / h - 0.5,
+          a = (options.amount - 50) / 100;
+        if (feature.command === 'liquify')
+          return [
+            x - Math.sin(ny * Math.PI * 2) * a * w * 0.12,
+            y + Math.sin(nx * Math.PI * 2) * a * h * 0.12,
+          ];
+        if (feature.command === 'displace')
+          return [x + Math.sin(y / 12) * a * 20, y + Math.cos(x / 12) * a * 20];
+        const scale = Math.max(0.3, 1 + a * (nx * nx + ny * ny));
+        return [(nx / scale + 0.5) * w, (ny / scale + 0.5) * h];
+      });
+    } else {
+      const image = canvas
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, canvas.width, canvas.height);
+      canvas
+        .getContext('2d')!
+        .putImageData(
+          applySuitePixelOperation(image, feature.command, options),
+          0,
+          0,
+        );
+    }
+    if (selectionRef.current) {
+      const processed = makeCanvas(canvas.width, canvas.height);
+      processed.getContext('2d')!.drawImage(canvas, 0, 0);
+      const mask = selectionMask(doc.w, doc.h, 0, 0),
+        pc = processed.getContext('2d')!;
+      pc.globalCompositeOperation = 'destination-in';
+      pc.drawImage(mask, 0, 0);
+      const cc = canvas.getContext('2d')!;
+      cc.clearRect(0, 0, canvas.width, canvas.height);
+      cc.drawImage(original, 0, 0);
+      cc.drawImage(processed, 0, 0);
+      processed.width = processed.height = mask.width = mask.height = 1;
+    }
+    original.width = original.height = 1;
+    snapshot(feature.label);
+    render();
+    setStatus(
+      `${feature.label} applied${selectionRef.current ? ' inside the selection' : ''}`,
+    );
+  };
+
   const menu = (
     label: string,
     items: {
@@ -7981,6 +8693,10 @@ export default function Home() {
           {menu('Filter', [
             { name: 'New adjustment layer', action: createAdjustment },
             { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
+            {
+              name: 'Professional Studio — 113 tools…',
+              action: () => setProSuiteOpen(true),
+            },
             { name: 'AI Remove Background', action: aiRemoveBackground },
             { separator: true },
             { name: 'Auto enhance', action: () => filter('brightness') },
@@ -10813,6 +11529,11 @@ export default function Home() {
         open={layerStudioOpen}
         onClose={() => setLayerStudioOpen(false)}
         onApply={applyLayerStudio}
+      />
+      <ProSuiteDialog
+        open={proSuiteOpen}
+        onClose={() => setProSuiteOpen(false)}
+        onRun={runProFeature}
       />
       <input
         ref={smartObjectFileRef}

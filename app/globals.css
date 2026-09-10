@@ -1794,6 +1794,101 @@ button {
   overflow: auto;
 }
 
+.pro-suite-dialog {
+  width: min(1040px, 94vw);
+  max-width: 1040px;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.pro-suite-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+
+.pro-suite-controls label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pro-suite-controls input {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+}
+
+.pro-suite-tabs {
+  display: flex;
+  justify-content: flex-start;
+  gap: 4px;
+  overflow-x: auto;
+  width: 100%;
+  height: auto;
+  padding-bottom: 4px;
+}
+
+.pro-suite-tabs button {
+  flex: 0 0 auto;
+  min-height: 36px;
+}
+
+.pro-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.pro-feature-grid button {
+  justify-content: flex-start;
+  min-height: 44px;
+  white-space: normal;
+  text-align: left;
+}
+
+.pro-feature-grid button span {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.pro-suite-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.pro-suite-footer output {
+  flex: 1;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 780px) {
+  .pro-suite-controls,
+  .pro-feature-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .pro-suite-controls,
+  .pro-feature-grid {
+    grid-template-columns: 1fr;
+  }
+  .pro-suite-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .professional-geometry-dialog [role='tabpanel'] {
   display: grid;
   gap: 14px;
