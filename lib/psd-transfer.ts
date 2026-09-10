@@ -1,7 +1,7 @@
 import type { Layer, Psd } from 'ag-psd';
 import PsdWorker from './psd-worker?worker';
 export type PsdImport={width:number;height:number;warnings:string[];children:Layer[]};
-export function processPsd<T>(request:{action:'read';buffer:ArrayBuffer}|{action:'write';psd:Psd}):Promise<T> {
+export function processPsd<T>(request:{action:'read';buffer:ArrayBuffer}|{action:'write';psd:Psd;psb?:boolean}):Promise<T> {
   return new Promise((resolve,reject)=>{
     const worker=new PsdWorker();
     const timeout=setTimeout(()=>{worker.terminate();reject(Error('PSD processing timed out. Try a smaller file.'));},45000);

@@ -10,7 +10,7 @@ function bounds(w:number,h:number) {
 function decode(buffer:ArrayBuffer) {
   if(buffer.byteLength<26||buffer.byteLength>128*1024*1024) throw Error('Choose a PSD smaller than 128 MB.');
   const header=new DataView(buffer);
-  if(header.getUint32(0)!==0x38425053||header.getUint16(4)!==1) throw Error('Choose a standard PSD. PSB large-document files are not supported yet.');
+  if(header.getUint32(0)!==0x38425053||![1,2].includes(header.getUint16(4))) throw Error('Choose a valid PSD or PSB file.');
   bounds(header.getUint32(18),header.getUint32(14));
   if(header.getUint16(22)!==8||header.getUint16(24)!==3) throw Error('Only 8-bit RGB PSD files are supported. Convert a copy in Photoshop first.');
   const psd=readPsd(buffer,{useRawData:true,useRawThumbnail:true,skipThumbnail:true,skipLinkedFilesData:true,totalMemoryLimit:256*1024*1024});
@@ -42,9 +42,9 @@ function decode(buffer:ArrayBuffer) {
     mask:layer.mask?{left:layer.mask.left,top:layer.mask.top,defaultColor:layer.mask.defaultColor,disabled:layer.mask.disabled,positionRelativeToLayer:layer.mask.positionRelativeToLayer,imageData:getLayerMaskImageData(layer)}:undefined});
   return {width:psd.width,height:psd.height,warnings:[],children:psd.children.map(convert)};
 }
-self.onmessage=(event:MessageEvent<{action:'read';buffer:ArrayBuffer}|{action:'write';psd:Psd}>)=>{
+self.onmessage=(event:MessageEvent<{action:'read';buffer:ArrayBuffer}|{action:'write';psd:Psd;psb?:boolean}>)=>{
   try {
     if(event.data.action==='read') self.postMessage({ok:true,result:decode(event.data.buffer)});
-    else {const result=writePsd(event.data.psd,{generateThumbnail:false,noBackground:true,trimImageData:false});self.postMessage({ok:true,result},{transfer:[result]});}
+    else {const result=writePsd(event.data.psd,{generateThumbnail:false,noBackground:true,trimImageData:false,psb:event.data.psb});self.postMessage({ok:true,result},{transfer:[result]});}
   } catch(error) {self.postMessage({ok:false,error:error instanceof Error?error.message:'PSD processing failed.'});}
 };
