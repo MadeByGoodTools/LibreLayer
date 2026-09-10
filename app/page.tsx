@@ -181,6 +181,7 @@ type SavedPath = {
   points: Point[];
   curved?: boolean;
 };
+type SavedSelection = { id: string; name: string; mask: string };
 type LayerKind = 'pixel' | 'group' | 'adjustment';
 type LayerMeta = {
   fill?: number;
@@ -269,6 +270,72 @@ type EditorDocument = {
   feather?: number;
   selectionPath?: Point[] | null;
   paths?: SavedPath[];
+  savedSelections?: SavedSelection[];
+};
+
+const embeddedJpeg = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer);
+  let best: Uint8Array | null = null;
+  for (let start = 0; start < bytes.length - 3; start++) {
+    if (bytes[start] !== 0xff || bytes[start + 1] !== 0xd8) continue;
+    for (let end = start + 2; end < bytes.length - 1; end++) {
+      if (bytes[end] === 0xff && bytes[end + 1] === 0xd9) {
+        const candidate = bytes.slice(start, end + 2);
+        if (!best || candidate.length > best.length) best = candidate;
+        start = end + 1;
+        break;
+      }
+    }
+  }
+  if (!best || best.length < 1024)
+    throw Error('This RAW file does not contain a browser-readable preview.');
+  return new Blob([new Uint8Array(best).buffer], { type: 'image/jpeg' });
+};
+
+const shiftedHex = (hex: string, amount: number) => {
+  if (!amount) return hex;
+  const n = parseInt(hex.slice(1), 16),
+    r = (n >> 16) & 255,
+    g = (n >> 8) & 255,
+    b = n & 255,
+    max = Math.max(r, g, b),
+    min = Math.min(r, g, b),
+    light = (max + min) / 510;
+  let hue = 0,
+    saturation = 0;
+  if (max !== min) {
+    const d = max - min;
+    saturation = d / (255 * (1 - Math.abs(2 * light - 1)));
+    hue =
+      max === r
+        ? 60 * (((g - b) / d) % 6)
+        : max === g
+          ? 60 * ((b - r) / d + 2)
+          : 60 * ((r - g) / d + 4);
+  }
+  hue = (hue + amount + 360) % 360;
+  const c = (1 - Math.abs(2 * light - 1)) * saturation,
+    x = c * (1 - Math.abs(((hue / 60) % 2) - 1)),
+    m = light - c / 2,
+    [rr, gg, bb] =
+      hue < 60
+        ? [c, x, 0]
+        : hue < 120
+          ? [x, c, 0]
+          : hue < 180
+            ? [0, c, x]
+            : hue < 240
+              ? [0, x, c]
+              : hue < 300
+                ? [x, 0, c]
+                : [c, 0, x];
+  return `#${[rr, gg, bb]
+    .map((value) =>
+      Math.round((value + m) * 255)
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
 };
 
 const toolItems: {
@@ -698,7 +765,25 @@ export default function Home() {
     [canvasSizeOpen, setCanvasSizeOpen] = useState(false),
     [adjustmentsOpen, setAdjustmentsOpen] = useState(false),
     [snapshotOpen, setSnapshotOpen] = useState(false),
-    [snapshotName, setSnapshotName] = useState('');
+    [snapshotName, setSnapshotName] = useState(''),
+    [selectMaskOpen, setSelectMaskOpen] = useState(false),
+    [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
+    [selectionName, setSelectionName] = useState('Selection 1'),
+    [rawDevelop, setRawDevelop] = useState<{
+      name: string;
+      pixels: HTMLCanvasElement;
+      thumbnail: string;
+    } | null>(null),
+    [rawExposure, setRawExposure] = useState(0),
+    [rawContrast, setRawContrast] = useState(0),
+    [rawTemperature, setRawTemperature] = useState(0),
+    [rawTint, setRawTint] = useState(0),
+    [refineRadius, setRefineRadius] = useState(2),
+    [refineSmooth, setRefineSmooth] = useState(2),
+    [refineFeather, setRefineFeather] = useState(1),
+    [refineShift, setRefineShift] = useState(0),
+    [decontaminate, setDecontaminate] = useState(true),
+    [decontaminateAmount, setDecontaminateAmount] = useState(50);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (
@@ -731,6 +816,7 @@ export default function Home() {
     x: number;
     y: number;
   } | null>(null);
+  const savedSelectionCanvases = useRef(new Map<string, HTMLCanvasElement>());
   const selectionChannelRef = useRef<HTMLCanvasElement | null>(null);
   const lastSelectionRef = useRef<{
     mask: HTMLCanvasElement;
@@ -789,6 +875,12 @@ export default function Home() {
   const [flow, setFlow] = useState(100);
   const [hardness, setHardness] = useState(80);
   const [brushSpacing, setBrushSpacing] = useState(10);
+  const [pressureSize, setPressureSize] = useState(true),
+    [pressureOpacity, setPressureOpacity] = useState(false),
+    [tiltShape, setTiltShape] = useState(true),
+    [brushSmoothing, setBrushSmoothing] = useState(20),
+    [sizeJitter, setSizeJitter] = useState(0),
+    [hueJitter, setHueJitter] = useState(0);
   const [paintMode, setPaintMode] = useState<'brush' | 'pencil'>('brush');
   const [color, setColor] = useState('#171717');
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -801,6 +893,7 @@ export default function Home() {
   const [dragRect, setDragRect] = useState<Rect | null>(null);
   const [draftPoints, setDraftPoints] = useState<Point[]>([]);
   const [paths, setPaths] = useState<SavedPath[]>([]);
+  const [savedSelections, setSavedSelections] = useState<SavedSelection[]>([]);
   const [layerComps, setLayerComps] = useState<LayerComp[]>([]);
   const layerCompsRef = useRef<LayerComp[]>([]);
   const [channelView, setChannelView] = useState<
@@ -1363,6 +1456,7 @@ export default function Home() {
       selection: selectionRef.current,
       selectionPath: selectionPathRef.current,
       paths,
+      savedSelections,
       feather,
     });
   };
@@ -1387,6 +1481,7 @@ export default function Home() {
     setSelectionPath(next.selectionPath ?? null);
     selectionPathRef.current = next.selectionPath ?? null;
     setPaths(next.paths ?? []);
+    setSavedSelections(next.savedSelections ?? []);
     layerCompsRef.current = next.layerComps ?? [];
     setLayerComps(layerCompsRef.current);
     setFeather(next.feather ?? 0);
@@ -1931,8 +2026,22 @@ export default function Home() {
     if (tool === 'brush' || tool === 'eraser') {
       const target = targetContext();
       if (!target) return;
-      const local = toLayerPoint(target.meta, p),
-        prev = toLayerPoint(target.meta, last.current),
+      let local = toLayerPoint(target.meta, p);
+      const prev = toLayerPoint(target.meta, last.current),
+        smoothing = Math.max(0, Math.min(0.95, brushSmoothing / 105));
+      local = {
+        x: local.x * (1 - smoothing) + prev.x * smoothing,
+        y: local.y * (1 - smoothing) + prev.y * smoothing,
+      };
+      const pointerPressure =
+          e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1,
+        pressureScale = pressureSize ? Math.max(0.08, pointerPressure) : 1,
+        pressureAlpha = pressureOpacity ? Math.max(0.03, pointerPressure) : 1,
+        tilt = tiltShape && e.pointerType === 'pen',
+        tiltMagnitude = tilt
+          ? Math.min(0.82, Math.hypot(e.tiltX, e.tiltY) / 90)
+          : 0,
+        tiltAngle = Math.atan2(e.tiltY, e.tiltX),
         drawStroke = (ctx: CanvasRenderingContext2D) => {
           const paint =
               editing === 'mask'
@@ -1953,37 +2062,50 @@ export default function Home() {
             ),
             count = Math.max(1, Math.ceil(distance / step));
           ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = ((opacity / 100) * flow) / 100;
+          ctx.globalAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha;
           for (let i = 0; i <= count; i++) {
             const x = prev.x + (dx * i) / count,
-              y = prev.y + (dy * i) / count;
+              y = prev.y + (dy * i) / count,
+              jitterScale = 1 - (sizeJitter / 100) * Math.random() * 0.75,
+              dabSize = Math.max(1, size * pressureScale * jitterScale),
+              dabPaint =
+                editing === 'pixels' && tool === 'brush' && hueJitter
+                  ? shiftedHex(color, (Math.random() * 2 - 1) * hueJitter * 1.8)
+                  : paint;
             if (paintMode === 'pencil') {
-              ctx.fillStyle = paint;
+              ctx.fillStyle = dabPaint;
               ctx.fillRect(
-                Math.round(x - size / 2),
-                Math.round(y - size / 2),
-                Math.max(1, Math.round(size)),
-                Math.max(1, Math.round(size)),
+                Math.round(x - dabSize / 2),
+                Math.round(y - dabSize / 2),
+                Math.max(1, Math.round(dabSize)),
+                Math.max(1, Math.round(dabSize)),
               );
               continue;
             }
-            const radius = size / 2,
+            const radius = dabSize / 2,
               inner = radius * Math.max(0, Math.min(1, hardness / 100)),
-              g = ctx.createRadialGradient(x, y, inner, x, y, radius);
-            g.addColorStop(0, paint);
-            g.addColorStop(Math.min(0.999, inner / radius), paint);
+              g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius);
+            g.addColorStop(0, dabPaint);
+            g.addColorStop(Math.min(0.999, inner / radius), dabPaint);
             g.addColorStop(
               1,
-              paint === 'white'
+              dabPaint === 'white'
                 ? 'rgba(255,255,255,0)'
-                : paint === 'black'
+                : dabPaint === 'black'
                   ? 'rgba(0,0,0,0)'
-                  : `${paint}00`,
+                  : `${dabPaint}00`,
             );
+            ctx.save();
+            ctx.translate(x, y);
+            if (tilt) {
+              ctx.rotate(tiltAngle);
+              ctx.scale(1, Math.max(0.18, 1 - tiltMagnitude));
+            }
             ctx.fillStyle = g;
             ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
             ctx.fill();
+            ctx.restore();
           }
         };
       if (!quickMaskRef.current && (selectionChannelRef.current || feather)) {
@@ -3401,6 +3523,146 @@ export default function Home() {
       'replace',
     );
   };
+  const saveCurrentSelection = () => {
+    if (!selectionRef.current) {
+      setStatus('Make a selection before saving it.');
+      return;
+    }
+    const mask = selectionMask(doc.w, doc.h, 0, 0),
+      name = selectionName.trim() || `Selection ${savedSelections.length + 1}`,
+      id = crypto.randomUUID();
+    savedSelectionCanvases.current.set(id, mask);
+    setSavedSelections((items) => [
+      { id, name, mask: mask.toDataURL('image/png') },
+      ...items,
+    ]);
+    setSelectionManagerOpen(false);
+    setSaved(false);
+    setStatus(`${name} saved with this document`);
+  };
+  const loadSavedSelection = (item: SavedSelection) => {
+    const stored = savedSelectionCanvases.current.get(item.id);
+    if (stored) {
+      const mask = makeCanvas(doc.w, doc.h);
+      mask.getContext('2d')!.drawImage(stored, 0, 0, doc.w, doc.h);
+      commitSelectionMask(mask, `Loaded ${item.name}`, 'replace');
+      snapshot('Load selection');
+      render();
+      setSelectionManagerOpen(false);
+      return;
+    }
+    const image = new Image();
+    image.onload = () => {
+      const mask = makeCanvas(doc.w, doc.h);
+      mask.getContext('2d')!.drawImage(image, 0, 0, doc.w, doc.h);
+      commitSelectionMask(mask, `Loaded ${item.name}`, 'replace');
+      snapshot('Load selection');
+      render();
+      setSelectionManagerOpen(false);
+    };
+    image.onerror = () => setStatus('Saved selection could not be decoded.');
+    image.src = item.mask;
+  };
+  const applySelectAndMask = () => {
+    if (!selectionRef.current) {
+      setStatus('Make a selection before opening Select and Mask.');
+      return;
+    }
+    const base = selectionMask(doc.w, doc.h, 0, 0);
+    let out = base;
+    if (refineRadius > 0) {
+      const grown = expandMask(out, Math.round(refineRadius)),
+        activeLayer = selected(),
+        surface = activeLayer && surfacesRef.current.get(activeLayer.id);
+      if (activeLayer && surface) {
+        const visible = makeCanvas(doc.w, doc.h);
+        drawLayer(
+          visible.getContext('2d')!,
+          { ...activeLayer, opacity: 100, fill: 100, blend: 'source-over' },
+          surface,
+          doc.w,
+          doc.h,
+        );
+        grown.getContext('2d')!.globalCompositeOperation = 'destination-in';
+        grown.getContext('2d')!.drawImage(visible, 0, 0);
+        visible.width = visible.height = 1;
+      }
+      if (out !== base) out.width = out.height = 1;
+      out = grown;
+    }
+    if (refineShift !== 0) {
+      const radius = Math.max(1, Math.round(Math.abs(refineShift) / 10));
+      if (refineShift > 0) {
+        const shifted = expandMask(out, radius);
+        if (out !== base) out.width = out.height = 1;
+        out = shifted;
+      } else {
+        const inverse = invertSelectionMask(out),
+          grown = expandMask(inverse, radius),
+          shifted = invertSelectionMask(grown);
+        inverse.width = inverse.height = grown.width = grown.height = 1;
+        if (out !== base) out.width = out.height = 1;
+        out = shifted;
+      }
+    }
+    if (refineSmooth || refineFeather) {
+      const softened = makeCanvas(doc.w, doc.h),
+        ctx = softened.getContext('2d')!;
+      ctx.filter = `blur(${Math.max(refineSmooth, refineFeather)}px)`;
+      ctx.drawImage(out, 0, 0);
+      if (!refineFeather) {
+        const pixels = ctx.getImageData(0, 0, doc.w, doc.h);
+        for (let i = 3; i < pixels.data.length; i += 4) {
+          const alpha = pixels.data[i] >= 128 ? 255 : 0;
+          pixels.data[i - 3] = pixels.data[i - 2] = pixels.data[i - 1] = alpha;
+          pixels.data[i] = alpha;
+        }
+        ctx.putImageData(pixels, 0, 0);
+      }
+      if (out !== base) out.width = out.height = 1;
+      out = softened;
+    }
+    if (decontaminate) {
+      const meta = selected(),
+        surface = meta && surfacesRef.current.get(meta.id);
+      if (meta && surface && !isLocked(meta.id)) {
+        const maskData = out
+            .getContext('2d', { willReadFrequently: true })!
+            .getImageData(0, 0, doc.w, doc.h),
+          pixels = surface.pixels
+            .getContext('2d', { willReadFrequently: true })!
+            .getImageData(0, 0, doc.w, doc.h),
+          amount = decontaminateAmount / 100;
+        for (let y = 1; y < doc.h - 1; y++)
+          for (let x = 1; x < doc.w - 1; x++) {
+            const i = (y * doc.w + x) * 4,
+              edge = maskData.data[i + 3];
+            if (edge < 16 || edge > 240) continue;
+            let best = i,
+              bestAlpha = edge;
+            for (let oy = -1; oy <= 1; oy++)
+              for (let ox = -1; ox <= 1; ox++) {
+                const n = ((y + oy) * doc.w + x + ox) * 4,
+                  alpha = maskData.data[n + 3];
+                if (alpha > bestAlpha) {
+                  bestAlpha = alpha;
+                  best = n;
+                }
+              }
+            for (let channel = 0; channel < 3; channel++)
+              pixels.data[i + channel] =
+                pixels.data[i + channel] * (1 - amount) +
+                pixels.data[best + channel] * amount;
+          }
+        surface.pixels.getContext('2d')!.putImageData(pixels, 0, 0);
+      }
+    }
+    if (out !== base) base.width = base.height = 1;
+    commitSelectionMask(out, 'Select and Mask refined', 'replace');
+    snapshot('Select and Mask');
+    render();
+    setSelectMaskOpen(false);
+  };
   const selectOpaqueObject = () => {
     const meta = selected(),
       surface = meta && surfacesRef.current.get(meta.id);
@@ -4099,6 +4361,7 @@ export default function Home() {
           };
         }),
         paths,
+        savedSelections,
         selection: selectionRef.current,
         selectionPath: selectionPathRef.current,
         feather,
@@ -4306,6 +4569,18 @@ export default function Home() {
         'Open layered project',
       );
       setPaths(importedPaths);
+      setSavedSelections(
+        Array.isArray(data.savedSelections)
+          ? data.savedSelections.filter(
+              (item: SavedSelection) =>
+                item &&
+                typeof item.id === 'string' &&
+                typeof item.name === 'string' &&
+                typeof item.mask === 'string' &&
+                item.mask.startsWith('data:image/png;base64,'),
+            )
+          : [],
+      );
       const importedComps = Array.isArray(data.layerComps)
         ? data.layerComps.filter(
             (c: LayerComp) =>
@@ -4922,6 +5197,122 @@ export default function Home() {
     render();
   };
 
+  const openRaw = async (file: File) => {
+    if (psdBusyRef.current) return;
+    psdBusyRef.current = true;
+    setPsdBusy(true);
+    setStatus('Reading the RAW preview…');
+    let url = '';
+    try {
+      checkFileSize(file.size);
+      const preview = embeddedJpeg(await file.arrayBuffer()),
+        image = new Image();
+      url = URL.createObjectURL(preview);
+      image.src = url;
+      await image.decode();
+      requireRoom(
+        image.naturalWidth,
+        image.naturalHeight,
+        image.naturalWidth * image.naturalHeight,
+      );
+      const pixels = makeCanvas(image.naturalWidth, image.naturalHeight);
+      pixels.getContext('2d')!.drawImage(image, 0, 0);
+      const previewScale = Math.min(
+          1,
+          720 / Math.max(pixels.width, pixels.height),
+        ),
+        previewCanvas = makeCanvas(
+          Math.max(1, Math.round(pixels.width * previewScale)),
+          Math.max(1, Math.round(pixels.height * previewScale)),
+        );
+      previewCanvas
+        .getContext('2d')!
+        .drawImage(pixels, 0, 0, previewCanvas.width, previewCanvas.height);
+      setRawExposure(0);
+      setRawContrast(0);
+      setRawTemperature(0);
+      setRawTint(0);
+      setRawDevelop({
+        name: file.name,
+        pixels,
+        thumbnail: previewCanvas.toDataURL('image/jpeg', 0.82),
+      });
+      previewCanvas.width = previewCanvas.height = 1;
+      setStatus('RAW preview ready for development');
+    } catch (error) {
+      setPsdError(
+        `${error instanceof Error ? error.message : 'RAW preview could not be decoded.'} Pixel Studio develops the full-size embedded JPEG preview and never changes the sensor file.`,
+      );
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+      psdBusyRef.current = false;
+      setPsdBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+  const applyRawDevelop = () => {
+    if (!rawDevelop) return;
+    const pixels = makeCanvas(
+      rawDevelop.pixels.width,
+      rawDevelop.pixels.height,
+    );
+    pixels.getContext('2d')!.drawImage(rawDevelop.pixels, 0, 0);
+    applyAdvancedPixels(pixels, {
+      brightness: rawExposure,
+      contrast: rawContrast,
+      hue: rawTint / 2,
+      saturation: 0,
+      vibrance: 0,
+      blackWhite: false,
+      redMix: 30,
+      greenMix: 59,
+      blueMix: 11,
+      blurMode: 'none',
+      blurRadius: 0,
+      blurAngle: 0,
+    });
+    if (rawTemperature) {
+      const ctx = pixels.getContext('2d')!,
+        image = ctx.getImageData(0, 0, pixels.width, pixels.height),
+        warm = rawTemperature / 100;
+      for (let index = 0; index < image.data.length; index += 4) {
+        image.data[index] = Math.max(
+          0,
+          Math.min(255, image.data[index] + warm * 38),
+        );
+        image.data[index + 2] = Math.max(
+          0,
+          Math.min(255, image.data[index + 2] - warm * 38),
+        );
+      }
+      ctx.putImageData(image, 0, 0);
+    }
+    const id = crypto.randomUUID();
+    loadImportedDocument(
+      `${rawDevelop.name} — developed preview`,
+      pixels.width,
+      pixels.height,
+      [
+        {
+          id,
+          name: 'RAW developed preview',
+          visible: true,
+          opacity: 100,
+          blend: 'source-over',
+          x: 0,
+          y: 0,
+          hasMask: false,
+          maskEnabled: true,
+          kind: 'pixel',
+        },
+      ],
+      new Map([[id, { pixels }]]),
+      'Open Camera Raw preview',
+    );
+    setRawDevelop(null);
+    setStatus('RAW preview opened as an editable pixel layer');
+  };
+
   const openImage = (file?: File) => {
     if (!file) return;
     if (
@@ -4940,9 +5331,7 @@ export default function Home() {
       return;
     }
     if (/\.(cr2|cr3|nef|arw|dng|raf|orf|rw2)$/i.test(file.name)) {
-      setPsdError(
-        'RAW sensor decoding is not available yet. Develop a copy in a RAW editor and open its PNG or JPEG export. Your RAW file was not changed.',
-      );
+      void openRaw(file);
       return;
     }
     if (!file.type.startsWith('image/')) {
@@ -5489,6 +5878,7 @@ export default function Home() {
             };
           }),
           paths: d.paths ?? [],
+          savedSelections: d.savedSelections ?? [],
           selection: d.selection,
           selectionPath: d.selectionPath ?? null,
           feather: d.feather ?? 0,
@@ -5822,6 +6212,25 @@ export default function Home() {
             { name: 'Color Range', action: selectColorRange },
             { separator: true },
             {
+              name: 'Select and Mask…',
+              action: () =>
+                selectionRef.current
+                  ? setSelectMaskOpen(true)
+                  : setStatus('Make a selection first'),
+            },
+            {
+              name: 'Save selection…',
+              action: () => {
+                setSelectionName(`Selection ${savedSelections.length + 1}`);
+                setSelectionManagerOpen(true);
+              },
+            },
+            {
+              name: 'Load selection…',
+              action: () => setSelectionManagerOpen(true),
+            },
+            { separator: true },
+            {
               name: 'Invert selection',
               action: () => refineSelection('invert'),
             },
@@ -6019,6 +6428,99 @@ export default function Home() {
                   />
                   %
                 </label>
+                <details className="brush-dynamics">
+                  <summary>Brush dynamics</summary>
+                  <div>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={pressureSize}
+                        onChange={(event) =>
+                          setPressureSize(event.target.checked)
+                        }
+                      />
+                      Pressure controls size
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={pressureOpacity}
+                        onChange={(event) =>
+                          setPressureOpacity(event.target.checked)
+                        }
+                      />
+                      Pressure controls opacity
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={tiltShape}
+                        onChange={(event) => setTiltShape(event.target.checked)}
+                      />
+                      Pen tilt shapes tip
+                    </label>
+                    <label>
+                      Smoothing
+                      <input
+                        aria-label="Brush smoothing"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={brushSmoothing}
+                        onChange={(event) =>
+                          setBrushSmoothing(
+                            Math.max(
+                              0,
+                              Math.min(100, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label>
+                      Size jitter
+                      <input
+                        aria-label="Brush size jitter"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={sizeJitter}
+                        onChange={(event) =>
+                          setSizeJitter(
+                            Math.max(
+                              0,
+                              Math.min(100, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label>
+                      Hue jitter
+                      <input
+                        aria-label="Brush hue jitter"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={hueJitter}
+                        onChange={(event) =>
+                          setHueJitter(
+                            Math.max(
+                              0,
+                              Math.min(100, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                  </div>
+                </details>
               </>
             )}
             {tool === 'clone' && (
@@ -7888,6 +8390,164 @@ export default function Home() {
           <DialogTitle>File and memory limits</DialogTitle>
           <DialogDescription>{psdError}</DialogDescription>
           <Button onClick={() => setPsdError('')}>OK</Button>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!rawDevelop}
+        onOpenChange={(open) => !open && setRawDevelop(null)}
+      >
+        <DialogContent className="raw-develop-dialog">
+          <DialogTitle>Camera Raw</DialogTitle>
+          <DialogDescription>
+            Develop the full-size embedded preview as a new editable document.
+            The original sensor file is never changed.
+          </DialogDescription>
+          {rawDevelop && (
+            <img
+              src={rawDevelop.thumbnail}
+              alt="RAW preview"
+              style={{
+                filter: `brightness(${100 + rawExposure}%) contrast(${100 + rawContrast}%) hue-rotate(${rawTint / 2}deg)`,
+              }}
+            />
+          )}
+          {[
+            ['Exposure', rawExposure, setRawExposure, -100, 100],
+            ['Contrast', rawContrast, setRawContrast, -100, 100],
+            ['Temperature', rawTemperature, setRawTemperature, -100, 100],
+            ['Tint', rawTint, setRawTint, -100, 100],
+          ].map(([label, value, setter, min, max]) => (
+            <label key={label as string}>
+              <span>{label as string}</span>
+              <Slider
+                aria-label={`RAW ${String(label).toLowerCase()}`}
+                min={min as number}
+                max={max as number}
+                value={value as number}
+                onValueChange={(next) =>
+                  (setter as (value: number) => void)(sliderNumber(next))
+                }
+              />
+              <strong>{value as number}</strong>
+            </label>
+          ))}
+          <div className="dialog-actions">
+            <Button onClick={applyRawDevelop}>Open image</Button>
+            <Button variant="outline" onClick={() => setRawDevelop(null)}>
+              Cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={selectMaskOpen} onOpenChange={setSelectMaskOpen}>
+        <DialogContent className="select-mask-dialog">
+          <DialogTitle>Select and Mask</DialogTitle>
+          <DialogDescription>
+            Refine the active selection edge, including fine hair-like detail,
+            then optionally remove color fringe from edge pixels.
+          </DialogDescription>
+          {[
+            ['Edge detection radius', refineRadius, setRefineRadius, 0, 20],
+            ['Smooth', refineSmooth, setRefineSmooth, 0, 20],
+            ['Feather', refineFeather, setRefineFeather, 0, 50],
+            ['Shift edge', refineShift, setRefineShift, -100, 100],
+          ].map(([label, value, setter, min, max]) => (
+            <label key={label as string}>
+              <span>{label as string}</span>
+              <Slider
+                aria-label={label as string}
+                min={min as number}
+                max={max as number}
+                value={value as number}
+                onValueChange={(next) =>
+                  (setter as (value: number) => void)(sliderNumber(next))
+                }
+              />
+              <strong>{value as number}</strong>
+            </label>
+          ))}
+          <label className="inline-check">
+            <input
+              type="checkbox"
+              checked={decontaminate}
+              onChange={(event) => setDecontaminate(event.target.checked)}
+            />
+            Decontaminate edge colors
+          </label>
+          {decontaminate && (
+            <label>
+              <span>Decontamination amount</span>
+              <Slider
+                aria-label="Decontamination amount"
+                min={0}
+                max={100}
+                value={decontaminateAmount}
+                onValueChange={(next) =>
+                  setDecontaminateAmount(sliderNumber(next))
+                }
+              />
+              <strong>{decontaminateAmount}%</strong>
+            </label>
+          )}
+          <div className="dialog-actions">
+            <Button onClick={applySelectAndMask}>Apply refinement</Button>
+            <Button variant="outline" onClick={() => setSelectMaskOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={selectionManagerOpen}
+        onOpenChange={setSelectionManagerOpen}
+      >
+        <DialogContent className="selection-manager-dialog">
+          <DialogTitle>Saved selections</DialogTitle>
+          <DialogDescription>
+            Save the active selection with this layered project or load a saved
+            selection into the document.
+          </DialogDescription>
+          <div className="selection-save-row">
+            <input
+              aria-label="Selection name"
+              value={selectionName}
+              onChange={(event) => setSelectionName(event.target.value)}
+            />
+            <Button onClick={saveCurrentSelection} disabled={!selection}>
+              Save current
+            </Button>
+          </div>
+          <div className="saved-selection-list">
+            {savedSelections.length ? (
+              savedSelections.map((item) => (
+                <div key={item.id}>
+                  <button onClick={() => loadSavedSelection(item)}>
+                    {item.name}
+                  </button>
+                  <button
+                    aria-label={`Delete ${item.name}`}
+                    onClick={() => {
+                      savedSelectionCanvases.current.delete(item.id);
+                      setSavedSelections((items) =>
+                        items.filter((saved) => saved.id !== item.id),
+                      );
+                      setSaved(false);
+                    }}
+                  >
+                    <Trash2 />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p>No saved selections yet.</p>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => setSelectionManagerOpen(false)}
+          >
+            Close
+          </Button>
         </DialogContent>
       </Dialog>
       <ExportDialog
