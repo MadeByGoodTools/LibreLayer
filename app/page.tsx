@@ -198,6 +198,7 @@ import {
 } from '@/lib/layer-compositing';
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
+import { Histogram } from '@/components/histogram';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
 import {
   decodeCameraRaw,
@@ -12162,6 +12163,10 @@ export default function Home() {
                             </div>
                             {active?.kind === 'adjustment' ? (
                               <>
+                                <Histogram
+                                  sourceCanvas={displayRef.current}
+                                  revision={layers}
+                                />
                                 <p className="precision-adjustment-note">
                                   Combined floating-point recipe · editable
                                 </p>

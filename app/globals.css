@@ -918,6 +918,57 @@ button {
   color: color-mix(in srgb, var(--accent) 72%, white);
   font-size: 12px;
 }
+.histogram-panel {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #41434a;
+  border-radius: 8px;
+  background: #17181c;
+}
+.histogram-heading,
+.histogram-clipping {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.histogram-heading strong {
+  font-size: 12px;
+}
+.histogram-heading > div {
+  display: flex;
+  gap: 3px;
+}
+.histogram-heading button {
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid #42444b;
+  border-radius: 5px;
+  background: transparent;
+  color: #aeb0b7;
+  font-size: 11px;
+}
+.histogram-heading button.active {
+  border-color: color-mix(in srgb, var(--accent) 65%, #42444b);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: white;
+}
+.histogram-panel canvas {
+  width: 100%;
+  height: 92px;
+  border: 1px solid #303239;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #16171a, #0d0e10);
+}
+.histogram-clipping {
+  color: #9699a1;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.histogram-clipping .warning {
+  color: #ffbd69;
+}
 .layer-controls [data-slot='slider'] {
   grid-column: 1/-1;
   width: 100%;
