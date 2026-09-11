@@ -1,7 +1,13 @@
 {
-  "name": "sites-project",
+  "name": "librelayer",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "MIT",
+  "homepage": "https://librelayer.goodtools.ca",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MadeByGoodTools/LibreLayer.git"
+  },
   "engines": {
     "node": ">=22.13.0"
   },
