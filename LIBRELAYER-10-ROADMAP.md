@@ -64,7 +64,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Browser-local Match Color from a chosen reference image with fade, luminance, intensity, and neutralization.
 - [x] Floating-point Reinhard/filmic HDR toning and skin-protected perceptual vibrance.
 - [x] Lift/gamma/gain color wheels with independent tonal levels.
-- [ ] Waveform scale controls and reference comparison.
+- [x] Waveform/parade/vector zoom and trace-brightness controls.
+- [ ] Side-by-side reference comparison with matched view navigation.
 
 ## 4. Selections and masking
 

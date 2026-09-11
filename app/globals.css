@@ -988,6 +988,8 @@ button {
 }
 .scope-heading,
 .scope-heading > div,
+.scope-controls,
+.scope-controls > div,
 .lut-heading,
 .lut-file-row,
 .lut-amount-label {
@@ -1008,6 +1010,20 @@ button {
   background: #202328;
   color: #9298a2;
   font-size: 10px;
+}
+.scope-controls button {
+  min-height: 21px;
+  padding: 2px 5px;
+  border: 1px solid #343840;
+  border-radius: 3px;
+  background: #1c1f23;
+  color: #8f949d;
+  font-size: 9px;
+}
+
+.scope-controls button.active {
+  border-color: var(--accent);
+  color: #fff;
 }
 .scope-heading button.active {
   border-color: color-mix(in srgb, var(--accent) 65%, #42444b);

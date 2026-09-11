@@ -13,6 +13,8 @@ export function ColorScopes({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<ScopeMode>('waveform');
+  const [verticalScale, setVerticalScale] = useState<1 | 1.25 | 1.5>(1);
+  const [traceGain, setTraceGain] = useState<1 | 2 | 3>(2);
 
   useEffect(() => {
     const output = canvasRef.current;
@@ -50,6 +52,8 @@ export function ColorScopes({
         ).data,
         stride = Math.max(1, Math.ceil((sample.width * sample.height) / 45000));
       context.globalCompositeOperation = 'lighter';
+      const scopeValue = (value: number) =>
+        Math.max(0, Math.min(1, 0.5 + (value - 0.5) * verticalScale));
       for (
         let pixel = 0;
         pixel < sample.width * sample.height;
@@ -63,10 +67,10 @@ export function ColorScopes({
           sourceX = pixel % sample.width;
         if (mode === 'waveform') {
           const luma = red * 0.2126 + green * 0.7152 + blue * 0.0722;
-          context.fillStyle = 'rgb(125 235 190 / 0.08)';
+          context.fillStyle = `rgb(125 235 190 / ${0.04 * traceGain})`;
           context.fillRect(
             (sourceX / sample.width) * output.width,
-            (1 - luma) * output.height,
+            (1 - scopeValue(luma)) * output.height,
             1,
             1,
           );
@@ -74,13 +78,13 @@ export function ColorScopes({
           const width = output.width / 3;
           [red, green, blue].forEach((value, channel) => {
             context.fillStyle = [
-              'rgb(255 90 96 / .08)',
-              'rgb(72 230 142 / .08)',
-              'rgb(84 139 255 / .08)',
+              `rgb(255 90 96 / ${0.04 * traceGain})`,
+              `rgb(72 230 142 / ${0.04 * traceGain})`,
+              `rgb(84 139 255 / ${0.04 * traceGain})`,
             ][channel];
             context.fillRect(
               channel * width + (sourceX / sample.width) * width,
-              (1 - value) * output.height,
+              (1 - scopeValue(value)) * output.height,
               1,
               1,
             );
@@ -89,10 +93,10 @@ export function ColorScopes({
           const cb =
               (blue - (red * 0.2126 + green * 0.7152 + blue * 0.0722)) * 0.55,
             cr = (red - (red * 0.2126 + green * 0.7152 + blue * 0.0722)) * 0.55;
-          context.fillStyle = `rgb(${pixels[index]} ${pixels[index + 1]} ${pixels[index + 2]} / .13)`;
+          context.fillStyle = `rgb(${pixels[index]} ${pixels[index + 1]} ${pixels[index + 2]} / ${0.065 * traceGain})`;
           context.fillRect(
-            output.width / 2 + cb * output.width,
-            output.height / 2 - cr * output.height,
+            output.width / 2 + cb * output.width * verticalScale,
+            output.height / 2 - cr * output.height * verticalScale,
             1.5,
             1.5,
           );
@@ -114,7 +118,7 @@ export function ColorScopes({
       sample.width = sample.height = 1;
     });
     return () => cancelAnimationFrame(frame);
-  }, [mode, revision, sourceCanvas]);
+  }, [mode, revision, sourceCanvas, traceGain, verticalScale]);
 
   return (
     <section className="color-scopes" aria-label="Color scopes">
@@ -137,6 +141,32 @@ export function ColorScopes({
               </button>
             ),
           )}
+        </div>
+      </div>
+      <div className="scope-controls">
+        <div role="group" aria-label="Scope scale">
+          {([1, 1.25, 1.5] as const).map((scale) => (
+            <button
+              key={scale}
+              className={verticalScale === scale ? 'active' : ''}
+              aria-pressed={verticalScale === scale}
+              onClick={() => setVerticalScale(scale)}
+            >
+              {Math.round(scale * 100)}%
+            </button>
+          ))}
+        </div>
+        <div role="group" aria-label="Trace brightness">
+          {([1, 2, 3] as const).map((gain) => (
+            <button
+              key={gain}
+              className={traceGain === gain ? 'active' : ''}
+              aria-pressed={traceGain === gain}
+              onClick={() => setTraceGain(gain)}
+            >
+              {gain === 1 ? 'Dim' : gain === 2 ? 'Normal' : 'Bright'}
+            </button>
+          ))}
         </div>
       </div>
       <canvas
