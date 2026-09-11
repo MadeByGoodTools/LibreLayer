@@ -22,7 +22,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Saved panel side, width, visibility, presets, and local preferences.
 - [x] Multiple document tabs, fit, 100%, rotation, rulers, guides, and grid.
 - [ ] Dock, stack, resize, float, collapse, and solo every panel.
-- [ ] Save, rename, import, export, and reset complete workspace layouts.
+- [x] Save, rename, import, export, validate, and reset complete workspace layouts.
 - [ ] Contextual task bar and complete right-click menus.
 - [ ] Scrubby labels, direct numeric entry, per-control reset, and fine/coarse modifiers.
 - [ ] Configurable toolbar and tool groups.

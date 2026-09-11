@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { commandKey, shortcutLabel } from '@/lib/editor-shortcuts';
 import {
   Dialog,
@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import type { SoftProofMode } from '@/lib/soft-proof';
+import { parseWorkspaces, serializeWorkspaces } from '@/lib/workspace-layout';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -83,7 +84,10 @@ export function WorkspaceSettings({
   documentStatus: string;
 }) {
   const [name, setName] = useState(''),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [renameIndex, setRenameIndex] = useState<number | null>(null),
+    [renameValue, setRenameValue] = useState('');
+  const workspaceImportRef = useRef<HTMLInputElement>(null);
   const updateLayout = (p: Partial<WorkspaceLayout>) =>
     onChange({ ...value, layout: { ...value.layout, ...p } });
   return (
@@ -224,16 +228,137 @@ export function WorkspaceSettings({
             >
               Save workspace
             </Button>
-            {value.workspaces.map((w, i) => (
-              <div key={w.name} className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    onChange({ ...value, layout: { ...w.layout } })
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!value.workspaces.length}
+                onClick={() => {
+                  const url = URL.createObjectURL(
+                      new Blob([serializeWorkspaces(value.workspaces)], {
+                        type: 'application/json',
+                      }),
+                    ),
+                    anchor = document.createElement('a');
+                  anchor.href = url;
+                  anchor.download = 'librelayer-workspaces.json';
+                  anchor.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  setError('Workspace layouts exported.');
+                }}
+              >
+                Export layouts
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => workspaceImportRef.current?.click()}
+              >
+                Import layouts…
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={!value.workspaces.length}
+                onClick={() => {
+                  onChange({
+                    ...value,
+                    layout: { ...defaultPreferences.layout },
+                    workspaces: [],
+                  });
+                  setRenameIndex(null);
+                  setError('All saved layouts reset.');
+                }}
+              >
+                Reset all layouts
+              </Button>
+              <input
+                ref={workspaceImportRef}
+                hidden
+                type="file"
+                accept="application/json,.json"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (!file) return;
+                  try {
+                    const workspaces = parseWorkspaces(await file.text());
+                    onChange({
+                      ...value,
+                      workspaces,
+                      layout: { ...workspaces[0].layout },
+                    });
+                    setError(
+                      `${workspaces.length} workspace ${workspaces.length === 1 ? 'layout' : 'layouts'} imported.`,
+                    );
+                  } catch (importError) {
+                    setError(
+                      importError instanceof Error
+                        ? importError.message
+                        : 'Workspace layouts could not be imported.',
+                    );
                   }
-                >
-                  {w.name}
-                </Button>
+                }}
+              />
+            </div>
+            {value.workspaces.map((w, i) => (
+              <div key={`${w.name}-${i}`} className="flex flex-wrap gap-2">
+                {renameIndex === i ? (
+                  <>
+                    <input
+                      aria-label={`Rename workspace ${w.name}`}
+                      className="min-w-0 flex-1 rounded border p-2"
+                      value={renameValue}
+                      maxLength={60}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                    />
+                    <Button
+                      disabled={
+                        !renameValue.trim() ||
+                        value.workspaces.some(
+                          (item, index) =>
+                            index !== i &&
+                            item.name.toLowerCase() ===
+                              renameValue.trim().toLowerCase(),
+                        )
+                      }
+                      onClick={() => {
+                        onChange({
+                          ...value,
+                          workspaces: value.workspaces.map((item, index) =>
+                            index === i
+                              ? { ...item, name: renameValue.trim() }
+                              : item,
+                          ),
+                        });
+                        setRenameIndex(null);
+                        setRenameValue('');
+                      }}
+                    >
+                      Save name
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        onChange({ ...value, layout: { ...w.layout } })
+                      }
+                    >
+                      {w.name}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setRenameIndex(i);
+                        setRenameValue(w.name);
+                      }}
+                    >
+                      Rename
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="ghost"
                   aria-label={`Delete workspace ${w.name}`}
