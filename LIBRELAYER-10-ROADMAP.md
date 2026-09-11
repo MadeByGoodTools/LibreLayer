@@ -39,7 +39,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Reference-quality full blend-mode math in gamma and linear light.
 - [ ] Complete knockout, group isolation, and nested clipping behavior.
 - [x] Mask density, feather, live overlay, direct edge refinement, and independent position, rotation, and two-axis transforms.
-- [ ] Cross-document layer copying without rasterization.
+- [x] Cross-document layer-tree copying that preserves groups, masks, links, Smart Objects, fills, adjustments, and effects without rasterization.
 - [ ] Pixel-reference compositing fixture suite.
 
 ## 3. Adjustments and color grading

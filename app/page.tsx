@@ -216,6 +216,7 @@ import {
   normalizeMaskTransform,
   type MaskTransform,
 } from '@/lib/mask-transform';
+import { planLayerTransfer } from '@/lib/layer-transfer';
 import {
   marqueeBounds,
   strongestEdgeInPatch,
@@ -1660,6 +1661,14 @@ export default function Home() {
     y: number;
   } | null>(null);
   const effectsClipboardRef = useRef<LayerEffects | null>(null);
+  const layerClipboardRef = useRef<{
+    documentName: string;
+    width: number;
+    height: number;
+    layers: LayerMeta[];
+    rootIds: string[];
+    surfaces: Map<string, LayerSurface>;
+  } | null>(null);
   const savedSelectionCanvases = useRef(new Map<string, HTMLCanvasElement>());
   const selectionChannelRef = useRef<HTMLCanvasElement | null>(null);
   const lastSelectionRef = useRef<{
@@ -4755,6 +4764,102 @@ export default function Home() {
     selectMany(roots.map((l) => ids.get(l.id)!));
     snapshot('Duplicate selected layers');
     render();
+  };
+  const copySelectedLayers = () => {
+    const roots = selectedRoots(),
+      source = selectedTree();
+    if (!roots.length || !source.length) {
+      setStatus('Select one or more layers to copy');
+      return;
+    }
+    const copiedSurfaces = new Map<string, LayerSurface>();
+    for (const layer of source) {
+      const sourceSurface = surfacesRef.current.get(layer.id);
+      if (!sourceSurface) continue;
+      const pixels = makeCanvas(
+        sourceSurface.pixels.width,
+        sourceSurface.pixels.height,
+      );
+      pixels.getContext('2d')!.drawImage(sourceSurface.pixels, 0, 0);
+      let mask: HTMLCanvasElement | undefined;
+      if (sourceSurface.mask) {
+        mask = makeCanvas(sourceSurface.mask.width, sourceSurface.mask.height);
+        mask.getContext('2d')!.drawImage(sourceSurface.mask, 0, 0);
+      }
+      copiedSurfaces.set(layer.id, { pixels, mask });
+    }
+    layerClipboardRef.current = {
+      documentName: fileName,
+      width: doc.w,
+      height: doc.h,
+      layers: structuredClone(source),
+      rootIds: roots.map((layer) => layer.id),
+      surfaces: copiedSurfaces,
+    };
+    setStatus(
+      `${roots.length} ${roots.length === 1 ? 'layer tree' : 'layer trees'} copied from ${fileName} · switch tabs and paste`,
+    );
+  };
+  const pasteSelectedLayers = () => {
+    const clipboard = layerClipboardRef.current;
+    if (!clipboard) {
+      setStatus('Copy layers first');
+      return;
+    }
+    const plan = planLayerTransfer(clipboard.layers, clipboard.rootIds, () =>
+      crypto.randomUUID(),
+    );
+    const units = plan.layers.reduce((count, layer) => {
+      const sourceId = [...plan.idMap.entries()].find(
+        ([, targetId]) => targetId === layer.id,
+      )?.[0];
+      return (
+        count + (sourceId && clipboard.surfaces.get(sourceId)?.mask ? 2 : 1)
+      );
+    }, 0);
+    if (
+      !plan.layers.length ||
+      !roomForLayers(plan.layers.length) ||
+      !hasRoom(doc.w * doc.h * units)
+    )
+      return;
+    const sourceByTarget = new Map(
+      [...plan.idMap.entries()].map(([sourceId, targetId]) => [
+        targetId,
+        sourceId,
+      ]),
+    );
+    for (const layer of plan.layers) {
+      const sourceId = sourceByTarget.get(layer.id),
+        sourceSurface = sourceId ? clipboard.surfaces.get(sourceId) : undefined,
+        pixels = makeCanvas(doc.w, doc.h);
+      if (
+        sourceSurface &&
+        layer.kind !== 'group' &&
+        layer.kind !== 'adjustment' &&
+        layer.kind !== 'fill'
+      )
+        pixels.getContext('2d')!.drawImage(sourceSurface.pixels, 0, 0);
+      let mask: HTMLCanvasElement | undefined;
+      if (sourceSurface?.mask) {
+        mask = makeCanvas(doc.w, doc.h);
+        mask.getContext('2d')!.drawImage(sourceSurface.mask, 0, 0);
+      }
+      surfacesRef.current.set(layer.id, { pixels, mask });
+    }
+    const insertion = Math.max(
+      0,
+      layersRef.current.findIndex((layer) => layer.id === selectedRef.current),
+    );
+    const next = [...layersRef.current];
+    next.splice(insertion, 0, ...plan.layers);
+    syncLayers(next);
+    selectMany(plan.rootIds, plan.rootIds[0]);
+    snapshot('Paste layers from document');
+    render();
+    setStatus(
+      `${plan.rootIds.length} editable ${plan.rootIds.length === 1 ? 'layer tree' : 'layer trees'} pasted from ${clipboard.documentName} without flattening`,
+    );
   };
   const removeLayer = () => {
     const removed = selectedTree();
@@ -10312,6 +10417,8 @@ export default function Home() {
             { name: 'Rasterize Smart Object', action: rasterizeSmartObject },
             { name: 'Convert text to shape path', action: convertTextToShapes },
             { separator: true },
+            { name: 'Copy selected layers', action: copySelectedLayers },
+            { name: 'Paste layers', action: pasteSelectedLayers },
             { name: 'Duplicate layer', action: duplicate, shortcut: '⌘J' },
             { name: 'Add layer mask', action: addMask },
             { name: 'Mask from selection', action: selectionToMask },
@@ -12955,6 +13062,20 @@ export default function Home() {
                               Clear
                             </button>
                           </div>
+                        </div>
+                        <div className="property-buttons">
+                          <button
+                            disabled={!selectedIds.length}
+                            onClick={copySelectedLayers}
+                          >
+                            Copy layers
+                          </button>
+                          <button
+                            disabled={!layerClipboardRef.current}
+                            onClick={pasteSelectedLayers}
+                          >
+                            Paste layers
+                          </button>
                         </div>
                         <Button
                           size="sm"
