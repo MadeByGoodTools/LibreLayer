@@ -82,6 +82,7 @@ export function AdvancedColorControls({
   onChange,
   onCommit,
   sourceCanvas,
+  onRequestHueTarget,
 }: {
   adjustments: HighDepthAdjustments;
   onChange: (
@@ -90,6 +91,7 @@ export function AdvancedColorControls({
   ) => void;
   onCommit: (label: string) => void;
   sourceCanvas?: HTMLCanvasElement | null;
+  onRequestHueTarget?: (target: HueSaturationRangeTarget) => void;
 }) {
   const matchInput = useRef<HTMLInputElement>(null);
   const [matchError, setMatchError] = useState('');
@@ -109,12 +111,39 @@ export function AdvancedColorControls({
       hue: 0,
       saturation: 0,
       lightness: 0,
+      center: {
+        reds: 0,
+        yellows: 60,
+        greens: 120,
+        cyans: 180,
+        blues: 240,
+        magentas: 300,
+      }[hueRange],
+      width: 30,
+      falloff: 30,
     },
     hdrToning = adjustments.hdrToning ?? defaultHdrToning,
     perceptualVibrance =
       adjustments.perceptualVibrance ?? defaultPerceptualVibrance,
     liftGammaGain = adjustments.liftGammaGain ?? defaultLiftGammaGain,
     matchColor = adjustments.matchColor;
+  const hueCenter = hueRangeRecipe.center ?? 0,
+    hueSpread =
+      (hueRangeRecipe.width ?? 30) / 2 + (hueRangeRecipe.falloff ?? 30),
+    hueStart = hueCenter - hueSpread,
+    hueEnd = hueCenter + hueSpread,
+    hueSegments =
+      hueStart < 0
+        ? [
+            { left: 0, width: hueEnd },
+            { left: 360 + hueStart, width: -hueStart },
+          ]
+        : hueEnd > 360
+          ? [
+              { left: hueStart, width: 360 - hueStart },
+              { left: 0, width: hueEnd - 360 },
+            ]
+          : [{ left: hueStart, width: hueEnd - hueStart }];
   const updateMixer = (input: keyof ChannelMixer['red'], value: number) =>
     onChange('channelMixer', {
       ...mixer,
@@ -394,6 +423,58 @@ export function AdvancedColorControls({
               ))}
             </select>
           </label>
+          <button
+            className="color-reset-button"
+            onClick={() => onRequestHueTarget?.(hueRange)}
+          >
+            Target color on image
+          </button>
+          <div
+            className="hue-range-preview"
+            aria-label={`${hueRange} range centered at ${Math.round(hueRangeRecipe.center ?? 0)} degrees`}
+          >
+            {hueSegments.map((segment, index) => (
+              <i
+                key={index}
+                style={{
+                  left: `${segment.left / 3.6}%`,
+                  width: `${segment.width / 3.6}%`,
+                }}
+              />
+            ))}
+          </div>
+          {(
+            [
+              ['Center', 'center', 0, 359, '°'],
+              ['Range width', 'width', 2, 180, '°'],
+              ['Falloff', 'falloff', 1, 90, '°'],
+            ] as const
+          ).map(([label, key, min, max, suffix]) => (
+            <div className="advanced-color-slider" key={key}>
+              <label>
+                {label}{' '}
+                <span>
+                  {Math.round(
+                    hueRangeRecipe[key] ?? (key === 'center' ? 0 : 30),
+                  )}
+                  {suffix}
+                </span>
+              </label>
+              <Slider
+                aria-label={`${hueRange} ${label}`}
+                min={min}
+                max={max}
+                step={1}
+                value={hueRangeRecipe[key] ?? (key === 'center' ? 0 : 30)}
+                onValueChange={(value) =>
+                  updateHueRange(key, sliderNumber(value))
+                }
+                onValueCommitted={() =>
+                  onCommit(`${hueRange} Hue and Saturation range`)
+                }
+              />
+            </div>
+          ))}
           {(
             [
               ['Hue', 'hue', -180, 180, '°'],

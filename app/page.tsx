@@ -227,6 +227,7 @@ import {
   type CurveChannel,
   type ChannelLevel,
   type HighDepthAdjustments,
+  type HueSaturationRangeTarget,
 } from '@/lib/high-depth';
 const Mask = Focus;
 
@@ -1558,6 +1559,9 @@ export default function Home() {
   const [soloChannel, setSoloChannel] = useState(false);
   const [curveTargetChannel, setCurveTargetChannel] =
     useState<CurveChannel | null>(null);
+  const [hueTarget, setHueTarget] = useState<HueSaturationRangeTarget | null>(
+    null,
+  );
   const [levelsTarget, setLevelsTarget] = useState<{
     kind: 'black' | 'gray' | 'white';
     channel: CurveChannel;
@@ -2917,7 +2921,10 @@ export default function Home() {
   const begin = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const p = point(e),
       meta = selected();
-    if ((curveTargetChannel || levelsTarget) && meta?.kind === 'adjustment') {
+    if (
+      (curveTargetChannel || levelsTarget || hueTarget) &&
+      meta?.kind === 'adjustment'
+    ) {
       render();
       const x = Math.max(0, Math.min(doc.w - 1, Math.floor(p.x))),
         y = Math.max(0, Math.min(doc.h - 1, Math.floor(p.y))),
@@ -2933,7 +2940,47 @@ export default function Home() {
           (sampled[0] * 0.2126 + sampled[1] * 0.7152 + sampled[2] * 0.0722) /
           255,
       };
-      if (curveTargetChannel) {
+      if (hueTarget) {
+        const red = normalized.red,
+          green = normalized.green,
+          blue = normalized.blue,
+          maximum = Math.max(red, green, blue),
+          minimum = Math.min(red, green, blue),
+          delta = maximum - minimum;
+        let hue = 0;
+        if (delta > 1e-7) {
+          if (maximum === red) hue = 60 * (((green - blue) / delta) % 6);
+          else if (maximum === green) hue = 60 * ((blue - red) / delta + 2);
+          else hue = 60 * ((red - green) / delta + 4);
+        }
+        hue = Math.round((hue + 360) % 360);
+        const current = meta.precisionAdjustment ?? {},
+          existing = current.hueSaturationRanges?.[hueTarget] ?? {
+            hue: 0,
+            saturation: 0,
+            lightness: 0,
+          };
+        patchLayer(
+          meta.id,
+          {
+            precisionAdjustment: {
+              ...current,
+              hueSaturationRanges: {
+                ...current.hueSaturationRanges,
+                [hueTarget]: {
+                  ...existing,
+                  center: hue,
+                  width: existing.width ?? 30,
+                  falloff: existing.falloff ?? 30,
+                },
+              },
+            },
+          },
+          `${hueTarget} color range sampled`,
+        );
+        setStatus(`${hueTarget} range centered on sampled hue ${hue}°`);
+        setHueTarget(null);
+      } else if (curveTargetChannel) {
         const value = normalized[curveTargetChannel],
           current = meta.precisionAdjustment ?? {},
           points = [
@@ -11325,6 +11372,7 @@ export default function Home() {
           >
             <canvas
               ref={displayRef}
+              aria-label="Editable image canvas"
               className={`soft-proof-${preferences.proofMode ?? 'none'}`}
               width={doc.w}
               height={doc.h}
@@ -12329,6 +12377,7 @@ export default function Home() {
                                   onCommit={() => snapshot('Levels adjustment')}
                                   onRequestEyedropper={(kind, channel) => {
                                     setCurveTargetChannel(null);
+                                    setHueTarget(null);
                                     setLevelsTarget({ kind, channel });
                                     setStatus(
                                       `Click the image to set the ${kind} point · ${channel.toUpperCase()}`,
@@ -12348,6 +12397,7 @@ export default function Home() {
                                   revision={layers}
                                   onRequestTarget={(channel) => {
                                     setLevelsTarget(null);
+                                    setHueTarget(null);
                                     setCurveTargetChannel(channel);
                                     setStatus(
                                       `Click the image to add a ${channel.toUpperCase()} curve point`,
@@ -12364,6 +12414,14 @@ export default function Home() {
                                   onChange={updatePrecisionAdjustment}
                                   onCommit={(label) => snapshot(label)}
                                   sourceCanvas={displayRef.current}
+                                  onRequestHueTarget={(target) => {
+                                    setCurveTargetChannel(null);
+                                    setLevelsTarget(null);
+                                    setHueTarget(target);
+                                    setStatus(
+                                      `Click the image to center the ${target} color range`,
+                                    );
+                                  }}
                                 />
                                 {(
                                   [

@@ -80,6 +80,9 @@ export type HueSaturationRange = {
   hue: number;
   saturation: number;
   lightness: number;
+  center?: number;
+  width?: number;
+  falloff?: number;
 };
 export type ColorStatistics = {
   mean: [number, number, number];
@@ -570,6 +573,24 @@ export const applyHueSaturationRanges = (
 ) => {
   if (!ranges) return [red, green, blue] as const;
   const weights = selectiveColorWeights(red, green, blue);
+  const maximum = Math.max(red, green, blue),
+    minimum = Math.min(red, green, blue),
+    delta = maximum - minimum;
+  let sourceHue = 0;
+  if (delta > 1e-7) {
+    if (maximum === red) sourceHue = 60 * (((green - blue) / delta) % 6);
+    else if (maximum === green) sourceHue = 60 * ((blue - red) / delta + 2);
+    else sourceHue = 60 * ((red - green) / delta + 4);
+  }
+  sourceHue = (sourceHue + 360) % 360;
+  const centers: Record<HueSaturationRangeTarget, number> = {
+    reds: 0,
+    yellows: 60,
+    greens: 120,
+    cyans: 180,
+    blues: 240,
+    magentas: 300,
+  };
   let channels = [red, green, blue] as [number, number, number];
   for (const target of [
     'reds',
@@ -580,7 +601,12 @@ export const applyHueSaturationRanges = (
     'magentas',
   ] as const) {
     const recipe = ranges[target],
-      weight = weights[target];
+      center = recipe?.center ?? centers[target],
+      width = Math.max(2, Math.min(180, recipe?.width ?? 30)),
+      falloff = Math.max(1, Math.min(90, recipe?.falloff ?? 30)),
+      distance = Math.abs(((sourceHue - center + 540) % 360) - 180),
+      customWeight = 1 - smoothstep(width / 2, width / 2 + falloff, distance),
+      weight = recipe?.center === undefined ? weights[target] : customWeight;
     if (!recipe || weight <= 0) continue;
     let shifted = hueRotate(...channels, recipe.hue);
     const luma = 0.299 * shifted[0] + 0.587 * shifted[1] + 0.114 * shifted[2],

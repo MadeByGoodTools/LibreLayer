@@ -54,7 +54,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Monotonic spline Curves with a direct numeric point editor.
 - [x] Freehand Curves with editable-point resampling, adjustable smoothing, and endpoint clipping controls.
 - [x] Hue/Saturation controls for six independent color ranges.
-- [ ] Hue/Saturation on-image adjustment and editable range falloff handles.
+- [x] Hue/Saturation on-image color targeting with editable center, range width, and soft falloff controls.
 - [x] Full RGB Channel Mixer with output-channel recipes and constants.
 - [x] Editable two-color Gradient Map with reverse and live strength.
 - [x] Selective Color with nine color/tonal targets, relative/absolute modes, and CMYK recipes.

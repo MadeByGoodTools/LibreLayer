@@ -378,6 +378,23 @@ void test('Hue and Saturation ranges affect only the chosen color family', () =>
   assert.deepEqual(blue, [0, 0, 1]);
 });
 
+void test('custom Hue and Saturation falloff isolates a sampled hue', () => {
+  const narrow = {
+    reds: {
+      hue: 0,
+      saturation: -100,
+      lightness: 0,
+      center: 120,
+      width: 10,
+      falloff: 5,
+    },
+  };
+  const green = applyHueSaturationRanges(0, 1, 0, narrow);
+  const red = applyHueSaturationRanges(1, 0, 0, narrow);
+  assert.ok(Math.abs(green[0] - green[1]) < 0.001);
+  assert.deepEqual(red, [1, 0, 0]);
+});
+
 void test('Match Color transfers reference statistics with adjustable fade', () => {
   const source = computeColorStatistics({
       width: 2,

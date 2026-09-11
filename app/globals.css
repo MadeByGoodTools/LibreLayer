@@ -1198,6 +1198,22 @@ button {
   gap: 8px;
   padding: 0 10px 10px;
 }
+.hue-range-preview {
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+  border: 1px solid #4a4d55;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #f55, #ff5, #5f5, #5ff, #55f, #f5f, #f55);
+}
+.hue-range-preview i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-inline: 2px solid #fff;
+  background: rgb(255 255 255 / 16%);
+  box-shadow: 0 0 0 999px rgb(8 9 12 / 55%);
+}
 .channel-mixer-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
