@@ -40,7 +40,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Complete knockout, group isolation, and nested clipping behavior.
 - [x] Mask density, feather, live overlay, direct edge refinement, and independent position, rotation, and two-axis transforms.
 - [x] Cross-document layer-tree copying that preserves groups, masks, links, Smart Objects, fills, adjustments, and effects without rasterization.
-- [ ] Pixel-reference compositing fixture suite.
+- [x] Versioned pixel-reference compositing fixtures covering opaque, partial-alpha, transparent, gamma, and linear-light output.
 
 ## 3. Adjustments and color grading
 

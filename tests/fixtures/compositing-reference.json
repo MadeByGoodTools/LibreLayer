@@ -1,0 +1,66 @@
+[
+  {
+    "name": "opaque normal",
+    "mode": "source-over",
+    "space": "gamma",
+    "backdrop": [0.2, 0.5, 0.8, 1],
+    "source": [0.8, 0.2, 0.1, 1],
+    "expected": [0.8, 0.2, 0.1, 1]
+  },
+  {
+    "name": "opaque multiply",
+    "mode": "multiply",
+    "space": "gamma",
+    "backdrop": [0.2, 0.5, 0.8, 1],
+    "source": [0.8, 0.2, 0.1, 1],
+    "expected": [0.16, 0.1, 0.08, 1]
+  },
+  {
+    "name": "opaque screen",
+    "mode": "screen",
+    "space": "gamma",
+    "backdrop": [0.2, 0.5, 0.8, 1],
+    "source": [0.8, 0.2, 0.1, 1],
+    "expected": [0.84, 0.6, 0.82, 1]
+  },
+  {
+    "name": "opaque overlay",
+    "mode": "overlay",
+    "space": "gamma",
+    "backdrop": [0.2, 0.5, 0.8, 1],
+    "source": [0.8, 0.2, 0.1, 1],
+    "expected": [0.32, 0.2, 0.64, 1]
+  },
+  {
+    "name": "opaque difference",
+    "mode": "difference",
+    "space": "gamma",
+    "backdrop": [0.2, 0.5, 0.8, 1],
+    "source": [0.8, 0.2, 0.1, 1],
+    "expected": [0.6, 0.3, 0.7, 1]
+  },
+  {
+    "name": "half-alpha normal over opaque",
+    "mode": "source-over",
+    "space": "gamma",
+    "backdrop": [0.2, 0.5, 0.8, 1],
+    "source": [0.8, 0.2, 0.1, 0.5],
+    "expected": [0.5, 0.35, 0.45, 1]
+  },
+  {
+    "name": "half-alpha source over transparent",
+    "mode": "source-over",
+    "space": "gamma",
+    "backdrop": [0, 0, 0, 0],
+    "source": [0.8, 0.2, 0.1, 0.5],
+    "expected": [0.8, 0.2, 0.1, 0.5]
+  },
+  {
+    "name": "linear-light multiply midgray",
+    "mode": "multiply",
+    "space": "linear",
+    "backdrop": [0.5, 0.5, 0.5, 1],
+    "source": [0.5, 0.5, 0.5, 1],
+    "expected": [0.2369668246, 0.2369668246, 0.2369668246, 1]
+  }
+]

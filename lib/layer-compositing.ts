@@ -196,6 +196,36 @@ export function blendRgbInSpace(
     convertOut,
   );
 }
+export type NormalizedRgba = [number, number, number, number];
+export function compositePixel(
+  backdrop: NormalizedRgba,
+  source: NormalizedRgba,
+  mode: string,
+  blendSpace: BlendSpace = 'gamma',
+): NormalizedRgba {
+  const sourceAlpha = clamp(source[3]),
+    backdropAlpha = clamp(backdrop[3]),
+    alpha = sourceAlpha + backdropAlpha * (1 - sourceAlpha),
+    convertIn = (value: number) =>
+      blendSpace === 'linear' ? srgbToLinear(clamp(value)) : clamp(value),
+    convertOut = (value: number) =>
+      blendSpace === 'linear' ? linearToSrgb(clamp(value)) : clamp(value),
+    sourceRgb = source.slice(0, 3).map(convertIn),
+    backdropRgb = backdrop.slice(0, 3).map(convertIn),
+    blendedRgb = blendRgb(backdropRgb, sourceRgb, mode),
+    output = sourceRgb.map((sourceValue, index) => {
+      if (!alpha) return 0;
+      const backdropValue = backdropRgb[index],
+        composed =
+          ((1 - sourceAlpha) * backdropAlpha * backdropValue +
+            sourceAlpha *
+              ((1 - backdropAlpha) * sourceValue +
+                backdropAlpha * blendedRgb[index])) /
+          alpha;
+      return convertOut(composed);
+    });
+  return [output[0], output[1], output[2], alpha];
+}
 // Tile-sized reads bound temporary pixel arrays; source/backdrop remain full-resolution canvases.
 export function compositePixels(
   target: CanvasRenderingContext2D,
@@ -250,28 +280,14 @@ export function compositePixels(
           seed ^= seed >>> 13;
           sa = (seed >>> 0) / 4294967296 < sa ? 1 : 0;
         }
-        const alpha = sa + ba * (1 - sa),
-          sourceRgb = [s.data[i], s.data[i + 1], s.data[i + 2]].map((value) =>
-            blendSpace === 'linear' ? srgbToLinear(value / 255) : value / 255,
-          ),
-          backdropRgb = [b.data[i], b.data[i + 1], b.data[i + 2]].map(
-            (value) =>
-              blendSpace === 'linear' ? srgbToLinear(value / 255) : value / 255,
-          ),
-          blendedRgb = blendRgb(backdropRgb, sourceRgb, mode);
-        for (let c = 0; c < 3; c++) {
-          const sv = sourceRgb[c],
-            bv = backdropRgb[c],
-            encoded = alpha
-              ? ((1 - sa) * ba * bv +
-                  sa * ((1 - ba) * sv + ba * blendedRgb[c])) /
-                alpha
-              : 0;
-          b.data[i + c] =
-            255 *
-            (blendSpace === 'linear' ? linearToSrgb(clamp(encoded)) : encoded);
-        }
-        b.data[i + 3] = alpha * 255;
+        const result = compositePixel(
+          [b.data[i] / 255, b.data[i + 1] / 255, b.data[i + 2] / 255, ba],
+          [s.data[i] / 255, s.data[i + 1] / 255, s.data[i + 2] / 255, sa],
+          mode,
+          blendSpace,
+        );
+        for (let c = 0; c < 3; c++) b.data[i + c] = result[c] * 255;
+        b.data[i + 3] = result[3] * 255;
       }
       if (custom) target.putImageData(b, x, y);
       else sourceCtx.putImageData(s, x, y);
