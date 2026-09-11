@@ -210,5 +210,5 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Complete manual, shortcut map, format matrix, performance expectations, and privacy model.
 - [x] Migration and backward-compatibility policy.
 - [ ] Stable fixture pack and reproducible visual-regression suite.
-- [ ] Security review, dependency audit, contributor guide, issue templates, and release notes.
+- [x] Security review, dependency audit, contributor guide, issue templates, and release notes.
 - [ ] Independent professional-editor beta and release-candidate signoff.

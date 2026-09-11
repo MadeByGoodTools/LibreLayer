@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose an editing workflow or compatibility improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Editing need
+      description: What are you trying to accomplish, and where does the current workflow stop you?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Suggested workflow
+      description: Describe the controls, shortcuts, live preview, and expected undo behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Area
+      options:
+        - Layers and masks
+        - Painting and retouching
+        - Selections
+        - Color and adjustments
+        - Filters and transforms
+        - Import, export, or compatibility
+        - Performance and large files
+        - Accessibility and input
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: References and constraints
+      description: Include non-sensitive examples, formats, and browser or device constraints.

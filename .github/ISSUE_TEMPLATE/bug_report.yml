@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible LibreLayer problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach private images or project files. Report security issues privately through GitHub Security Advisories.
+  - type: input
+    id: version
+    attributes:
+      label: LibreLayer version
+      placeholder: Published URL or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and operating system
+      placeholder: Chrome 140 on Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the document type, tool, settings, and exact sequence.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: dropdown
+    id: recovery
+    attributes:
+      label: Did undo, recovery, or reopening work?
+      options:
+        - Yes
+        - No
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add non-sensitive screenshots or a minimal synthetic fixture if useful.
