@@ -199,6 +199,7 @@ import {
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
 import { Histogram } from '@/components/histogram';
+import { LevelsControl } from '@/components/levels-control';
 import { ToneCurve } from '@/components/tone-curve';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
 import {
@@ -12173,6 +12174,24 @@ export default function Home() {
                                 <Histogram
                                   sourceCanvas={displayRef.current}
                                   revision={layers}
+                                />
+                                <LevelsControl
+                                  black={Number(
+                                    active.precisionAdjustment?.levelsBlack ??
+                                      0,
+                                  )}
+                                  gamma={Number(
+                                    active.precisionAdjustment?.levelsGamma ??
+                                      1,
+                                  )}
+                                  white={Number(
+                                    active.precisionAdjustment?.levelsWhite ??
+                                      255,
+                                  )}
+                                  onChange={updatePrecisionAdjustment}
+                                  onCommit={() =>
+                                    snapshot('Input levels adjustment')
+                                  }
                                 />
                                 <p className="precision-adjustment-note">
                                   Combined floating-point recipe · editable

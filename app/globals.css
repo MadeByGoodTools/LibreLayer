@@ -969,6 +969,76 @@ button {
 .histogram-clipping .warning {
   color: #ffbd69;
 }
+.levels-control {
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px 10px;
+  border: 1px solid #393c43;
+  border-radius: 6px;
+  background: #17191d;
+}
+.levels-heading,
+.levels-values {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #aeb3bd;
+  font-size: 11px;
+}
+.levels-heading strong {
+  color: #eff1f4;
+  font-size: 13px;
+}
+.levels-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.levels-track {
+  position: relative;
+  height: 25px;
+  margin: 0 7px;
+  border: 1px solid #454851;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #050505, #fff);
+  touch-action: none;
+}
+.levels-track button {
+  position: absolute;
+  bottom: -9px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 2px solid #e5e8ee;
+  background: #121419;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+.levels-track button.levelsGamma {
+  border-color: #8eb4ff;
+  background: #618ee4;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+.levels-track button.levelsWhite {
+  border-color: #22252b;
+  background: #f4f5f7;
+}
+.levels-track button:hover,
+.levels-track button:focus,
+.levels-track button.dragging {
+  outline: none;
+  filter: drop-shadow(0 0 4px rgb(117 165 255 / 0.9));
+}
+.levels-values {
+  padding: 0 1px;
+  color: #d5d8df;
+  font-variant-numeric: tabular-nums;
+}
+.levels-values span:nth-child(2) {
+  color: #a9c5ff;
+}
 .tone-curve-editor {
   display: grid;
   gap: 7px;
