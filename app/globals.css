@@ -1133,6 +1133,38 @@ button {
   border-radius: 4px;
   background: transparent;
 }
+
+.color-wheel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+}
+
+.grade-wheel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.grade-wheel label {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+}
+
+.grade-wheel input[type='color'] {
+  width: 42px;
+  height: 42px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  overflow: hidden;
+  background: conic-gradient(#f66, #ff6, #6f6, #6ff, #66f, #f6f, #f66);
+}
 .advanced-color-controls > details {
   border: 1px solid #393c43;
   border-radius: 6px;

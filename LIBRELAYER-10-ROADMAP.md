@@ -61,8 +61,10 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Built-in Color Lookup library with four live, adjustable 3D looks.
 - [x] Tonal Shadows/Highlights recovery with independent range and color controls.
 - [x] Targeted Replace Color with fuzziness, HSL correction, and live amount.
-- [ ] Match Color, HDR toning, and perceptual vibrance.
-- [ ] Lift/gamma/gain wheels, waveform scale controls, and reference comparison.
+- [x] Browser-local Match Color from a chosen reference image with fade, luminance, intensity, and neutralization.
+- [x] Floating-point Reinhard/filmic HDR toning and skin-protected perceptual vibrance.
+- [x] Lift/gamma/gain color wheels with independent tonal levels.
+- [ ] Waveform scale controls and reference comparison.
 
 ## 4. Selections and masking
 

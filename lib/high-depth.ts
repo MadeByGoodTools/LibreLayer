@@ -81,6 +81,37 @@ export type HueSaturationRange = {
   saturation: number;
   lightness: number;
 };
+export type ColorStatistics = {
+  mean: [number, number, number];
+  deviation: [number, number, number];
+};
+export type MatchColor = {
+  sourceName: string;
+  source: ColorStatistics;
+  target: ColorStatistics;
+  amount: number;
+  luminance: number;
+  colorIntensity: number;
+  neutralize: boolean;
+};
+export type HdrToning = {
+  method: 'reinhard' | 'filmic';
+  strength: number;
+  exposure: number;
+  gamma: number;
+  shadows: number;
+  highlights: number;
+};
+export type PerceptualVibrance = {
+  amount: number;
+  protectSkin: number;
+};
+export type GradeWheel = { color: string; level: number };
+export type LiftGammaGain = {
+  lift: GradeWheel;
+  gamma: GradeWheel;
+  gain: GradeWheel;
+};
 
 export type PrecisionLayer = PrecisionImage & {
   opacity?: number;
@@ -131,6 +162,10 @@ export type HighDepthAdjustments = {
   hueSaturationRanges?: Partial<
     Record<HueSaturationRangeTarget, HueSaturationRange>
   >;
+  matchColor?: MatchColor;
+  hdrToning?: HdrToning;
+  perceptualVibrance?: PerceptualVibrance;
+  liftGammaGain?: LiftGammaGain;
 };
 
 export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
@@ -194,6 +229,20 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
     amount: 0,
   },
   hueSaturationRanges: {},
+  hdrToning: {
+    method: 'reinhard',
+    strength: 0,
+    exposure: 0,
+    gamma: 1,
+    shadows: 0,
+    highlights: 0,
+  },
+  perceptualVibrance: { amount: 0, protectSkin: 60 },
+  liftGammaGain: {
+    lift: { color: '#808080', level: 0 },
+    gamma: { color: '#808080', level: 0 },
+    gain: { color: '#808080', level: 0 },
+  },
 });
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -506,6 +555,179 @@ export const applyHueSaturationRanges = (
   return channels;
 };
 
+export const computeColorStatistics = (image: PrecisionImage) => {
+  if (image.data.length !== image.width * image.height * 4)
+    throw new Error('Color statistics require complete RGBA pixels.');
+  const mean = [0, 0, 0],
+    deviation = [0, 0, 0];
+  let weight = 0;
+  for (let index = 0; index < image.data.length; index += 4) {
+    const alpha = sample(image.data, index + 3);
+    if (alpha <= 0) continue;
+    weight += alpha;
+    for (let channel = 0; channel < 3; channel++)
+      mean[channel] += sample(image.data, index + channel) * alpha;
+  }
+  if (!weight)
+    return {
+      mean: [0, 0, 0],
+      deviation: [0, 0, 0],
+    } satisfies ColorStatistics;
+  for (let channel = 0; channel < 3; channel++) mean[channel] /= weight;
+  for (let index = 0; index < image.data.length; index += 4) {
+    const alpha = sample(image.data, index + 3);
+    if (alpha <= 0) continue;
+    for (let channel = 0; channel < 3; channel++) {
+      const difference = sample(image.data, index + channel) - mean[channel];
+      deviation[channel] += difference * difference * alpha;
+    }
+  }
+  return {
+    mean: mean as [number, number, number],
+    deviation: deviation.map((value) => Math.sqrt(value / weight)) as [
+      number,
+      number,
+      number,
+    ],
+  } satisfies ColorStatistics;
+};
+
+export const applyMatchColor = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: MatchColor,
+) => {
+  if (!adjustment || adjustment.amount <= 0) return [red, green, blue] as const;
+  const channels = [red, green, blue],
+    matched = channels.map((value, channel) => {
+      const targetDeviation = Math.max(
+          1 / 255,
+          adjustment.target.deviation[channel],
+        ),
+        standardized =
+          (value - adjustment.target.mean[channel]) / targetDeviation;
+      return (
+        adjustment.source.mean[channel] +
+        standardized * adjustment.source.deviation[channel]
+      );
+    }),
+    sourceLuma = matched[0] * 0.299 + matched[1] * 0.587 + matched[2] * 0.114,
+    originalLuma = red * 0.299 + green * 0.587 + blue * 0.114,
+    luminance = adjustment.luminance / 100,
+    intensity = adjustment.colorIntensity / 100;
+  for (let channel = 0; channel < 3; channel++)
+    matched[channel] =
+      originalLuma +
+      (sourceLuma - originalLuma) * luminance +
+      (matched[channel] - sourceLuma) * intensity;
+  if (adjustment.neutralize) {
+    const tint =
+      (adjustment.source.mean[0] +
+        adjustment.source.mean[1] +
+        adjustment.source.mean[2]) /
+      3;
+    for (let channel = 0; channel < 3; channel++)
+      matched[channel] -= (adjustment.source.mean[channel] - tint) * 0.5;
+  }
+  const amount = clamp(adjustment.amount / 100);
+  return channels.map((value, channel) =>
+    clamp(value + (matched[channel] - value) * amount),
+  ) as [number, number, number];
+};
+
+export const applyHdrToning = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: HdrToning,
+) => {
+  if (!adjustment || adjustment.strength <= 0)
+    return [red, green, blue] as const;
+  const exposure = 2 ** adjustment.exposure,
+    gamma = Math.max(0.1, adjustment.gamma),
+    amount = clamp(adjustment.strength / 100),
+    tone = (value: number) => {
+      const exposed = Math.max(0, value * exposure),
+        compressed =
+          adjustment.method === 'filmic'
+            ? (exposed * (2.51 * exposed + 0.03)) /
+              (exposed * (2.43 * exposed + 0.59) + 0.14)
+            : exposed / (1 + exposed),
+        gammaCorrected = Math.max(0, compressed) ** (1 / gamma),
+        shadowMask = 1 - smoothstep(0, 0.5, value),
+        highlightMask = smoothstep(0.5, 1, value);
+      return clamp(
+        gammaCorrected +
+          (adjustment.shadows / 100) * shadowMask * 0.25 +
+          (adjustment.highlights / 100) * highlightMask * 0.25,
+      );
+    };
+  return [red, green, blue].map(
+    (value) => value + (tone(value) - value) * amount,
+  ) as [number, number, number];
+};
+
+export const applyLiftGammaGain = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: LiftGammaGain,
+) => {
+  if (!adjustment) return [red, green, blue] as const;
+  let channels = [red, green, blue];
+  const tint = (wheel: GradeWheel) => {
+    const color = parseHexColor(wheel.color),
+      luma = color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114;
+    return color.map((value) => (value - luma) * 0.35);
+  };
+  const liftTint = tint(adjustment.lift),
+    gammaTint = tint(adjustment.gamma),
+    gainTint = tint(adjustment.gain),
+    lift = adjustment.lift.level / 100,
+    gamma = 2 ** (adjustment.gamma.level / 100),
+    gain = 2 ** (adjustment.gain.level / 100);
+  channels = channels.map((value, channel) =>
+    clamp(value + lift + liftTint[channel]),
+  );
+  channels = channels.map((value, channel) =>
+    clamp(value ** (1 / Math.max(0.1, gamma + gammaTint[channel]))),
+  );
+  channels = channels.map((value, channel) =>
+    clamp(value * Math.max(0, gain + gainTint[channel])),
+  );
+  return channels as [number, number, number];
+};
+
+export const applyPerceptualVibrance = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: PerceptualVibrance,
+) => {
+  if (!adjustment || adjustment.amount === 0)
+    return [red, green, blue] as const;
+  const maximum = Math.max(red, green, blue),
+    minimum = Math.min(red, green, blue),
+    chroma = maximum - minimum,
+    luma = 0.299 * red + 0.587 * green + 0.114 * blue,
+    redDominance = clamp((red - Math.max(green, blue)) * 4),
+    skinLuma =
+      smoothstep(0.15, 0.45, luma) * (1 - smoothstep(0.75, 0.95, luma)),
+    skinProtection =
+      1 - redDominance * skinLuma * clamp(adjustment.protectSkin / 100),
+    scale = Math.max(
+      0,
+      1 +
+        (adjustment.amount / 100) *
+          (adjustment.amount > 0 ? 1 - chroma : 1) *
+          skinProtection,
+    );
+  return [red, green, blue].map((value) =>
+    clamp(luma + (value - luma) * scale),
+  ) as [number, number, number];
+};
+
 /**
  * Apply a complete color correction recipe in one floating-point pass.
  * The input may be 8, 16 or 32-bit RGBA and the result stays Float32 until
@@ -568,7 +790,23 @@ export function adjustHighDepth(
           (recipe.hue !== 0 ||
             recipe.saturation !== 0 ||
             recipe.lightness !== 0),
-      );
+      ),
+    matchColor = settings.matchColor,
+    matchColorActive = !!matchColor && matchColor.amount > 0,
+    hdrToning = settings.hdrToning,
+    hdrToningActive = !!hdrToning && hdrToning.strength > 0,
+    perceptualVibrance = settings.perceptualVibrance,
+    perceptualVibranceActive =
+      !!perceptualVibrance && perceptualVibrance.amount !== 0,
+    liftGammaGain = settings.liftGammaGain,
+    liftGammaGainActive =
+      !!liftGammaGain &&
+      (liftGammaGain.lift.level !== 0 ||
+        liftGammaGain.lift.color !== '#808080' ||
+        liftGammaGain.gamma.level !== 0 ||
+        liftGammaGain.gamma.color !== '#808080' ||
+        liftGammaGain.gain.level !== 0 ||
+        liftGammaGain.gain.color !== '#808080');
   const masterLevelsActive =
     (settings.levelsBlack ?? 0) !== 0 ||
     (settings.levelsWhite ?? 255) !== 255 ||
@@ -702,6 +940,23 @@ export function adjustHighDepth(
 
     if (replaceColorActive)
       [red, green, blue] = applyReplaceColor(red, green, blue, replaceColor);
+
+    if (matchColorActive)
+      [red, green, blue] = applyMatchColor(red, green, blue, matchColor);
+
+    if (liftGammaGainActive)
+      [red, green, blue] = applyLiftGammaGain(red, green, blue, liftGammaGain);
+
+    if (hdrToningActive)
+      [red, green, blue] = applyHdrToning(red, green, blue, hdrToning);
+
+    if (perceptualVibranceActive)
+      [red, green, blue] = applyPerceptualVibrance(
+        red,
+        green,
+        blue,
+        perceptualVibrance,
+      );
 
     let luma = 0.299 * red + 0.587 * green + 0.114 * blue;
     const vibranceAmount = (settings.vibrance ?? 0) / 100;

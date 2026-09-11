@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   adjustHighDepth,
+  applyHdrToning,
   applyHueSaturationRanges,
+  applyLiftGammaGain,
+  applyMatchColor,
+  applyPerceptualVibrance,
   applyReplaceColor,
   applySelectiveColor,
   applyShadowsHighlights,
   compositeHighDepth,
+  computeColorStatistics,
   createDefaultHighDepthAdjustments,
   levelCurveValue,
   pointCurveValue,
@@ -336,6 +341,70 @@ void test('Hue and Saturation ranges affect only the chosen color family', () =>
   const blue = applyHueSaturationRanges(0, 0, 1, ranges);
   assert.ok(red[1] > red[0]);
   assert.deepEqual(blue, [0, 0, 1]);
+});
+
+void test('Match Color transfers reference statistics with adjustable fade', () => {
+  const source = computeColorStatistics({
+      width: 2,
+      height: 1,
+      data: new Float32Array([0.7, 0.5, 0.3, 1, 0.9, 0.7, 0.5, 1]),
+    }),
+    target = computeColorStatistics({
+      width: 2,
+      height: 1,
+      data: new Float32Array([0.1, 0.2, 0.4, 1, 0.3, 0.4, 0.6, 1]),
+    }),
+    matched = applyMatchColor(0.2, 0.3, 0.5, {
+      sourceName: 'reference.png',
+      source,
+      target,
+      amount: 100,
+      luminance: 100,
+      colorIntensity: 100,
+      neutralize: false,
+    });
+  assert.ok(matched[0] > 0.6);
+  assert.ok(matched[2] < 0.6);
+});
+
+void test('HDR toning compresses highlights and preserves bounded output', () => {
+  const toned = applyHdrToning(2, 1, 0.5, {
+    method: 'filmic',
+    strength: 100,
+    exposure: 0,
+    gamma: 1,
+    shadows: 0,
+    highlights: 0,
+  });
+  assert.ok(toned[0] <= 1 && toned[0] > toned[1]);
+  assert.ok(toned.every((value) => value >= 0 && value <= 1));
+});
+
+void test('Lift gamma gain wheels independently alter tonal response', () => {
+  const neutral = {
+      lift: { color: '#808080', level: 0 },
+      gamma: { color: '#808080', level: 0 },
+      gain: { color: '#808080', level: 0 },
+    },
+    lifted = applyLiftGammaGain(0.2, 0.4, 0.6, {
+      ...neutral,
+      lift: { color: '#808080', level: 20 },
+    }),
+    gained = applyLiftGammaGain(0.2, 0.4, 0.6, {
+      ...neutral,
+      gain: { color: '#808080', level: 30 },
+    });
+  assert.ok(lifted[0] > 0.2 && lifted[2] > 0.6);
+  assert.ok(gained[0] > 0.2 && gained[2] > 0.6);
+});
+
+void test('Perceptual vibrance boosts muted color more than saturated color', () => {
+  const settings = { amount: 80, protectSkin: 0 },
+    muted = applyPerceptualVibrance(0.55, 0.45, 0.4, settings),
+    saturated = applyPerceptualVibrance(0.9, 0.1, 0.1, settings),
+    mutedScale = (Math.max(...muted) - Math.min(...muted)) / 0.15,
+    saturatedScale = (Math.max(...saturated) - Math.min(...saturated)) / 0.8;
+  assert.ok(mutedScale > saturatedScale);
 });
 
 void test('new adjustment defaults are a neutral full recipe', () => {

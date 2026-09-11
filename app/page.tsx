@@ -12361,6 +12361,7 @@ export default function Home() {
                                   adjustments={active.precisionAdjustment ?? {}}
                                   onChange={updatePrecisionAdjustment}
                                   onCommit={(label) => snapshot(label)}
+                                  sourceCanvas={displayRef.current}
                                 />
                                 {(
                                   [

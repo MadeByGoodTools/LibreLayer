@@ -1,16 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Slider } from '@/components/ui/slider';
-import type {
-  ChannelMixer,
-  GradientMap,
-  HighDepthAdjustments,
-  HueSaturationRangeTarget,
-  ReplaceColor,
-  SelectiveColor,
-  SelectiveColorTarget,
-  ShadowsHighlights,
+import {
+  computeColorStatistics,
+  type GradeWheel,
+  type HdrToning,
+  type LiftGammaGain,
+  type PerceptualVibrance,
+  type ChannelMixer,
+  type GradientMap,
+  type HighDepthAdjustments,
+  type HueSaturationRangeTarget,
+  type ReplaceColor,
+  type SelectiveColor,
+  type SelectiveColorTarget,
+  type ShadowsHighlights,
 } from '@/lib/high-depth';
 
 const identityMixer: ChannelMixer = {
@@ -40,6 +45,23 @@ const defaultReplaceColor: ReplaceColor = {
   lightness: 0,
   amount: 0,
 };
+const defaultHdrToning: HdrToning = {
+  method: 'reinhard',
+  strength: 0,
+  exposure: 0,
+  gamma: 1,
+  shadows: 0,
+  highlights: 0,
+};
+const defaultPerceptualVibrance: PerceptualVibrance = {
+  amount: 0,
+  protectSkin: 60,
+};
+const defaultLiftGammaGain: LiftGammaGain = {
+  lift: { color: '#808080', level: 0 },
+  gamma: { color: '#808080', level: 0 },
+  gain: { color: '#808080', level: 0 },
+};
 const emptyRecipe = { cyan: 0, magenta: 0, yellow: 0, black: 0 };
 const selectiveTargets: SelectiveColorTarget[] = [
   'reds',
@@ -59,6 +81,7 @@ export function AdvancedColorControls({
   adjustments,
   onChange,
   onCommit,
+  sourceCanvas,
 }: {
   adjustments: HighDepthAdjustments;
   onChange: (
@@ -66,7 +89,10 @@ export function AdvancedColorControls({
     value: HighDepthAdjustments[keyof HighDepthAdjustments],
   ) => void;
   onCommit: (label: string) => void;
+  sourceCanvas?: HTMLCanvasElement | null;
 }) {
+  const matchInput = useRef<HTMLInputElement>(null);
+  const [matchError, setMatchError] = useState('');
   const [output, setOutput] = useState<'red' | 'green' | 'blue'>('red');
   const [selectiveTarget, setSelectiveTarget] =
     useState<SelectiveColorTarget>('reds');
@@ -83,7 +109,12 @@ export function AdvancedColorControls({
       hue: 0,
       saturation: 0,
       lightness: 0,
-    };
+    },
+    hdrToning = adjustments.hdrToning ?? defaultHdrToning,
+    perceptualVibrance =
+      adjustments.perceptualVibrance ?? defaultPerceptualVibrance,
+    liftGammaGain = adjustments.liftGammaGain ?? defaultLiftGammaGain,
+    matchColor = adjustments.matchColor;
   const updateMixer = (input: keyof ChannelMixer['red'], value: number) =>
     onChange('channelMixer', {
       ...mixer,
@@ -110,6 +141,69 @@ export function AdvancedColorControls({
       ...hueRanges,
       [hueRange]: { ...hueRangeRecipe, [key]: value },
     });
+  const updateHdrToning = (patch: Partial<HdrToning>) =>
+    onChange('hdrToning', { ...hdrToning, ...patch });
+  const updatePerceptualVibrance = (patch: Partial<PerceptualVibrance>) =>
+    onChange('perceptualVibrance', { ...perceptualVibrance, ...patch });
+  const updateWheel = (
+    wheel: keyof LiftGammaGain,
+    patch: Partial<GradeWheel>,
+  ) =>
+    onChange('liftGammaGain', {
+      ...liftGammaGain,
+      [wheel]: { ...liftGammaGain[wheel], ...patch },
+    });
+  const loadMatchReference = async (file?: File) => {
+    if (!file || !sourceCanvas) return;
+    setMatchError('');
+    try {
+      const bitmap = await createImageBitmap(file),
+        scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height)),
+        canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) throw new Error('Reference image could not be analyzed.');
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const source = computeColorStatistics({
+          width: canvas.width,
+          height: canvas.height,
+          data: context.getImageData(0, 0, canvas.width, canvas.height).data,
+        }),
+        targetContext = sourceCanvas.getContext('2d', {
+          willReadFrequently: true,
+        });
+      if (!targetContext)
+        throw new Error('Current image could not be analyzed.');
+      const target = computeColorStatistics({
+        width: sourceCanvas.width,
+        height: sourceCanvas.height,
+        data: targetContext.getImageData(
+          0,
+          0,
+          sourceCanvas.width,
+          sourceCanvas.height,
+        ).data,
+      });
+      onChange('matchColor', {
+        sourceName: file.name,
+        source,
+        target,
+        amount: 100,
+        luminance: 100,
+        colorIntensity: 100,
+        neutralize: false,
+      });
+      onCommit(`Matched color from ${file.name}`);
+    } catch (reason) {
+      setMatchError(
+        reason instanceof Error ? reason.message : 'Could not match color.',
+      );
+    } finally {
+      if (matchInput.current) matchInput.current.value = '';
+    }
+  };
   return (
     <div className="advanced-color-controls">
       <details>
@@ -408,6 +502,201 @@ export function AdvancedColorControls({
                   updateReplaceColor({ [key]: sliderNumber(value) })
                 }
                 onValueCommitted={() => onCommit(`Replace Color ${label}`)}
+              />
+            </div>
+          ))}
+        </div>
+      </details>
+      <details>
+        <summary>Match Color</summary>
+        <div className="advanced-color-body">
+          <input
+            ref={matchInput}
+            className="sr-only"
+            type="file"
+            accept="image/*"
+            onChange={(event) =>
+              void loadMatchReference(event.target.files?.[0])
+            }
+          />
+          <button
+            className="color-reset-button"
+            disabled={!sourceCanvas}
+            onClick={() => matchInput.current?.click()}
+          >
+            {matchColor
+              ? `Reference: ${matchColor.sourceName}`
+              : 'Choose reference image…'}
+          </button>
+          {matchColor && (
+            <>
+              {(
+                [
+                  ['Amount', 'amount', 0, 100],
+                  ['Luminance', 'luminance', 0, 200],
+                  ['Color intensity', 'colorIntensity', 0, 200],
+                ] as const
+              ).map(([label, key, min, max]) => (
+                <div className="advanced-color-slider" key={key}>
+                  <label>
+                    {label} <span>{matchColor[key]}%</span>
+                  </label>
+                  <Slider
+                    aria-label={`Match Color ${label}`}
+                    min={min}
+                    max={max}
+                    step={1}
+                    value={matchColor[key]}
+                    onValueChange={(value) =>
+                      onChange('matchColor', {
+                        ...matchColor,
+                        [key]: sliderNumber(value),
+                      })
+                    }
+                    onValueCommitted={() => onCommit(`Match Color ${label}`)}
+                  />
+                </div>
+              ))}
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={matchColor.neutralize}
+                  onChange={(event) => {
+                    onChange('matchColor', {
+                      ...matchColor,
+                      neutralize: event.target.checked,
+                    });
+                    onCommit('Match Color neutralize');
+                  }}
+                />{' '}
+                Neutralize color cast
+              </label>
+              <button
+                className="color-reset-button"
+                onClick={() => {
+                  onChange('matchColor', undefined);
+                  onCommit('Removed Match Color');
+                }}
+              >
+                Remove match
+              </button>
+            </>
+          )}
+          {matchError && (
+            <p className="lut-error" role="alert">
+              {matchError}
+            </p>
+          )}
+        </div>
+      </details>
+      <details>
+        <summary>Lift / Gamma / Gain</summary>
+        <div className="color-wheel-grid">
+          {(['lift', 'gamma', 'gain'] as const).map((wheel) => (
+            <div className="grade-wheel" key={wheel}>
+              <label>
+                <span>{wheel[0].toUpperCase() + wheel.slice(1)}</span>
+                <input
+                  aria-label={`${wheel} color wheel`}
+                  type="color"
+                  value={liftGammaGain[wheel].color}
+                  onChange={(event) =>
+                    updateWheel(wheel, { color: event.target.value })
+                  }
+                  onBlur={() => onCommit(`${wheel} color wheel`)}
+                />
+              </label>
+              <span>{liftGammaGain[wheel].level}</span>
+              <Slider
+                aria-label={`${wheel} level`}
+                min={-100}
+                max={100}
+                step={1}
+                value={liftGammaGain[wheel].level}
+                onValueChange={(value) =>
+                  updateWheel(wheel, { level: sliderNumber(value) })
+                }
+                onValueCommitted={() => onCommit(`${wheel} level`)}
+              />
+            </div>
+          ))}
+        </div>
+      </details>
+      <details>
+        <summary>HDR Toning</summary>
+        <div className="advanced-color-body">
+          <label className="selective-color-target">
+            Method
+            <select
+              value={hdrToning.method}
+              onChange={(event) => {
+                updateHdrToning({
+                  method: event.target.value as HdrToning['method'],
+                });
+                onCommit('HDR toning method');
+              }}
+            >
+              <option value="reinhard">Reinhard</option>
+              <option value="filmic">Filmic</option>
+            </select>
+          </label>
+          {(
+            [
+              ['Strength', 'strength', 0, 100, 1, '%'],
+              ['Exposure', 'exposure', -5, 5, 0.1, ' EV'],
+              ['Gamma', 'gamma', 0.1, 3, 0.05, ''],
+              ['Shadows', 'shadows', -100, 100, 1, '%'],
+              ['Highlights', 'highlights', -100, 100, 1, '%'],
+            ] as const
+          ).map(([label, key, min, max, step, suffix]) => (
+            <div className="advanced-color-slider" key={key}>
+              <label>
+                {label}{' '}
+                <span>
+                  {hdrToning[key]}
+                  {suffix}
+                </span>
+              </label>
+              <Slider
+                aria-label={`HDR Toning ${label}`}
+                min={min}
+                max={max}
+                step={step}
+                value={hdrToning[key]}
+                onValueChange={(value) =>
+                  updateHdrToning({ [key]: sliderNumber(value) })
+                }
+                onValueCommitted={() => onCommit(`HDR Toning ${label}`)}
+              />
+            </div>
+          ))}
+        </div>
+      </details>
+      <details>
+        <summary>Perceptual Vibrance</summary>
+        <div className="advanced-color-body">
+          {(
+            [
+              ['Amount', 'amount', -100, 100],
+              ['Protect skin tones', 'protectSkin', 0, 100],
+            ] as const
+          ).map(([label, key, min, max]) => (
+            <div className="advanced-color-slider" key={key}>
+              <label>
+                {label} <span>{perceptualVibrance[key]}%</span>
+              </label>
+              <Slider
+                aria-label={`Perceptual Vibrance ${label}`}
+                min={min}
+                max={max}
+                step={1}
+                value={perceptualVibrance[key]}
+                onValueChange={(value) =>
+                  updatePerceptualVibrance({ [key]: sliderNumber(value) })
+                }
+                onValueCommitted={() =>
+                  onCommit(`Perceptual Vibrance ${label}`)
+                }
               />
             </div>
           ))}
