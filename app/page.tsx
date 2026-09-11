@@ -704,16 +704,7 @@ const transformRasterPixels = (
 ) => {
   if (mode === 'content-aware-scale') return;
   remapRaster(canvas, (x, y, w, h) =>
-    warpSourcePoint(
-      mode as WarpMode,
-      x,
-      y,
-      w,
-      h,
-      horizontal,
-      vertical,
-      preset,
-    ),
+    warpSourcePoint(mode as WarpMode, x, y, w, h, horizontal, vertical, preset),
   );
 };
 
@@ -1362,7 +1353,32 @@ export default function Home() {
       useState<EditorPreferences>(defaultPreferences),
     [settingsOpen, setSettingsOpen] = useState(false),
     [panelsHidden, setPanelsHidden] = useState(false),
-    [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+    [commandPaletteOpen, setCommandPaletteOpen] = useState(false),
+    [contextMenu, setContextMenu] = useState<{
+      kind: 'canvas' | 'document' | 'layer';
+      x: number;
+      y: number;
+      id?: string;
+    } | null>(null);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null),
+      onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') close();
+      };
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
   const menuCommands = useRef(
     new Map<string, { name: string; shortcut: string; action: () => void }>(),
   );
@@ -3016,6 +3032,33 @@ export default function Home() {
     }
     setTimeout(() => recoveryTick.current(), 0);
   };
+  const closeOtherDocuments = (keepId: string) => {
+    if (documents.length < 2) return;
+    persistActiveDocument();
+    const closing = documents.filter((item) => item.id !== keepId),
+      unsaved = closing.filter(
+        (item) => !documentStoreRef.current.get(item.id)?.saved,
+      );
+    if (
+      unsaved.length &&
+      !window.confirm(
+        `Close ${closing.length} other document${closing.length === 1 ? '' : 's'}? ${unsaved.length} ${unsaved.length === 1 ? 'has' : 'have'} unsaved changes.`,
+      )
+    )
+      return;
+    const keep = documentStoreRef.current.get(keepId);
+    if (!keep) return;
+    for (const item of closing) {
+      documentStoreRef.current.delete(item.id);
+      void deleteRecovery(item.id);
+    }
+    setDocuments([{ id: keep.id, name: keep.name, saved: keep.saved }]);
+    if (keepId !== activeDocumentRef.current) loadDocument(keep);
+    setStatus(
+      `${closing.length} other document${closing.length === 1 ? '' : 's'} closed`,
+    );
+    setTimeout(() => recoveryTick.current(), 0);
+  };
   const renameDocument = (id: string) => {
     if (id === activeDocumentRef.current) persistActiveDocument();
     const current = documentStoreRef.current.get(id),
@@ -3374,6 +3417,7 @@ export default function Home() {
     };
   };
   const begin = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0) return;
     const p = point(e),
       meta = selected();
     if (
@@ -11634,7 +11678,7 @@ export default function Home() {
           />
         </div>
       </header>
-      <section className="options-bar">
+      <section className="options-bar" aria-label="Contextual task bar">
         <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
           Workspace & presets
         </Button>
@@ -11642,6 +11686,16 @@ export default function Home() {
           {tool === 'brush' && paintMode === 'pencil'
             ? 'Pencil'
             : toolItems.find((x) => x.id === tool)?.label}
+        </span>
+        <span
+          className="contextual-subject"
+          title="The contextual task bar follows the active tool, layer, mask, and selection"
+        >
+          {selectedIds.length > 1
+            ? `${selectedIds.length} layers`
+            : (active?.name ?? 'No active layer')}
+          {' · '}
+          {editing === 'mask' ? 'Mask' : selection ? 'Selection' : 'Canvas'}
         </span>
         {[
           'brush',
@@ -13218,6 +13272,17 @@ export default function Home() {
                     ? 'document-tab active'
                     : 'document-tab'
                 }
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  if (item.id !== activeDocumentRef.current)
+                    switchDocument(item.id);
+                  setContextMenu({
+                    kind: 'document',
+                    id: item.id,
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
               >
                 <button
                   className="tab-main"
@@ -13278,6 +13343,14 @@ export default function Home() {
               onPointerMove={move}
               onPointerUp={end}
               onPointerCancel={end}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({
+                  kind: 'canvas',
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
               onDoubleClick={() => {
                 if (tool === 'lasso' || tool === 'path') {
                   polygonDraft.current = polygonDraft.current.slice(0, -1);
@@ -13659,6 +13732,17 @@ export default function Home() {
                             }}
                             className={`${selectedIds.includes(layer.id) ? 'layer-row selected' : 'layer-row'}${layer.parentId ? ' child-layer' : ''}`}
                             onClick={(e) => clickLayer(layer.id, e)}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              if (!selectedIdsRef.current.includes(layer.id))
+                                select(layer.id);
+                              setContextMenu({
+                                kind: 'layer',
+                                id: layer.id,
+                                x: event.clientX,
+                                y: event.clientY,
+                              });
+                            }}
                           >
                             <input
                               type="checkbox"
@@ -16524,6 +16608,346 @@ export default function Home() {
           </CommandList>
         </Command>
       </CommandDialog>
+      {contextMenu && (
+        <div
+          className="editor-context-menu"
+          role="menu"
+          aria-label={`${contextMenu.kind} actions`}
+          style={{
+            left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 244)),
+            top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 390)),
+          }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            event.preventDefault();
+            const items = [
+                ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  'button:not(:disabled)',
+                ),
+              ],
+              current = items.indexOf(
+                document.activeElement as HTMLButtonElement,
+              ),
+              direction = event.key === 'ArrowDown' ? 1 : -1;
+            items[(current + direction + items.length) % items.length]?.focus();
+          }}
+        >
+          <div className="editor-context-heading">
+            {contextMenu.kind === 'document'
+              ? fileName
+              : contextMenu.kind === 'layer'
+                ? selectedIds.length > 1
+                  ? `${selectedIds.length} selected layers`
+                  : (active?.name ?? 'Layer')
+                : `${toolItems.find((item) => item.id === tool)?.label ?? 'Canvas'} tool`}
+          </div>
+          {contextMenu.kind === 'document' && (
+            <>
+              <button
+                autoFocus
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  renameDocument(contextMenu.id!);
+                }}
+              >
+                Rename document…
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  void saveProject();
+                }}
+              >
+                Save layered project… <kbd>⌘S</kbd>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  showExport();
+                }}
+              >
+                Export image…
+              </button>
+              <div className="editor-context-separator" />
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  makeBlankDocument();
+                }}
+              >
+                New document… <kbd>⌘N</kbd>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  closeOtherDocuments(contextMenu.id!);
+                }}
+                disabled={documents.length < 2}
+              >
+                Close other documents
+              </button>
+              <button
+                className="destructive"
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  closeDocument(contextMenu.id!);
+                }}
+              >
+                Close document
+              </button>
+            </>
+          )}
+          {contextMenu.kind === 'canvas' && (
+            <>
+              <button
+                autoFocus
+                role="menuitem"
+                disabled={historyIndex.current <= 0}
+                onClick={() => {
+                  setContextMenu(null);
+                  undo();
+                }}
+              >
+                Undo <kbd>⌘Z</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={historyIndex.current >= historyRef.current.length - 1}
+                onClick={() => {
+                  setContextMenu(null);
+                  redo();
+                }}
+              >
+                Redo <kbd>⇧⌘Z</kbd>
+              </button>
+              <div className="editor-context-separator" />
+              <button
+                role="menuitem"
+                disabled={!active || isLocked(active.id)}
+                onClick={() => {
+                  setContextMenu(null);
+                  cutSelection();
+                }}
+              >
+                Cut <kbd>⌘X</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active}
+                onClick={() => {
+                  setContextMenu(null);
+                  copySelection();
+                }}
+              >
+                Copy <kbd>⌘C</kbd>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  pasteClipboard();
+                }}
+              >
+                Paste as new layer <kbd>⌘V</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active || isLocked(active.id)}
+                onClick={() => {
+                  setContextMenu(null);
+                  startFreeTransform();
+                }}
+              >
+                Free Transform <kbd>⌘T</kbd>
+              </button>
+              <div className="editor-context-separator" />
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  selectAll();
+                }}
+              >
+                Select all <kbd>⌘A</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!selection}
+                onClick={() => {
+                  setContextMenu(null);
+                  clearSelection();
+                }}
+              >
+                Deselect <kbd>⌘D</kbd>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  viewportRef.current?.fit();
+                }}
+              >
+                Fit on screen <kbd>⌘0</kbd>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  viewportRef.current?.zoomAt(100);
+                }}
+              >
+                Actual size <kbd>⌘1</kbd>
+              </button>
+            </>
+          )}
+          {contextMenu.kind === 'layer' && (
+            <>
+              <button
+                autoFocus
+                role="menuitem"
+                disabled={!active || isLocked(active.id)}
+                onClick={() => {
+                  setContextMenu(null);
+                  renameLayer();
+                }}
+              >
+                Rename layer…
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active}
+                onClick={() => {
+                  setContextMenu(null);
+                  duplicate();
+                }}
+              >
+                Duplicate {selectedIds.length > 1 ? 'layers' : 'layer'}{' '}
+                <kbd>⌘J</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active}
+                onClick={() => {
+                  setContextMenu(null);
+                  copySelectedLayers();
+                }}
+              >
+                Copy {selectedIds.length > 1 ? 'layers' : 'layer'}
+              </button>
+              <button
+                role="menuitem"
+                disabled={!layerClipboardRef.current}
+                onClick={() => {
+                  setContextMenu(null);
+                  pasteSelectedLayers();
+                }}
+              >
+                Paste layers
+              </button>
+              <div className="editor-context-separator" />
+              <button
+                role="menuitem"
+                disabled={
+                  !active || active.kind === 'group' || isLocked(active.id)
+                }
+                onClick={() => {
+                  setContextMenu(null);
+                  if (active?.hasMask) removeMask();
+                  else addMask();
+                }}
+              >
+                {active?.hasMask ? 'Delete layer mask' : 'Add layer mask'}
+              </button>
+              <button
+                role="menuitem"
+                disabled={
+                  !active ||
+                  active.kind === 'group' ||
+                  active.kind === 'adjustment' ||
+                  isLocked(active.id)
+                }
+                onClick={() => {
+                  setContextMenu(null);
+                  toggleClipping();
+                }}
+              >
+                {active?.clipping
+                  ? 'Release clipping mask'
+                  : 'Create clipping mask'}{' '}
+                <kbd>⌥⌘G</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active}
+                onClick={() => {
+                  setContextMenu(null);
+                  if (active)
+                    patchLayer(
+                      active.id,
+                      { visible: !active.visible },
+                      'Layer visibility',
+                    );
+                }}
+              >
+                {active?.visible ? 'Hide layer' : 'Show layer'}
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active}
+                onClick={() => {
+                  setContextMenu(null);
+                  if (active)
+                    patchLayer(
+                      active.id,
+                      { locked: !active.locked },
+                      active.locked ? 'Unlock layer' : 'Lock layer',
+                    );
+                }}
+              >
+                {active?.locked ? 'Unlock layer' : 'Lock layer'}
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setContextMenu(null);
+                  createGroup();
+                }}
+              >
+                New layer group <kbd>⌘G</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!active || active.kind === 'group'}
+                onClick={() => {
+                  setContextMenu(null);
+                  mergeDown();
+                }}
+              >
+                Merge down <kbd>⌘E</kbd>
+              </button>
+              <div className="editor-context-separator" />
+              <button
+                className="destructive"
+                role="menuitem"
+                disabled={!active || isLocked(active.id)}
+                onClick={() => {
+                  setContextMenu(null);
+                  removeLayer();
+                }}
+              >
+                Delete {selectedIds.length > 1 ? 'layers' : 'layer'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <Dialog
         open={recoveries !== null}
         onOpenChange={(open) => {

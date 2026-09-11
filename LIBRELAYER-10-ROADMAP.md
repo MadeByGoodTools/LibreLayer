@@ -23,7 +23,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Multiple document tabs, fit, 100%, rotation, rulers, guides, and grid.
 - [x] Dock, tab-stack, resize, float, collapse, and solo every Layers, Properties, Channels, Paths, and History panel.
 - [x] Save, rename, import, export, validate, and reset complete workspace layouts.
-- [ ] Contextual task bar and complete right-click menus.
+- [x] Contextual task bar and complete right-click menus.
 - [ ] Scrubby labels, direct numeric entry, per-control reset, and fine/coarse modifiers.
 - [ ] Configurable toolbar and tool groups.
 - [ ] Interface scaling, light, dark, and high-contrast themes.
