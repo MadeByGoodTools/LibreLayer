@@ -208,6 +208,7 @@ import {
   type RawLinearImage,
 } from '@/lib/raw-develop';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
+import { adjustHighDepth, precisionToEncodedRgba } from '@/lib/high-depth';
 const Mask = Focus;
 
 type Tool =
@@ -526,101 +527,16 @@ const applyAdvancedPixels = (
 ) => {
   const filtered = makeCanvas(canvas.width, canvas.height),
     fc = filtered.getContext('2d')!;
-  fc.filter = `brightness(${100 + options.brightness}%) contrast(${100 + options.contrast}%) saturate(${100 + options.saturation}%) hue-rotate(${options.hue}deg)`;
   fc.drawImage(canvas, 0, 0);
-  fc.filter = 'none';
-  if (
-    options.vibrance ||
-    options.blackWhite ||
-    (options.levelsBlack ?? 0) > 0 ||
-    (options.levelsWhite ?? 255) < 255 ||
-    (options.levelsGamma ?? 1) !== 1 ||
-    options.curveShadows ||
-    options.curveHighlights ||
-    options.exposure ||
-    (options.exposureGamma ?? 1) !== 1 ||
-    options.balanceCyanRed ||
-    options.balanceMagentaGreen ||
-    options.balanceYellowBlue ||
-    options.photoFilterDensity
-  ) {
-    for (let y = 0; y < canvas.height; y += 256)
-      for (let x = 0; x < canvas.width; x += 256) {
-        const w = Math.min(256, canvas.width - x),
-          h = Math.min(256, canvas.height - y),
-          data = fc.getImageData(x, y, w, h);
-        for (let i = 0; i < data.data.length; i += 4) {
-          let r = data.data[i],
-            g = data.data[i + 1],
-            b = data.data[i + 2];
-          const black = Math.min(options.levelsBlack ?? 0, 254),
-            white = Math.max(options.levelsWhite ?? 255, black + 1),
-            levelGamma = options.levelsGamma ?? 1,
-            exposureScale = 2 ** (options.exposure ?? 0),
-            exposureGamma = options.exposureGamma ?? 1,
-            remap = (value: number) => {
-              let normalized = Math.max(
-                0,
-                Math.min(1, (value - black) / (white - black)),
-              );
-              normalized = normalized ** (1 / levelGamma);
-              const shadowWeight = 1 - normalized,
-                highlightWeight = normalized;
-              normalized +=
-                ((options.curveShadows ?? 0) / 100) *
-                  shadowWeight *
-                  normalized +
-                ((options.curveHighlights ?? 0) / 100) *
-                  highlightWeight *
-                  (1 - normalized);
-              normalized =
-                Math.max(0, Math.min(1, normalized * exposureScale)) **
-                (1 / exposureGamma);
-              return normalized * 255;
-            };
-          r = remap(r);
-          g = remap(g);
-          b = remap(b);
-          r += ((options.balanceCyanRed ?? 0) / 100) * 64;
-          g += ((options.balanceMagentaGreen ?? 0) / 100) * 64;
-          b += ((options.balanceYellowBlue ?? 0) / 100) * 64;
-          if (options.photoFilterDensity) {
-            const filter = options.photoFilter ?? '#ec8a32',
-              density = (options.photoFilterDensity ?? 0) / 100,
-              fr = parseInt(filter.slice(1, 3), 16),
-              fg = parseInt(filter.slice(3, 5), 16),
-              fb = parseInt(filter.slice(5, 7), 16);
-            r = r * (1 - density) + fr * density;
-            g = g * (1 - density) + fg * density;
-            b = b * (1 - density) + fb * density;
-          }
-          if (options.vibrance) {
-            const max = Math.max(r, g, b),
-              avg = (r + g + b) / 3,
-              amount = (options.vibrance / 100) * (1 - (max - avg) / 255);
-            r = avg + (r - avg) * (1 + amount);
-            g = avg + (g - avg) * (1 + amount);
-            b = avg + (b - avg) * (1 + amount);
-          }
-          if (options.blackWhite) {
-            const gray = Math.max(
-              0,
-              Math.min(
-                255,
-                (r * options.redMix) / 100 +
-                  (g * options.greenMix) / 100 +
-                  (b * options.blueMix) / 100,
-              ),
-            );
-            r = g = b = gray;
-          }
-          data.data[i] = Math.max(0, Math.min(255, r));
-          data.data[i + 1] = Math.max(0, Math.min(255, g));
-          data.data[i + 2] = Math.max(0, Math.min(255, b));
-        }
-        fc.putImageData(data, x, y);
-      }
-  }
+  for (let y = 0; y < canvas.height; y += 256)
+    for (let x = 0; x < canvas.width; x += 256) {
+      const width = Math.min(256, canvas.width - x),
+        height = Math.min(256, canvas.height - y),
+        tile = fc.getImageData(x, y, width, height),
+        adjusted = adjustHighDepth({ width, height, data: tile.data }, options);
+      tile.data.set(precisionToEncodedRgba({ width, height, data: adjusted }));
+      fc.putImageData(tile, x, y);
+    }
   let output = filtered;
   if (options.blurMode !== 'none' && options.blurRadius > 0) {
     output = makeCanvas(canvas.width, canvas.height);
@@ -4694,7 +4610,9 @@ export default function Home() {
     ].filter(Boolean);
     snapshot(labels.join(' + ') || 'Adjustments');
     render();
-    setStatus(`${labels.join(', ') || 'Adjustments'} applied`);
+    setStatus(
+      `${labels.join(', ') || 'Adjustments'} applied in one tiled floating-point pass`,
+    );
   };
   const applyLayerStudio = (operation: LayerStudioOperation) => {
     if (operation.kind === 'effects') {

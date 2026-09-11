@@ -19,6 +19,30 @@ export type PrecisionLayer = PrecisionImage & {
   mask?: PrecisionPixels;
 };
 
+export type HighDepthAdjustments = {
+  brightness?: number;
+  contrast?: number;
+  hue?: number;
+  saturation?: number;
+  vibrance?: number;
+  blackWhite?: boolean;
+  redMix?: number;
+  greenMix?: number;
+  blueMix?: number;
+  levelsBlack?: number;
+  levelsWhite?: number;
+  levelsGamma?: number;
+  curveShadows?: number;
+  curveHighlights?: number;
+  exposure?: number;
+  exposureGamma?: number;
+  balanceCyanRed?: number;
+  balanceMagentaGreen?: number;
+  balanceYellowBlue?: number;
+  photoFilter?: string;
+  photoFilterDensity?: number;
+};
+
 const clamp = (value: number, low = 0, high = 1) =>
   Math.max(low, Math.min(high, value));
 
@@ -38,6 +62,131 @@ const blend = (backdrop: number, source: number, mode: PrecisionBlendMode) => {
   return source;
 };
 
+const hueRotate = (
+  red: number,
+  green: number,
+  blue: number,
+  degrees: number,
+) => {
+  if (!degrees) return [red, green, blue] as const;
+  const angle = (degrees * Math.PI) / 180;
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  return [
+    (0.213 + cosine * 0.787 - sine * 0.213) * red +
+      (0.715 - cosine * 0.715 - sine * 0.715) * green +
+      (0.072 - cosine * 0.072 + sine * 0.928) * blue,
+    (0.213 - cosine * 0.213 + sine * 0.143) * red +
+      (0.715 + cosine * 0.285 + sine * 0.14) * green +
+      (0.072 - cosine * 0.072 - sine * 0.283) * blue,
+    (0.213 - cosine * 0.213 - sine * 0.787) * red +
+      (0.715 - cosine * 0.715 + sine * 0.715) * green +
+      (0.072 + cosine * 0.928 + sine * 0.072) * blue,
+  ] as const;
+};
+
+const parseHexColor = (value = '#ec8a32') => {
+  const match = /^#([0-9a-f]{6})$/i.exec(value);
+  if (!match) return [236 / 255, 138 / 255, 50 / 255] as const;
+  return [0, 2, 4].map(
+    (offset) => parseInt(match[1].slice(offset, offset + 2), 16) / 255,
+  ) as [number, number, number];
+};
+
+/**
+ * Apply a complete color correction recipe in one floating-point pass.
+ * The input may be 8, 16 or 32-bit RGBA and the result stays Float32 until
+ * the caller explicitly converts it for an 8-bit browser canvas.
+ */
+export function adjustHighDepth(
+  image: PrecisionImage,
+  settings: HighDepthAdjustments,
+) {
+  if (image.data.length !== image.width * image.height * 4)
+    throw new Error(
+      'High-depth pixel data length does not match its dimensions.',
+    );
+  const output = new Float32Array(image.data.length);
+  const brightness = Math.max(0, 1 + (settings.brightness ?? 0) / 100);
+  const contrast = Math.max(0, 1 + (settings.contrast ?? 0) / 100);
+  const exposure = 2 ** (settings.exposure ?? 0);
+  const black = clamp((settings.levelsBlack ?? 0) / 255);
+  const white = Math.max(black + 1 / 255, (settings.levelsWhite ?? 255) / 255);
+  const levelGamma = Math.max(0.01, settings.levelsGamma ?? 1);
+  const exposureGamma = Math.max(0.01, settings.exposureGamma ?? 1);
+  const saturation = Math.max(0, 1 + (settings.saturation ?? 0) / 100);
+  const density = clamp((settings.photoFilterDensity ?? 0) / 100);
+  const filter = parseHexColor(settings.photoFilter);
+
+  for (let index = 0; index < image.data.length; index += 4) {
+    let red = sample(image.data, index) * brightness;
+    let green = sample(image.data, index + 1) * brightness;
+    let blue = sample(image.data, index + 2) * brightness;
+
+    const remap = (value: number) => {
+      let normalized = Math.max(0, (value - black) / (white - black));
+      normalized = normalized ** (1 / levelGamma);
+      const bounded = clamp(normalized);
+      normalized +=
+        ((settings.curveShadows ?? 0) / 100) * (1 - bounded) * normalized +
+        ((settings.curveHighlights ?? 0) / 100) * bounded * (1 - bounded);
+      normalized = Math.max(0, normalized * exposure) ** (1 / exposureGamma);
+      return (normalized - 0.5) * contrast + 0.5;
+    };
+    red = remap(red);
+    green = remap(green);
+    blue = remap(blue);
+
+    red += ((settings.balanceCyanRed ?? 0) / 100) * 0.25;
+    green += ((settings.balanceMagentaGreen ?? 0) / 100) * 0.25;
+    blue += ((settings.balanceYellowBlue ?? 0) / 100) * 0.25;
+    [red, green, blue] = hueRotate(red, green, blue, settings.hue ?? 0);
+
+    if (density) {
+      red = red * (1 - density) + filter[0] * density;
+      green = green * (1 - density) + filter[1] * density;
+      blue = blue * (1 - density) + filter[2] * density;
+    }
+
+    let luma = 0.299 * red + 0.587 * green + 0.114 * blue;
+    const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
+    const vibrance = 1 + ((settings.vibrance ?? 0) / 100) * (1 - clamp(chroma));
+    const colorScale = Math.max(0, saturation * vibrance);
+    red = luma + (red - luma) * colorScale;
+    green = luma + (green - luma) * colorScale;
+    blue = luma + (blue - luma) * colorScale;
+
+    if (settings.blackWhite) {
+      luma =
+        red * ((settings.redMix ?? 30) / 100) +
+        green * ((settings.greenMix ?? 59) / 100) +
+        blue * ((settings.blueMix ?? 11) / 100);
+      red = green = blue = luma;
+    }
+    output[index] = red;
+    output[index + 1] = green;
+    output[index + 2] = blue;
+    output[index + 3] = sample(image.data, index + 3);
+  }
+  return output;
+}
+
+/** Quantize display-referred float pixels once, after all corrections. */
+export function precisionToEncodedRgba(image: PrecisionImage) {
+  if (image.data.length !== image.width * image.height * 4)
+    throw new Error(
+      'High-depth pixel data length does not match its dimensions.',
+    );
+  const result = new Uint8ClampedArray(image.data.length);
+  for (let index = 0; index < image.data.length; index += 4) {
+    result[index] = Math.round(clamp(sample(image.data, index)) * 255);
+    result[index + 1] = Math.round(clamp(sample(image.data, index + 1)) * 255);
+    result[index + 2] = Math.round(clamp(sample(image.data, index + 2)) * 255);
+    result[index + 3] = Math.round(clamp(sample(image.data, index + 3)) * 255);
+  }
+  return result;
+}
+
 /**
  * Composite same-sized straight-alpha layers into a scene-linear float buffer.
  * RGB values above 1 remain available in normal mode for 32-bit HDR work.
@@ -47,13 +196,22 @@ export function compositeHighDepth(
   height: number,
   layers: PrecisionLayer[],
 ) {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1)
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1
+  )
     throw new Error('High-depth composite dimensions are invalid.');
   const pixels = width * height;
   const output = new Float32Array(pixels * 4);
   for (const layer of layers) {
     if (layer.visible === false) continue;
-    if (layer.width !== width || layer.height !== height || layer.data.length !== pixels * 4)
+    if (
+      layer.width !== width ||
+      layer.height !== height ||
+      layer.data.length !== pixels * 4
+    )
       throw new Error('High-depth layers must match the composite dimensions.');
     const opacity = clamp(layer.opacity ?? 1);
     const mode = layer.blend ?? 'normal';
@@ -88,7 +246,9 @@ const encodeSrgb = (value: number) => {
 /** Convert 8/16/32-bit RGBA pixels to an 8-bit browser display preview. */
 export function precisionToDisplayRgba(image: PrecisionImage) {
   if (image.data.length !== image.width * image.height * 4)
-    throw new Error('High-depth pixel data length does not match its dimensions.');
+    throw new Error(
+      'High-depth pixel data length does not match its dimensions.',
+    );
   if (image.data instanceof Uint8ClampedArray)
     return new Uint8ClampedArray(image.data);
   const result = new Uint8ClampedArray(image.data.length);

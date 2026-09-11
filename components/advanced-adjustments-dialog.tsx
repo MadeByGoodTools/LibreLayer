@@ -118,7 +118,8 @@ export function AdvancedAdjustmentsDialog({
         <DialogTitle>Adjustments and blur</DialogTitle>
         <DialogDescription>
           Apply tonal, color, black-and-white, or photographic blur corrections
-          to the active pixel layer. The result is one undoable edit.
+          to the active pixel layer. Color corrections run together in one tiled
+          floating-point pass, then write one undoable result.
         </DialogDescription>
         <div className="advanced-adjustments-grid">
           {slider('Brightness', 'brightness', -100, 100)}

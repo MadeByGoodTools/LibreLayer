@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  adjustHighDepth,
   compositeHighDepth,
+  precisionToEncodedRgba,
   precisionToDisplayRgba,
 } from '../lib/high-depth.ts';
 import { readSupportedPsdHeader } from '../lib/psd-header.ts';
@@ -35,7 +37,10 @@ void test('16-bit conversion retains values between adjacent 8-bit steps', () =>
     { width: 1, height: 1, data: b },
   ]);
   assert.notEqual(compositeA[0], compositeB[0]);
-  assert.equal(precisionToDisplayRgba({ width: 1, height: 1, data: a })[3], 255);
+  assert.equal(
+    precisionToDisplayRgba({ width: 1, height: 1, data: a })[3],
+    255,
+  );
 });
 
 void test('float compositing preserves HDR values before display tone mapping', () => {
@@ -70,4 +75,56 @@ void test('high-depth masks, opacity and multiply blend combine predictably', ()
   ]);
   assert.ok(output[0] < 0.8 && output[0] > 0.6);
   assert.equal(output[3], 1);
+});
+
+void test('neutral combined adjustment preserves every 16-bit step', () => {
+  const source = new Uint16Array([10000, 20000, 30000, 65535]);
+  const adjacent = new Uint16Array([10001, 20001, 30001, 65535]);
+  const adjusted = adjustHighDepth({ width: 1, height: 1, data: source }, {});
+  const adjustedAdjacent = adjustHighDepth(
+    { width: 1, height: 1, data: adjacent },
+    {},
+  );
+  assert.ok(Math.abs(adjusted[0] - source[0] / 65535) < 1e-7);
+  assert.notEqual(adjusted[0], adjustedAdjacent[0]);
+  assert.notEqual(adjusted[1], adjustedAdjacent[1]);
+  assert.notEqual(adjusted[2], adjustedAdjacent[2]);
+  assert.equal(adjusted[3], 1);
+});
+
+void test('combined exposure, contrast and color controls are deterministic', () => {
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Float32Array([0.2, 0.4, 0.7, 0.5]),
+    },
+    { exposure: 1, contrast: 20, saturation: 30, vibrance: 25 },
+  );
+  assert.ok(adjusted[2] > adjusted[1]);
+  assert.ok(adjusted[1] > adjusted[0]);
+  assert.equal(adjusted[3], 0.5);
+});
+
+void test('all color corrections quantize only at the display boundary', () => {
+  const source = new Uint8ClampedArray([64, 128, 192, 200]);
+  const adjusted = adjustHighDepth(
+    { width: 1, height: 1, data: source },
+    { exposure: 0.5, hue: 12, vibrance: 15, photoFilterDensity: 10 },
+  );
+  assert.ok(adjusted instanceof Float32Array);
+  const display = precisionToEncodedRgba({
+    width: 1,
+    height: 1,
+    data: adjusted,
+  });
+  assert.equal(display.length, 4);
+  assert.equal(display[3], 200);
+});
+
+void test('invalid high-depth adjustment buffers are rejected', () => {
+  assert.throws(
+    () => adjustHighDepth({ width: 2, height: 2, data: new Uint8Array(4) }, {}),
+    /length/,
+  );
 });
