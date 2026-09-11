@@ -2693,6 +2693,27 @@ button {
   color: #d8d9de;
   font-size: 10px;
 }
+.layer-effects-controls {
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid #414249;
+  border-radius: 6px;
+  background: #292a2f;
+}
+.layer-effects-controls > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #e5e6ea;
+  font-size: 11px;
+}
+.layer-effects-controls > div:first-child span {
+  color: #9fa2ab;
+  font-size: 10px;
+  text-transform: capitalize;
+}
 .layer-comps summary {
   cursor: pointer;
   color: #e5e6ea;

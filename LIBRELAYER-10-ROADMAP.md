@@ -35,7 +35,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Raster masks, vector masks, clipping, linking, locking, and nested groups.
 - [x] Opacity, fill, common blend modes, Blend If, and layer comps.
 - [x] Native editable solid-color, gradient, and pattern fill layers with masks, transforms, and persisted recipes.
-- [ ] Complete layer effects with contours, global light, scaling, and copy/paste.
+- [x] Editable layer effects with alpha contours, synchronized global light, independent scaling, and copy/paste/clear.
 - [ ] Reference-quality full blend-mode math in gamma and linear light.
 - [ ] Complete knockout, group isolation, and nested clipping behavior.
 - [x] Mask density, feather, live overlay, direct edge refinement, and independent position, rotation, and two-axis transforms.

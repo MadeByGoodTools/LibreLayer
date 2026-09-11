@@ -9,24 +9,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-export type LayerEffects = {
-  dropShadow: boolean;
-  innerShadow: boolean;
-  outerGlow: boolean;
-  innerGlow: boolean;
-  bevel: boolean;
-  satin: boolean;
-  colorOverlay: boolean;
-  gradientOverlay: boolean;
-  patternOverlay: boolean;
-  stroke: boolean;
-  color: string;
-  secondaryColor: string;
-  opacity: number;
-  size: number;
-  distance: number;
-};
+import {
+  defaultLayerEffects,
+  normalizeLayerEffects,
+  type LayerEffects,
+} from '@/lib/layer-effects';
+export type { LayerEffects } from '@/lib/layer-effects';
 
 export type LayerStudioOperation =
   | {
@@ -68,32 +56,16 @@ const effectLabels: [keyof LayerEffects, string][] = [
   ['stroke', 'Stroke'],
 ];
 
-const defaultEffects: LayerEffects = {
-  dropShadow: true,
-  innerShadow: false,
-  outerGlow: false,
-  innerGlow: false,
-  bevel: false,
-  satin: false,
-  colorOverlay: false,
-  gradientOverlay: false,
-  patternOverlay: false,
-  stroke: false,
-  color: '#000000',
-  secondaryColor: '#ffffff',
-  opacity: 55,
-  size: 12,
-  distance: 10,
-};
-
 export function LayerStudioDialog({
   open,
   onClose,
   onApply,
+  initialEffects,
 }: {
   open: boolean;
   onClose: () => void;
   onApply: (operation: LayerStudioOperation) => void;
+  initialEffects?: LayerEffects;
 }) {
   const [tab, setTab] = useState('adjustment');
   const [adjustment, setAdjustment] =
@@ -106,13 +78,14 @@ export function LayerStudioDialog({
   const [color, setColor] = useState('#173a63');
   const [color2, setColor2] = useState('#f6c453');
   const [masked, setMasked] = useState(false);
-  const [effects, setEffects] = useState(defaultEffects);
+  const [effects, setEffects] = useState(defaultLayerEffects);
   useEffect(() => {
     if (open) {
       setAmount(35);
       setSecondary(0);
+      setEffects(normalizeLayerEffects(initialEffects));
     }
-  }, [open]);
+  }, [initialEffects, open]);
   const apply = () => {
     if (tab === 'adjustment')
       onApply({
@@ -125,7 +98,7 @@ export function LayerStudioDialog({
       });
     else if (tab === 'fill')
       onApply({ kind: 'fill', mode: fill, color, color2, masked });
-    else onApply({ kind: 'effects', effects });
+    else onApply({ kind: 'effects', effects: normalizeLayerEffects(effects) });
     onClose();
   };
   return (
@@ -331,7 +304,70 @@ export function LayerStudioDialog({
                   />
                 </label>
               ))}
+              <label>
+                Light angle
+                <input
+                  aria-label="Layer effect light angle"
+                  type="number"
+                  min="-360"
+                  max="360"
+                  value={effects.angle}
+                  onChange={(event) =>
+                    setEffects((current) => ({
+                      ...current,
+                      angle: +event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Effect scale %
+                <input
+                  aria-label="Layer effect scale"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value={effects.scale}
+                  onChange={(event) =>
+                    setEffects((current) => ({
+                      ...current,
+                      scale: +event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Contour
+                <select
+                  aria-label="Layer effect contour"
+                  value={effects.contour}
+                  onChange={(event) =>
+                    setEffects((current) => ({
+                      ...current,
+                      contour: event.target.value as LayerEffects['contour'],
+                    }))
+                  }
+                >
+                  <option value="linear">Linear</option>
+                  <option value="smooth">Smooth</option>
+                  <option value="cone">Cone</option>
+                  <option value="ring">Ring</option>
+                </select>
+              </label>
             </div>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={effects.useGlobalLight}
+                onChange={(event) =>
+                  setEffects((current) => ({
+                    ...current,
+                    useGlobalLight: event.target.checked,
+                  }))
+                }
+              />
+              Use shared global light angle
+            </label>
           </TabsContent>
         </Tabs>
         <div className="dialog-actions">

@@ -229,6 +229,11 @@ import {
   type LuminosityRange,
 } from '@/lib/selection-ranges';
 import {
+  effectContourAlpha,
+  effectOffset,
+  normalizeLayerEffects,
+} from '@/lib/layer-effects';
+import {
   createPsdCompatibilityReport,
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
@@ -867,6 +872,24 @@ const positionedMaskAlpha = (
   alpha.width = alpha.height = 1;
   return placed;
 };
+const applyEffectContour = (
+  canvas: HTMLCanvasElement,
+  contour: LayerEffects['contour'],
+) => {
+  if (contour === 'linear') return;
+  const context = canvas.getContext('2d', { willReadFrequently: true })!;
+  for (let y = 0; y < canvas.height; y += 256)
+    for (let x = 0; x < canvas.width; x += 256) {
+      const width = Math.min(256, canvas.width - x),
+        height = Math.min(256, canvas.height - y),
+        image = context.getImageData(x, y, width, height);
+      for (let index = 3; index < image.data.length; index += 4)
+        image.data[index] = Math.round(
+          effectContourAlpha(image.data[index] / 255, contour) * 255,
+        );
+      context.putImageData(image, x, y);
+    }
+};
 const sliderNumber = (value: number | readonly number[]) =>
   Number(Array.isArray(value) ? value[0] : value);
 const nativeFillCanvas = (input: FillLayerRecipe, w: number, h: number) => {
@@ -1073,138 +1096,184 @@ const drawLayer = (
     pc.setTransform(1, 0, 0, 1, 0, 0);
     pc.drawImage(alpha, 0, 0);
     alpha.width = alpha.height = 1;
-    ctx.save();
-    ctx.globalAlpha = ((layer.opacity / 100) * (layer.fill ?? 100)) / 100;
-    ctx.globalCompositeOperation = layer.blend as GlobalCompositeOperation;
-    ctx.drawImage(placed, 0, 0);
-    ctx.restore();
+    drawLayer(
+      ctx,
+      {
+        ...layer,
+        kind: 'pixel',
+        fillLayer: undefined,
+        x: 0,
+        y: 0,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        hasMask: false,
+        vectorMask: undefined,
+        brightness: 100,
+        contrast: 100,
+        saturation: 100,
+        blur: 0,
+        colorGrade: undefined,
+        smartObject: undefined,
+      },
+      { pixels: placed },
+      w,
+      h,
+    );
     placed.width = placed.height = 1;
-  } else {
-    const effects = layer.effects;
-    if (effects) {
-      const drawEffectSource = (
+    if (source !== surface.pixels) source.width = source.height = 1;
+    return;
+  }
+  const effects = layer.effects
+    ? normalizeLayerEffects(layer.effects)
+    : undefined;
+  if (effects) {
+    const effectSize = (effects.size * effects.scale) / 100,
+      shadowOffset = effectOffset(
+        effects.angle,
+        effects.distance,
+        effects.scale,
+      ),
+      drawEffectSource = (
         effectColor: string,
         blur: number,
         offsetX: number,
         offsetY: number,
       ) => {
+        const rendered = makeCanvas(w, h),
+          renderedContext = rendered.getContext('2d')!;
+        renderedContext.shadowColor = effectColor;
+        renderedContext.shadowBlur = blur;
+        renderedContext.shadowOffsetX = offsetX;
+        renderedContext.shadowOffsetY = offsetY;
+        renderedContext.drawImage(source, 0, 0);
+        renderedContext.globalCompositeOperation = 'destination-out';
+        renderedContext.shadowColor = 'transparent';
+        renderedContext.shadowBlur = 0;
+        renderedContext.shadowOffsetX = 0;
+        renderedContext.shadowOffsetY = 0;
+        renderedContext.drawImage(source, 0, 0);
+        applyEffectContour(rendered, effects.contour);
         ctx.save();
         ctx.globalAlpha = (layer.opacity / 100) * (effects.opacity / 100);
-        ctx.shadowColor = effectColor;
-        ctx.shadowBlur = blur;
-        ctx.shadowOffsetX = offsetX;
-        ctx.shadowOffsetY = offsetY;
         ctx.translate(layer.x + w / 2, layer.y + h / 2);
         ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
         ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
-        ctx.drawImage(source, -w / 2, -h / 2);
+        ctx.drawImage(rendered, -w / 2, -h / 2);
         ctx.restore();
+        rendered.width = rendered.height = 1;
       };
-      if (effects.dropShadow)
-        drawEffectSource(
-          effects.color,
-          effects.size,
-          effects.distance,
-          effects.distance,
-        );
-      if (effects.outerGlow)
-        drawEffectSource(effects.color, effects.size * 1.6, 0, 0);
-      if (effects.stroke)
-        for (const [dx, dy] of [
-          [-effects.size, 0],
-          [effects.size, 0],
-          [0, -effects.size],
-          [0, effects.size],
-        ])
-          drawEffectSource(effects.color, 0, dx as number, dy as number);
+    if (effects.dropShadow)
+      drawEffectSource(
+        effects.color,
+        effectSize,
+        shadowOffset.x,
+        shadowOffset.y,
+      );
+    if (effects.outerGlow)
+      drawEffectSource(effects.color, effectSize * 1.6, 0, 0);
+    if (effects.stroke)
+      for (const [dx, dy] of [
+        [-effectSize, 0],
+        [effectSize, 0],
+        [0, -effectSize],
+        [0, effectSize],
+      ])
+        drawEffectSource(effects.color, 0, dx as number, dy as number);
+  }
+  ctx.save();
+  ctx.globalAlpha = ((layer.opacity / 100) * (layer.fill ?? 100)) / 100;
+  ctx.globalCompositeOperation = layer.blend as GlobalCompositeOperation;
+  ctx.filter = filter;
+  ctx.translate(layer.x + w / 2, layer.y + h / 2);
+  ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
+  ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+  ctx.drawImage(source, -w / 2, -h / 2);
+  ctx.restore();
+  if (effects) {
+    const effectSize = (effects.size * effects.scale) / 100,
+      innerOffset = effectOffset(
+        effects.angle,
+        effects.distance,
+        effects.scale,
+      ),
+      overlay = makeCanvas(w, h),
+      oc = overlay.getContext('2d')!;
+    if (effects.colorOverlay) {
+      oc.fillStyle = effects.color;
+      oc.fillRect(0, 0, w, h);
+    } else if (effects.gradientOverlay) {
+      const gradient = oc.createLinearGradient(0, 0, w, h);
+      gradient.addColorStop(0, effects.color);
+      gradient.addColorStop(1, effects.secondaryColor);
+      oc.fillStyle = gradient;
+      oc.fillRect(0, 0, w, h);
+    } else if (effects.patternOverlay) {
+      oc.fillStyle = effects.color;
+      oc.fillRect(0, 0, w, h);
+      oc.fillStyle = effects.secondaryColor;
+      for (let y = 0; y < h; y += Math.max(4, effectSize))
+        for (let x = 0; x < w; x += Math.max(4, effectSize))
+          if (((x + y) / Math.max(4, effectSize)) % 2 < 1)
+            oc.fillRect(
+              x,
+              y,
+              Math.max(2, effectSize / 2),
+              Math.max(2, effectSize / 2),
+            );
     }
-    ctx.save();
-    ctx.globalAlpha = ((layer.opacity / 100) * (layer.fill ?? 100)) / 100;
-    ctx.globalCompositeOperation = layer.blend as GlobalCompositeOperation;
-    ctx.filter = filter;
-    ctx.translate(layer.x + w / 2, layer.y + h / 2);
-    ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
-    ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
-    ctx.drawImage(source, -w / 2, -h / 2);
-    ctx.restore();
-    if (effects) {
-      const overlay = makeCanvas(w, h),
-        oc = overlay.getContext('2d')!;
-      if (effects.colorOverlay) {
-        oc.fillStyle = effects.color;
-        oc.fillRect(0, 0, w, h);
-      } else if (effects.gradientOverlay) {
-        const gradient = oc.createLinearGradient(0, 0, w, h);
-        gradient.addColorStop(0, effects.color);
-        gradient.addColorStop(1, effects.secondaryColor);
-        oc.fillStyle = gradient;
-        oc.fillRect(0, 0, w, h);
-      } else if (effects.patternOverlay) {
-        oc.fillStyle = effects.color;
-        oc.fillRect(0, 0, w, h);
-        oc.fillStyle = effects.secondaryColor;
-        for (let y = 0; y < h; y += Math.max(4, effects.size))
-          for (let x = 0; x < w; x += Math.max(4, effects.size))
-            if (((x + y) / Math.max(4, effects.size)) % 2 < 1)
-              oc.fillRect(
-                x,
-                y,
-                Math.max(2, effects.size / 2),
-                Math.max(2, effects.size / 2),
-              );
-      }
-      if (
-        effects.colorOverlay ||
-        effects.gradientOverlay ||
-        effects.patternOverlay
-      ) {
-        oc.globalCompositeOperation = 'destination-in';
-        oc.drawImage(source, 0, 0);
-        ctx.save();
-        ctx.globalAlpha = effects.opacity / 100;
-        ctx.translate(layer.x + w / 2, layer.y + h / 2);
-        ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
-        ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
-        ctx.drawImage(overlay, -w / 2, -h / 2);
-        ctx.restore();
-      }
-      if (
-        effects.innerShadow ||
-        effects.innerGlow ||
-        effects.bevel ||
-        effects.satin
-      ) {
-        const inner = makeCanvas(w, h),
-          ic = inner.getContext('2d')!;
-        ic.drawImage(source, 0, 0);
-        ic.globalCompositeOperation = 'source-atop';
-        ic.globalAlpha = effects.opacity / 100;
-        ic.fillStyle =
-          effects.innerGlow || effects.bevel
-            ? effects.secondaryColor
-            : effects.color;
-        if (effects.satin) {
-          for (let y = 0; y < h; y += Math.max(6, effects.size * 2))
-            ic.fillRect(0, y, w, Math.max(2, effects.size / 2));
-        } else ic.fillRect(0, 0, w, h);
-        ic.globalCompositeOperation = 'destination-in';
-        ic.filter = `blur(${effects.innerGlow ? effects.size : Math.max(1, effects.size / 3)}px)`;
-        ic.drawImage(
-          source,
-          effects.innerShadow ? effects.distance : 0,
-          effects.innerShadow ? effects.distance : 0,
-        );
-        ctx.save();
-        ctx.globalAlpha = effects.opacity / 100;
-        ctx.translate(layer.x + w / 2, layer.y + h / 2);
-        ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
-        ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
-        ctx.drawImage(inner, -w / 2, -h / 2);
-        ctx.restore();
-        inner.width = inner.height = 1;
-      }
-      overlay.width = overlay.height = 1;
+    if (
+      effects.colorOverlay ||
+      effects.gradientOverlay ||
+      effects.patternOverlay
+    ) {
+      oc.globalCompositeOperation = 'destination-in';
+      oc.drawImage(source, 0, 0);
+      ctx.save();
+      ctx.globalAlpha = effects.opacity / 100;
+      ctx.translate(layer.x + w / 2, layer.y + h / 2);
+      ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
+      ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+      ctx.drawImage(overlay, -w / 2, -h / 2);
+      ctx.restore();
     }
+    if (
+      effects.innerShadow ||
+      effects.innerGlow ||
+      effects.bevel ||
+      effects.satin
+    ) {
+      const inner = makeCanvas(w, h),
+        ic = inner.getContext('2d')!;
+      ic.drawImage(source, 0, 0);
+      ic.globalCompositeOperation = 'source-atop';
+      ic.globalAlpha = effects.opacity / 100;
+      ic.fillStyle =
+        effects.innerGlow || effects.bevel
+          ? effects.secondaryColor
+          : effects.color;
+      if (effects.satin) {
+        for (let y = 0; y < h; y += Math.max(6, effectSize * 2))
+          ic.fillRect(0, y, w, Math.max(2, effectSize / 2));
+      } else ic.fillRect(0, 0, w, h);
+      ic.globalCompositeOperation = 'destination-in';
+      ic.filter = `blur(${effects.innerGlow ? effectSize : Math.max(1, effectSize / 3)}px)`;
+      ic.drawImage(
+        source,
+        effects.innerShadow ? innerOffset.x : 0,
+        effects.innerShadow ? innerOffset.y : 0,
+      );
+      applyEffectContour(inner, effects.contour);
+      ctx.save();
+      ctx.globalAlpha = effects.opacity / 100;
+      ctx.translate(layer.x + w / 2, layer.y + h / 2);
+      ctx.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
+      ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+      ctx.drawImage(inner, -w / 2, -h / 2);
+      ctx.restore();
+      inner.width = inner.height = 1;
+    }
+    overlay.width = overlay.height = 1;
   }
   if (source !== surface.pixels) {
     source.width = source.height = 1;
@@ -1590,6 +1659,7 @@ export default function Home() {
     x: number;
     y: number;
   } | null>(null);
+  const effectsClipboardRef = useRef<LayerEffects | null>(null);
   const savedSelectionCanvases = useRef(new Map<string, HTMLCanvasElement>());
   const selectionChannelRef = useRef<HTMLCanvasElement | null>(null);
   const lastSelectionRef = useRef<{
@@ -5060,9 +5130,32 @@ export default function Home() {
         );
         return;
       }
-      patchLayer(meta.id, { effects: operation.effects }, 'Layer effects');
+      const effects = normalizeLayerEffects(operation.effects);
+      if (effects.useGlobalLight) {
+        syncLayers(
+          layersRef.current.map((layer) =>
+            layer.id === meta.id
+              ? { ...layer, effects }
+              : layer.effects?.useGlobalLight
+                ? {
+                    ...layer,
+                    effects: normalizeLayerEffects({
+                      ...layer.effects,
+                      angle: effects.angle,
+                    }),
+                  }
+                : layer,
+          ),
+        );
+        setSaved(false);
+        setTimeout(() => snapshot('Layer effects and global light'), 0);
+      } else patchLayer(meta.id, { effects }, 'Layer effects');
       render();
-      setStatus('Editable layer effects applied');
+      setStatus(
+        effects.useGlobalLight
+          ? `Editable layer effects applied · global light ${effects.angle}° synchronized`
+          : 'Editable layer effects applied',
+      );
       return;
     }
     if (operation.kind === 'fill') {
@@ -5198,6 +5291,32 @@ export default function Home() {
     );
     render();
     setStatus('Layer Studio adjustment applied');
+  };
+  const copyLayerEffects = () => {
+    const meta = selected();
+    if (!meta?.effects) {
+      setStatus('Select a layer with effects first');
+      return;
+    }
+    effectsClipboardRef.current = normalizeLayerEffects(meta.effects);
+    setStatus('Layer effects copied');
+  };
+  const pasteLayerEffects = () => {
+    const meta = selected(),
+      copied = effectsClipboardRef.current;
+    if (!meta || !copied || meta.kind === 'group' || isLocked(meta.id)) {
+      setStatus('Copy effects, then select an unlocked editable layer');
+      return;
+    }
+    applyLayerStudio({ kind: 'effects', effects: { ...copied } });
+    setStatus('Layer effects pasted and remain editable');
+  };
+  const clearLayerEffects = () => {
+    const meta = selected();
+    if (!meta?.effects) return;
+    patchLayer(meta.id, { effects: undefined }, 'Clear layer effects');
+    render();
+    setStatus('Layer effects cleared');
   };
   const convertToSmartObject = () => {
     const meta = selected(),
@@ -7420,6 +7539,13 @@ export default function Home() {
           throw Error('Invalid layer link');
         if (item.clipping !== undefined && typeof item.clipping !== 'boolean')
           throw Error('Invalid clipping mask');
+        if (
+          item.effects !== undefined &&
+          (!item.effects ||
+            typeof item.effects !== 'object' ||
+            Array.isArray(item.effects))
+        )
+          throw Error('Invalid layer effects');
         if (item.smartObject?.raw) {
           const raw = item.smartObject.raw;
           if (
@@ -7438,7 +7564,13 @@ export default function Home() {
           )
             throw Error('Invalid Camera Raw Smart Object');
         }
-        const { pixels, mask, ...meta } = item;
+        const { pixels, mask, ...rawMeta } = item,
+          meta: LayerMeta = {
+            ...rawMeta,
+            effects: rawMeta.effects
+              ? normalizeLayerEffects(rawMeta.effects)
+              : undefined,
+          };
         surfaces.set(meta.id, {
           pixels: await decode(pixels),
           mask: mask ? await decode(mask) : undefined,
@@ -10142,6 +10274,9 @@ export default function Home() {
             { name: 'Rename layer…', action: renameLayer },
             { name: 'New adjustment layer', action: createAdjustment },
             { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
+            { name: 'Copy layer effects', action: copyLayerEffects },
+            { name: 'Paste layer effects', action: pasteLayerEffects },
+            { name: 'Clear layer effects', action: clearLayerEffects },
             { separator: true },
             { name: 'Convert to Smart Object', action: convertToSmartObject },
             {
@@ -12774,6 +12909,53 @@ export default function Home() {
                             )
                           }
                         />
+                        <div className="layer-effects-controls">
+                          <div>
+                            <strong>Layer effects</strong>
+                            <span>
+                              {active?.effects
+                                ? `${normalizeLayerEffects(active.effects).contour} contour · ${normalizeLayerEffects(active.effects).scale}%`
+                                : 'None'}
+                            </span>
+                          </div>
+                          <div className="property-buttons">
+                            <button
+                              disabled={
+                                !active ||
+                                active.kind === 'group' ||
+                                active.kind === 'adjustment' ||
+                                isLocked(active.id)
+                              }
+                              onClick={() => setLayerStudioOpen(true)}
+                            >
+                              {active?.effects ? 'Edit effects' : 'Add effects'}
+                            </button>
+                            <button
+                              disabled={!active?.effects}
+                              onClick={copyLayerEffects}
+                            >
+                              Copy
+                            </button>
+                            <button
+                              disabled={
+                                !active ||
+                                !effectsClipboardRef.current ||
+                                active.kind === 'group' ||
+                                active.kind === 'adjustment' ||
+                                isLocked(active.id)
+                              }
+                              onClick={pasteLayerEffects}
+                            >
+                              Paste
+                            </button>
+                            <button
+                              disabled={!active?.effects}
+                              onClick={clearLayerEffects}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
                         <Button
                           size="sm"
                           variant="outline"
@@ -14533,6 +14715,7 @@ export default function Home() {
       />
       <LayerStudioDialog
         open={layerStudioOpen}
+        initialEffects={active?.effects}
         onClose={() => setLayerStudioOpen(false)}
         onApply={applyLayerStudio}
       />
