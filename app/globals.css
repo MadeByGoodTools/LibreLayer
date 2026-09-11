@@ -1117,6 +1117,22 @@ button {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--foreground);
 }
+
+.replace-color-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.replace-color-target input {
+  width: 44px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+}
 .advanced-color-controls > details {
   border: 1px solid #393c43;
   border-radius: 6px;

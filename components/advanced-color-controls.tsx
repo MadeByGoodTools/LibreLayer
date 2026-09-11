@@ -6,8 +6,10 @@ import type {
   ChannelMixer,
   GradientMap,
   HighDepthAdjustments,
+  ReplaceColor,
   SelectiveColor,
   SelectiveColorTarget,
+  ShadowsHighlights,
 } from '@/lib/high-depth';
 
 const identityMixer: ChannelMixer = {
@@ -21,6 +23,22 @@ const defaultGradient: GradientMap = {
   amount: 0,
 };
 const emptySelectiveColor: SelectiveColor = { mode: 'relative', colors: {} };
+const defaultShadowsHighlights: ShadowsHighlights = {
+  shadows: 0,
+  highlights: 0,
+  shadowTone: 50,
+  highlightTone: 50,
+  color: 0,
+  midtone: 0,
+};
+const defaultReplaceColor: ReplaceColor = {
+  target: '#ff0000',
+  fuzziness: 40,
+  hue: 0,
+  saturation: 0,
+  lightness: 0,
+  amount: 0,
+};
 const emptyRecipe = { cyan: 0, magenta: 0, yellow: 0, black: 0 };
 const selectiveTargets: SelectiveColorTarget[] = [
   'reds',
@@ -54,7 +72,10 @@ export function AdvancedColorControls({
   const mixer = adjustments.channelMixer ?? identityMixer,
     gradient = adjustments.gradientMap ?? defaultGradient,
     selective = adjustments.selectiveColor ?? emptySelectiveColor,
-    selectiveRecipe = selective.colors[selectiveTarget] ?? emptyRecipe;
+    selectiveRecipe = selective.colors[selectiveTarget] ?? emptyRecipe,
+    shadowsHighlights =
+      adjustments.shadowsHighlights ?? defaultShadowsHighlights,
+    replaceColor = adjustments.replaceColor ?? defaultReplaceColor;
   const updateMixer = (input: keyof ChannelMixer['red'], value: number) =>
     onChange('channelMixer', {
       ...mixer,
@@ -70,6 +91,12 @@ export function AdvancedColorControls({
         [selectiveTarget]: { ...selectiveRecipe, [channel]: value },
       },
     });
+  const updateShadowsHighlights = (
+    key: keyof ShadowsHighlights,
+    value: number,
+  ) => onChange('shadowsHighlights', { ...shadowsHighlights, [key]: value });
+  const updateReplaceColor = (patch: Partial<ReplaceColor>) =>
+    onChange('replaceColor', { ...replaceColor, ...patch });
   return (
     <div className="advanced-color-controls">
       <details>
@@ -240,6 +267,87 @@ export function AdvancedColorControls({
               </button>
             ))}
           </div>
+        </div>
+      </details>
+      <details>
+        <summary>Shadows / Highlights</summary>
+        <div className="advanced-color-body">
+          {(
+            [
+              ['Shadows', 'shadows', 0, 100],
+              ['Shadow tone', 'shadowTone', 5, 95],
+              ['Highlights', 'highlights', 0, 100],
+              ['Highlight tone', 'highlightTone', 5, 95],
+              ['Color correction', 'color', -100, 100],
+              ['Midtone contrast', 'midtone', -100, 100],
+            ] as const
+          ).map(([label, key, min, max]) => (
+            <div className="advanced-color-slider" key={key}>
+              <label>
+                {label} <span>{shadowsHighlights[key]}%</span>
+              </label>
+              <Slider
+                aria-label={label}
+                min={min}
+                max={max}
+                step={1}
+                value={shadowsHighlights[key]}
+                onValueChange={(value) =>
+                  updateShadowsHighlights(key, sliderNumber(value))
+                }
+                onValueCommitted={() =>
+                  onCommit('Shadows and Highlights adjustment')
+                }
+              />
+            </div>
+          ))}
+        </div>
+      </details>
+      <details>
+        <summary>Replace Color</summary>
+        <div className="advanced-color-body">
+          <label className="replace-color-target">
+            Target color
+            <input
+              aria-label="Replace Color target"
+              type="color"
+              value={replaceColor.target}
+              onChange={(event) =>
+                updateReplaceColor({ target: event.target.value })
+              }
+              onBlur={() => onCommit('Replace Color target')}
+            />
+          </label>
+          {(
+            [
+              ['Fuzziness', 'fuzziness', 0, 100, '%'],
+              ['Hue', 'hue', -180, 180, '°'],
+              ['Saturation', 'saturation', -100, 100, '%'],
+              ['Lightness', 'lightness', -100, 100, '%'],
+              ['Amount', 'amount', 0, 100, '%'],
+            ] as const
+          ).map(([label, key, min, max, suffix]) => (
+            <div className="advanced-color-slider" key={key}>
+              <label>
+                {label}{' '}
+                <span>
+                  {replaceColor[key]}
+                  {suffix}
+                </span>
+              </label>
+              <Slider
+                aria-label={`Replace Color ${label}`}
+                min={min}
+                max={max}
+                step={1}
+                value={replaceColor[key]}
+                onValueChange={(value) =>
+                  updateReplaceColor({ [key]: sliderNumber(value) })
+                }
+                onValueCommitted={() => onCommit(`Replace Color ${label}`)}
+              />
+            </div>
+          ))}
         </div>
       </details>
     </div>

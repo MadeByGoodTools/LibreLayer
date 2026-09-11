@@ -53,6 +53,22 @@ export type SelectiveColor = {
   mode: 'relative' | 'absolute';
   colors: Partial<Record<SelectiveColorTarget, SelectiveColorRecipe>>;
 };
+export type ShadowsHighlights = {
+  shadows: number;
+  highlights: number;
+  shadowTone: number;
+  highlightTone: number;
+  color: number;
+  midtone: number;
+};
+export type ReplaceColor = {
+  target: string;
+  fuzziness: number;
+  hue: number;
+  saturation: number;
+  lightness: number;
+  amount: number;
+};
 
 export type PrecisionLayer = PrecisionImage & {
   opacity?: number;
@@ -98,6 +114,8 @@ export type HighDepthAdjustments = {
   channelMixer?: ChannelMixer;
   gradientMap?: GradientMap;
   selectiveColor?: SelectiveColor;
+  shadowsHighlights?: ShadowsHighlights;
+  replaceColor?: ReplaceColor;
 };
 
 export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
@@ -144,6 +162,22 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
     amount: 0,
   },
   selectiveColor: { mode: 'relative', colors: {} },
+  shadowsHighlights: {
+    shadows: 0,
+    highlights: 0,
+    shadowTone: 50,
+    highlightTone: 50,
+    color: 0,
+    midtone: 0,
+  },
+  replaceColor: {
+    target: '#ff0000',
+    fuzziness: 40,
+    hue: 0,
+    saturation: 0,
+    lightness: 0,
+    amount: 0,
+  },
 });
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -350,6 +384,78 @@ export const applySelectiveColor = (
   return channels.map((value) => clamp(value)) as [number, number, number];
 };
 
+const smoothstep = (edge0: number, edge1: number, value: number) => {
+  const position = clamp((value - edge0) / Math.max(1e-6, edge1 - edge0));
+  return position * position * (3 - 2 * position);
+};
+
+export const applyShadowsHighlights = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: ShadowsHighlights,
+) => {
+  if (!adjustment || (!adjustment.shadows && !adjustment.highlights))
+    return [red, green, blue] as const;
+  const luma = clamp(0.299 * red + 0.587 * green + 0.114 * blue),
+    shadowEdge = clamp(adjustment.shadowTone / 100, 0.05, 0.95),
+    highlightEdge = clamp(1 - adjustment.highlightTone / 100, 0.05, 0.95),
+    shadowMask = 1 - smoothstep(0, shadowEdge, luma),
+    highlightMask = smoothstep(highlightEdge, 1, luma),
+    shadowStrength = (adjustment.shadows / 100) * shadowMask,
+    highlightStrength = (adjustment.highlights / 100) * highlightMask,
+    corrected = [red, green, blue].map(
+      (channel) =>
+        channel +
+        (1 - channel) * shadowStrength * 0.8 -
+        channel * highlightStrength * 0.8,
+    ),
+    correctedLuma =
+      0.299 * corrected[0] + 0.587 * corrected[1] + 0.114 * corrected[2],
+    affected = clamp(shadowMask + highlightMask),
+    colorScale = Math.max(0, 1 + (adjustment.color / 100) * affected),
+    midtoneScale = 1 + (adjustment.midtone / 100) * (1 - affected) * 0.75;
+  return corrected.map((channel) =>
+    clamp(
+      (correctedLuma + (channel - correctedLuma) * colorScale - 0.5) *
+        midtoneScale +
+        0.5,
+    ),
+  ) as [number, number, number];
+};
+
+export const applyReplaceColor = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: ReplaceColor,
+) => {
+  if (!adjustment || adjustment.amount <= 0) return [red, green, blue] as const;
+  const target = parseHexColor(adjustment.target),
+    distance = Math.hypot(red - target[0], green - target[1], blue - target[2]),
+    tolerance = 0.025 + (adjustment.fuzziness / 100) * 0.75,
+    mask = 1 - smoothstep(tolerance * 0.55, tolerance, distance);
+  if (mask <= 0) return [red, green, blue] as const;
+  let [nextRed, nextGreen, nextBlue] = hueRotate(
+    red,
+    green,
+    blue,
+    adjustment.hue,
+  );
+  const luma = 0.299 * nextRed + 0.587 * nextGreen + 0.114 * nextBlue,
+    saturation = Math.max(0, 1 + adjustment.saturation / 100),
+    lightness = adjustment.lightness / 100;
+  nextRed = luma + (nextRed - luma) * saturation + lightness;
+  nextGreen = luma + (nextGreen - luma) * saturation + lightness;
+  nextBlue = luma + (nextBlue - luma) * saturation + lightness;
+  const strength = mask * clamp(adjustment.amount / 100);
+  return [
+    clamp(red + (nextRed - red) * strength),
+    clamp(green + (nextGreen - green) * strength),
+    clamp(blue + (nextBlue - blue) * strength),
+  ] as const;
+};
+
 /**
  * Apply a complete color correction recipe in one floating-point pass.
  * The input may be 8, 16 or 32-bit RGBA and the result stays Float32 until
@@ -397,6 +503,12 @@ export function adjustHighDepth(
           recipe.yellow !== 0 ||
           recipe.black !== 0),
     );
+  const shadowsHighlights = settings.shadowsHighlights,
+    shadowsHighlightsActive =
+      !!shadowsHighlights &&
+      (shadowsHighlights.shadows !== 0 || shadowsHighlights.highlights !== 0),
+    replaceColor = settings.replaceColor,
+    replaceColorActive = !!replaceColor && replaceColor.amount > 0;
   const masterLevelsActive =
     (settings.levelsBlack ?? 0) !== 0 ||
     (settings.levelsWhite ?? 255) !== 255 ||
@@ -513,6 +625,17 @@ export function adjustHighDepth(
     if (selectiveActive)
       [red, green, blue] = applySelectiveColor(red, green, blue, selective);
 
+    if (shadowsHighlightsActive)
+      [red, green, blue] = applyShadowsHighlights(
+        red,
+        green,
+        blue,
+        shadowsHighlights,
+      );
+
+    if (replaceColorActive)
+      [red, green, blue] = applyReplaceColor(red, green, blue, replaceColor);
+
     let luma = 0.299 * red + 0.587 * green + 0.114 * blue;
     const vibranceAmount = (settings.vibrance ?? 0) / 100;
     if (saturation !== 1 || vibranceAmount !== 0) {
@@ -545,6 +668,7 @@ export function precisionToEncodedRgba(image: PrecisionImage) {
     throw new Error(
       'High-depth pixel data length does not match its dimensions.',
     );
+
   const result = new Uint8ClampedArray(image.data.length);
   for (let index = 0; index < image.data.length; index += 4) {
     result[index] = Math.round(clamp(sample(image.data, index)) * 255);

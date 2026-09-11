@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   adjustHighDepth,
+  applyReplaceColor,
   applySelectiveColor,
+  applyShadowsHighlights,
   compositeHighDepth,
   createDefaultHighDepthAdjustments,
   levelCurveValue,
@@ -291,6 +293,38 @@ void test('built-in LUT library provides distinct, valid live looks', () => {
     );
     assert.ok(adjusted.slice(0, 3).every(Number.isFinite));
   }
+});
+
+void test('Shadows and Highlights independently recover tonal extremes', () => {
+  const settings = {
+    shadows: 75,
+    highlights: 75,
+    shadowTone: 50,
+    highlightTone: 50,
+    color: 0,
+    midtone: 0,
+  };
+  const shadow = applyShadowsHighlights(0.05, 0.05, 0.05, settings);
+  const highlight = applyShadowsHighlights(0.95, 0.95, 0.95, settings);
+  const midtone = applyShadowsHighlights(0.5, 0.5, 0.5, settings);
+  assert.ok(shadow[0] > 0.2);
+  assert.ok(highlight[0] < 0.8);
+  assert.ok(Math.abs(midtone[0] - 0.5) < 1e-6);
+});
+
+void test('Replace Color respects the selected color and fuzziness mask', () => {
+  const settings = {
+    target: '#ff0000',
+    fuzziness: 35,
+    hue: 120,
+    saturation: 0,
+    lightness: 0,
+    amount: 100,
+  };
+  const red = applyReplaceColor(1, 0, 0, settings);
+  const blue = applyReplaceColor(0, 0, 1, settings);
+  assert.ok(red[1] > red[0]);
+  assert.deepEqual(blue, [0, 0, 1]);
 });
 
 void test('new adjustment defaults are a neutral full recipe', () => {
