@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import type { SoftProofMode } from '@/lib/soft-proof';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -34,6 +35,8 @@ export type EditorPreferences = {
   commands?: Record<string, string>;
   presets: ToolPreset[];
   autosave: boolean;
+  proofMode?: SoftProofMode;
+  gamutWarning?: boolean;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -41,6 +44,8 @@ export const defaultPreferences: EditorPreferences = {
   shortcuts: {},
   presets: [],
   autosave: true,
+  proofMode: 'none',
+  gamutWarning: false,
 };
 export function WorkspaceSettings({
   commands,
@@ -56,6 +61,7 @@ export function WorkspaceSettings({
   onChooseSaveLocation,
   onProtectStorage,
   onResetSaveLocation,
+  documentStatus,
 }: {
   commands: { name: string; shortcut: string }[];
   open: boolean;
@@ -70,6 +76,7 @@ export function WorkspaceSettings({
   onChooseSaveLocation: () => void;
   onProtectStorage: () => void;
   onResetSaveLocation: () => void;
+  documentStatus: string;
 }) {
   const [name, setName] = useState(''),
     [error, setError] = useState('');
@@ -96,6 +103,7 @@ export function WorkspaceSettings({
             <TabsTrigger value="layout">Workspace</TabsTrigger>
             <TabsTrigger value="keys">Shortcuts</TabsTrigger>
             <TabsTrigger value="presets">Tool presets</TabsTrigger>
+            <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
           <TabsContent value="layout" className="grid gap-3">
             <label>
@@ -406,6 +414,49 @@ export function WorkspaceSettings({
                 </Button>
               </div>
             ))}
+          </TabsContent>
+          <TabsContent value="performance" className="grid gap-3">
+            <div className="grid gap-2 rounded border p-3">
+              <strong>Current document</strong>
+              <span>{documentStatus}</span>
+              <span>{storageStatus}</span>
+            </div>
+            <label>
+              Soft-proof preview
+              <select
+                className="block border rounded p-2 bg-background w-full"
+                value={value.proofMode ?? 'none'}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    proofMode: event.target.value as SoftProofMode,
+                  })
+                }
+              >
+                <option value="none">Off — working RGB</option>
+                <option value="cmyk">CMYK print simulation</option>
+                <option value="grayscale">Grayscale output</option>
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={value.gamutWarning ?? false}
+                disabled={(value.proofMode ?? 'none') === 'none'}
+                onChange={(event) =>
+                  onChange({ ...value, gamutWarning: event.target.checked })
+                }
+              />{' '}
+              Show out-of-gamut colors in magenta
+            </label>
+            <p>
+              Proofing changes only the on-screen preview. Exported pixels stay
+              untouched. Exact press matching still depends on the destination
+              ICC profile and a calibrated display.
+            </p>
+            <Button variant="outline" onClick={onProtectStorage}>
+              Protect local working storage
+            </Button>
           </TabsContent>
         </Tabs>
         {error && <p role="alert">{error}</p>}

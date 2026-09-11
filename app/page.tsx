@@ -202,6 +202,11 @@ import { Histogram } from '@/components/histogram';
 import { AdjustmentPresets } from '@/components/adjustment-presets';
 import { LevelsControl } from '@/components/levels-control';
 import { ToneCurve } from '@/components/tone-curve';
+import { SoftProofOverlay } from '@/components/soft-proof-overlay';
+import {
+  createPsdCompatibilityReport,
+  type PsdCompatibilityReport,
+} from '@/lib/psd-compatibility';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
 import {
   decodeCameraRaw,
@@ -216,6 +221,8 @@ import {
   adjustHighDepth,
   createDefaultHighDepthAdjustments,
   precisionToEncodedRgba,
+  type CurveChannel,
+  type ChannelLevel,
   type HighDepthAdjustments,
 } from '@/lib/high-depth';
 const Mask = Focus;
@@ -508,6 +515,14 @@ const makeCanvas = (w: number, h: number) => {
   c.width = w;
   c.height = h;
   return c;
+};
+const downloadBlob = (name: string, blob: Blob) => {
+  const url = URL.createObjectURL(blob),
+    anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 const canvasPngDataUrl = (canvas: HTMLCanvasElement) =>
@@ -1334,6 +1349,9 @@ export default function Home() {
     data: PsdImport;
   } | null>(null);
   const [psdError, setPsdError] = useState('');
+  const [psdReport, setPsdReport] = useState<PsdCompatibilityReport | null>(
+    null,
+  );
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
   const [imageSizeOpen, setImageSizeOpen] = useState(false),
     [canvasSizeOpen, setCanvasSizeOpen] = useState(false),
@@ -1535,6 +1553,12 @@ export default function Home() {
     'rgb' | 'red' | 'green' | 'blue' | 'alpha'
   >('rgb');
   const [soloChannel, setSoloChannel] = useState(false);
+  const [curveTargetChannel, setCurveTargetChannel] =
+    useState<CurveChannel | null>(null);
+  const [levelsTarget, setLevelsTarget] = useState<{
+    kind: 'black' | 'gray' | 'white';
+    channel: CurveChannel;
+  } | null>(null);
   const [text, setText] = useState('Your text');
   const [fontSize, setFontSize] = useState(64);
   const [fileName, setFileName] = useState('Untitled artwork');
@@ -2890,6 +2914,117 @@ export default function Home() {
   const begin = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const p = point(e),
       meta = selected();
+    if ((curveTargetChannel || levelsTarget) && meta?.kind === 'adjustment') {
+      render();
+      const x = Math.max(0, Math.min(doc.w - 1, Math.floor(p.x))),
+        y = Math.max(0, Math.min(doc.h - 1, Math.floor(p.y))),
+        sampled = displayRef.current
+          ?.getContext('2d', { willReadFrequently: true })
+          ?.getImageData(x, y, 1, 1).data;
+      if (!sampled) return;
+      const normalized = {
+        red: sampled[0] / 255,
+        green: sampled[1] / 255,
+        blue: sampled[2] / 255,
+        rgb:
+          (sampled[0] * 0.2126 + sampled[1] * 0.7152 + sampled[2] * 0.0722) /
+          255,
+      };
+      if (curveTargetChannel) {
+        const value = normalized[curveTargetChannel],
+          current = meta.precisionAdjustment ?? {},
+          points = [
+            ...(current.curves?.[curveTargetChannel] ?? []),
+            { x: value, y: value },
+          ]
+            .sort((a, b) => a.x - b.x)
+            .slice(0, 14);
+        patchLayer(
+          meta.id,
+          {
+            precisionAdjustment: {
+              ...current,
+              curves: { ...current.curves, [curveTargetChannel]: points },
+            },
+          },
+          'Targeted curve point',
+        );
+        setStatus(
+          `${curveTargetChannel.toUpperCase()} curve point sampled at ${Math.round(value * 255)}`,
+        );
+        setCurveTargetChannel(null);
+      } else if (levelsTarget) {
+        const current = meta.precisionAdjustment ?? {},
+          target = levelsTarget;
+        if (target.kind === 'gray') {
+          const gammaFor = (value: number) =>
+            Math.max(
+              0.1,
+              Math.min(3, Math.log(Math.max(0.004, value)) / Math.log(0.5)),
+            );
+          const nextLevels = { ...current.channelLevels };
+          for (const color of ['red', 'green', 'blue'] as const) {
+            const previous = nextLevels[color];
+            nextLevels[color] = {
+              black: 0,
+              white: 255,
+              outputBlack: 0,
+              outputWhite: 255,
+              ...previous,
+              gamma: gammaFor(normalized[color]),
+            };
+          }
+          patchLayer(
+            meta.id,
+            { precisionAdjustment: { ...current, channelLevels: nextLevels } },
+            'Neutral gray eyedropper',
+          );
+        } else {
+          const value = Math.round(normalized[target.channel] * 255),
+            key = target.kind === 'black' ? 'black' : 'white';
+          if (target.channel === 'rgb')
+            patchLayer(
+              meta.id,
+              {
+                precisionAdjustment: {
+                  ...current,
+                  [target.kind === 'black' ? 'levelsBlack' : 'levelsWhite']:
+                    value,
+                },
+              },
+              `${target.kind} point eyedropper`,
+            );
+          else {
+            const base: ChannelLevel = {
+              black: 0,
+              gamma: 1,
+              white: 255,
+              outputBlack: 0,
+              outputWhite: 255,
+              ...current.channelLevels?.[target.channel],
+            };
+            patchLayer(
+              meta.id,
+              {
+                precisionAdjustment: {
+                  ...current,
+                  channelLevels: {
+                    ...current.channelLevels,
+                    [target.channel]: { ...base, [key]: value },
+                  },
+                },
+              },
+              `${target.channel} ${target.kind} point eyedropper`,
+            );
+          }
+        }
+        setStatus(
+          `${target.kind} point sampled · ${target.channel.toUpperCase()}`,
+        );
+        setLevelsTarget(null);
+      }
+      return;
+    }
     if (
       meta &&
       !quickMaskRef.current &&
@@ -6261,6 +6396,7 @@ export default function Home() {
     if (fileRef.current) fileRef.current.value = '';
   };
   const importPsdResult = (name: string, data: PsdImport) => {
+    setPsdReport(createPsdCompatibilityReport(name, data));
     let units = 0;
     const inspectUnits = (nodes: PsdLayer[]) =>
       nodes.forEach((n) => {
@@ -11182,6 +11318,7 @@ export default function Home() {
           >
             <canvas
               ref={displayRef}
+              className={`soft-proof-${preferences.proofMode ?? 'none'}`}
               width={doc.w}
               height={doc.h}
               onPointerDown={begin}
@@ -11194,6 +11331,12 @@ export default function Home() {
                   finishPolygon(tool);
                 }
               }}
+            />
+            <SoftProofOverlay
+              sourceCanvas={displayRef.current}
+              revision={layers}
+              mode={preferences.proofMode ?? 'none'}
+              enabled={preferences.gamutWarning ?? false}
             />
             {selection && !selectionPath && (
               <div className="selection-box" style={selectionStyle} />
@@ -12167,22 +12310,16 @@ export default function Home() {
                                   }
                                 />
                                 <LevelsControl
-                                  black={Number(
-                                    active.precisionAdjustment?.levelsBlack ??
-                                      0,
-                                  )}
-                                  gamma={Number(
-                                    active.precisionAdjustment?.levelsGamma ??
-                                      1,
-                                  )}
-                                  white={Number(
-                                    active.precisionAdjustment?.levelsWhite ??
-                                      255,
-                                  )}
+                                  adjustments={active.precisionAdjustment ?? {}}
                                   onChange={updatePrecisionAdjustment}
-                                  onCommit={() =>
-                                    snapshot('Input levels adjustment')
-                                  }
+                                  onCommit={() => snapshot('Levels adjustment')}
+                                  onRequestEyedropper={(kind, channel) => {
+                                    setCurveTargetChannel(null);
+                                    setLevelsTarget({ kind, channel });
+                                    setStatus(
+                                      `Click the image to set the ${kind} point · ${channel.toUpperCase()}`,
+                                    );
+                                  }}
                                 />
                                 <p className="precision-adjustment-note">
                                   Combined floating-point recipe · editable
@@ -12193,6 +12330,15 @@ export default function Home() {
                                   onCommit={() =>
                                     snapshot('Tone curve adjustment')
                                   }
+                                  sourceCanvas={displayRef.current}
+                                  revision={layers}
+                                  onRequestTarget={(channel) => {
+                                    setLevelsTarget(null);
+                                    setCurveTargetChannel(channel);
+                                    setStatus(
+                                      `Click the image to add a ${channel.toUpperCase()} curve point`,
+                                    );
+                                  }}
                                 />
                                 {(
                                   [
@@ -12245,51 +12391,6 @@ export default function Home() {
                                     [
                                       'Vibrance',
                                       'vibrance',
-                                      -100,
-                                      100,
-                                      1,
-                                      '',
-                                      0,
-                                    ],
-                                    [
-                                      'Input black',
-                                      'levelsBlack',
-                                      0,
-                                      254,
-                                      1,
-                                      '',
-                                      0,
-                                    ],
-                                    [
-                                      'Input white',
-                                      'levelsWhite',
-                                      1,
-                                      255,
-                                      1,
-                                      '',
-                                      255,
-                                    ],
-                                    [
-                                      'Gamma',
-                                      'levelsGamma',
-                                      0.1,
-                                      3,
-                                      0.05,
-                                      '',
-                                      1,
-                                    ],
-                                    [
-                                      'Shadow curve',
-                                      'curveShadows',
-                                      -100,
-                                      100,
-                                      1,
-                                      '',
-                                      0,
-                                    ],
-                                    [
-                                      'Highlight curve',
-                                      'curveHighlights',
                                       -100,
                                       100,
                                       1,
@@ -13176,6 +13277,70 @@ export default function Home() {
         </DialogContent>
       </Dialog>
       <Dialog
+        open={!!psdReport}
+        onOpenChange={(open) => !open && setPsdReport(null)}
+      >
+        <DialogContent className="psd-compatibility-dialog">
+          <DialogTitle>PSD compatibility report</DialogTitle>
+          <DialogDescription>
+            {psdReport?.fileName} · {psdReport?.dimensions}px ·{' '}
+            {psdReport?.sourceDepth}-bit source
+          </DialogDescription>
+          {psdReport && (
+            <>
+              <div className={`compatibility-status ${psdReport.status}`}>
+                <strong>
+                  {psdReport.status === 'preserved'
+                    ? 'Editable structure preserved'
+                    : psdReport.status === 'converted'
+                      ? 'Editable with working-depth conversion'
+                      : 'Opened as a flattened saved preview'}
+                </strong>
+                <span>
+                  {psdReport.pixelLayers} pixel layers · {psdReport.groups}{' '}
+                  groups · {psdReport.masks} masks
+                </span>
+              </div>
+              <dl className="compatibility-details">
+                <div>
+                  <dt>Source depth</dt>
+                  <dd>{psdReport.sourceDepth}-bit</dd>
+                </div>
+                <div>
+                  <dt>Working display</dt>
+                  <dd>{psdReport.workingDepth}-bit RGBA</dd>
+                </div>
+              </dl>
+              {psdReport.warnings.length > 0 ? (
+                <ul className="compatibility-warnings">
+                  {psdReport.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No unsupported PSD features were reported by the decoder.</p>
+              )}
+              <div className="dialog-actions">
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    downloadBlob(
+                      `${psdReport.fileName}-compatibility.json`,
+                      new Blob([JSON.stringify(psdReport, null, 2)], {
+                        type: 'application/json',
+                      }),
+                    )
+                  }
+                >
+                  Download report
+                </Button>
+                <Button onClick={() => setPsdReport(null)}>Done</Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog
         open={!!rawDevelop}
         onOpenChange={(open) => !open && setRawDevelop(null)}
       >
@@ -13521,6 +13686,7 @@ export default function Home() {
         onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
         onProtectStorage={() => void protectLocalStorage()}
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
+        documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/32 history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels`}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}
         onApply={(p) => {

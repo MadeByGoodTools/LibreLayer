@@ -4,6 +4,8 @@ import {
   adjustHighDepth,
   compositeHighDepth,
   createDefaultHighDepthAdjustments,
+  levelCurveValue,
+  pointCurveValue,
   precisionToEncodedRgba,
   precisionToDisplayRgba,
   toneCurveValue,
@@ -170,6 +172,48 @@ void test('per-channel curves change only their targeted color channel', () => {
   assert.ok(adjusted[0] > 0.25);
   assert.equal(adjusted[1], 0.25);
   assert.equal(adjusted[2], 0.25);
+});
+
+void test('multi-point curves interpolate and target one color channel', () => {
+  assert.equal(pointCurveValue(0.25, [{ x: 0.5, y: 0.75 }]), 0.375);
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Float32Array([0.5, 0.5, 0.5, 1]),
+    },
+    { curves: { blue: [{ x: 0.5, y: 0.8 }] } },
+  );
+  assert.equal(adjusted[0], 0.5);
+  assert.equal(adjusted[1], 0.5);
+  assert.ok(adjusted[2] > 0.79);
+});
+
+void test('input and output levels remain bounded and work per channel', () => {
+  assert.equal(levelCurveValue(0, { outputBlack: 32 }), 32 / 255);
+  assert.equal(levelCurveValue(1, { outputWhite: 224 }), 224 / 255);
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Float32Array([0.5, 0.5, 0.5, 1]),
+    },
+    {
+      outputBlack: 16,
+      outputWhite: 240,
+      channelLevels: {
+        red: {
+          black: 0,
+          gamma: 1,
+          white: 255,
+          outputBlack: 0,
+          outputWhite: 128,
+        },
+      },
+    },
+  );
+  assert.ok(adjusted[0] < adjusted[1]);
+  assert.equal(adjusted[1], adjusted[2]);
 });
 
 void test('new adjustment defaults are a neutral full recipe', () => {

@@ -31,6 +31,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Record, export, validate, and replay open `.libreflow` editing workflows without executing arbitrary code
 - Password-encrypted layered project packages using local AES-256-GCM encryption
 - Device-local autosave, recovery, recent projects, preferences, and optional installation
+- Live CMYK/grayscale soft proofing, magenta gamut warnings, document performance/storage reporting, and downloadable PSD compatibility reports
 
 Projects remain on the user's device unless they explicitly export or share a file.
 

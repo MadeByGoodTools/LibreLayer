@@ -990,6 +990,67 @@ button {
   color: #eff1f4;
   font-size: 13px;
 }
+.levels-eyedroppers,
+.tone-curve-heading > div {
+  display: flex;
+  gap: 3px;
+}
+.levels-eyedroppers button,
+.tone-curve-heading button {
+  min-width: 25px;
+  min-height: 23px;
+  padding: 2px 6px;
+  border: 1px solid #424650;
+  border-radius: 4px;
+  background: #22252b;
+  color: #cbd0d9;
+  font-size: 10px;
+}
+.levels-eyedroppers button.black {
+  color: #737983;
+}
+.levels-eyedroppers button.gray {
+  color: #b0b4bc;
+}
+.levels-eyedroppers button.white {
+  color: #fff;
+}
+.levels-channels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+.levels-channels button {
+  min-height: 24px;
+  border: 1px solid #3e424a;
+  border-radius: 4px;
+  background: #202228;
+  color: #aeb3bd;
+  font-size: 11px;
+}
+.levels-channels button.active {
+  border-color: #8da8da;
+  background: #303845;
+  color: white;
+}
+.levels-channels button.active.red {
+  color: #ff9b9f;
+  border-color: #ff777b;
+}
+.levels-channels button.active.green {
+  color: #92e7b7;
+  border-color: #5ed795;
+}
+.levels-channels button.active.blue {
+  color: #aec7ff;
+  border-color: #6d9cff;
+}
+.levels-track-label {
+  color: #8f949d;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 .levels-heading span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1025,6 +1086,30 @@ button {
   border-color: #22252b;
   background: #f4f5f7;
 }
+.levels-output {
+  height: 14px;
+  margin-top: -2px;
+}
+.levels-output button.outputBlack,
+.levels-output button.outputWhite {
+  position: absolute;
+  bottom: -9px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 2px solid #e5e8ee;
+  background: #121419;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+.levels-output button.outputWhite {
+  border-color: #22252b;
+  background: #f4f5f7;
+}
+.output-values span:last-child {
+  margin-left: auto;
+}
 .levels-track button:hover,
 .levels-track button:focus,
 .levels-track button.dragging {
@@ -1038,6 +1123,65 @@ button {
 }
 .levels-values span:nth-child(2) {
   color: #a9c5ff;
+}
+.soft-proof-cmyk {
+  filter: saturate(0.84) contrast(0.96) brightness(0.98);
+}
+.soft-proof-grayscale {
+  filter: grayscale(1);
+}
+.soft-proof-gamut-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+.psd-compatibility-dialog {
+  max-width: 520px;
+}
+.compatibility-status {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #4e5561;
+  border-radius: 7px;
+  background: #20242b;
+}
+.compatibility-status.preserved {
+  border-color: #3f8a66;
+}
+.compatibility-status.converted {
+  border-color: #9a793d;
+}
+.compatibility-status.flattened {
+  border-color: #a9565d;
+}
+.compatibility-status span,
+.compatibility-details dt {
+  color: #aeb3bd;
+  font-size: 12px;
+}
+.compatibility-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.compatibility-details div {
+  padding: 9px;
+  border: 1px solid #383c44;
+  border-radius: 6px;
+}
+.compatibility-details dd {
+  margin: 3px 0 0;
+  color: #f0f2f6;
+}
+.compatibility-warnings {
+  max-height: 180px;
+  overflow: auto;
+  padding-left: 20px;
+  color: #ffc878;
 }
 .adjustment-presets {
   display: grid;
@@ -1176,9 +1320,14 @@ button {
 }
 .tone-curve-grid,
 .tone-curve-baseline,
-.tone-curve-line {
+.tone-curve-line,
+.tone-curve-overlay {
   fill: none;
   vector-effect: non-scaling-stroke;
+}
+.tone-curve-histogram {
+  fill: rgb(216 223 235 / 0.16);
+  pointer-events: none;
 }
 .tone-curve-grid {
   stroke: #2d3036;
@@ -1193,6 +1342,20 @@ button {
   stroke: #d9e4ff;
   stroke-width: 2;
 }
+.tone-curve-overlay {
+  stroke-width: 1;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.tone-curve-overlay.red {
+  stroke: #ff777b;
+}
+.tone-curve-overlay.green {
+  stroke: #5ed795;
+}
+.tone-curve-overlay.blue {
+  stroke: #6d9cff;
+}
 .tone-curve-editor svg.curve-red .tone-curve-line {
   stroke: #ff777b;
 }
@@ -1206,8 +1369,15 @@ button {
   fill: #76a5ff;
   stroke: #f5f8ff;
   stroke-width: 2;
-  cursor: ns-resize;
+  cursor: move;
   vector-effect: non-scaling-stroke;
+}
+.tone-curve-editor circle.zone-point {
+  opacity: 0.72;
+}
+.tone-curve-editor circle.custom-point.selected {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 5px rgb(118 165 255 / 0.95));
 }
 .tone-curve-editor svg.curve-red circle {
   fill: #f05c63;

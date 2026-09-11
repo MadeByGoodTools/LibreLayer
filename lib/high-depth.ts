@@ -12,6 +12,16 @@ export type PrecisionImage = {
 
 export type PrecisionBlendMode = 'normal' | 'multiply' | 'screen' | 'overlay';
 
+export type CurveChannel = 'rgb' | 'red' | 'green' | 'blue';
+export type CurvePoint = { x: number; y: number };
+export type ChannelLevel = {
+  black: number;
+  gamma: number;
+  white: number;
+  outputBlack: number;
+  outputWhite: number;
+};
+
 export type PrecisionLayer = PrecisionImage & {
   opacity?: number;
   blend?: PrecisionBlendMode;
@@ -32,6 +42,9 @@ export type HighDepthAdjustments = {
   levelsBlack?: number;
   levelsWhite?: number;
   levelsGamma?: number;
+  outputBlack?: number;
+  outputWhite?: number;
+  channelLevels?: Partial<Record<Exclude<CurveChannel, 'rgb'>, ChannelLevel>>;
   curveShadows?: number;
   curveHighlights?: number;
   redCurveShadows?: number;
@@ -40,6 +53,7 @@ export type HighDepthAdjustments = {
   greenCurveHighlights?: number;
   blueCurveShadows?: number;
   blueCurveHighlights?: number;
+  curves?: Partial<Record<CurveChannel, CurvePoint[]>>;
   exposure?: number;
   exposureGamma?: number;
   balanceCyanRed?: number;
@@ -60,6 +74,9 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
   levelsBlack: 0,
   levelsWhite: 255,
   levelsGamma: 1,
+  outputBlack: 0,
+  outputWhite: 255,
+  channelLevels: {},
   curveShadows: 0,
   curveHighlights: 0,
   redCurveShadows: 0,
@@ -68,6 +85,7 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
   greenCurveHighlights: 0,
   blueCurveShadows: 0,
   blueCurveHighlights: 0,
+  curves: {},
   balanceCyanRed: 0,
   balanceMagentaGreen: 0,
   balanceYellowBlue: 0,
@@ -90,6 +108,45 @@ export const toneCurveValue = (input: number, shadows = 0, highlights = 0) => {
     (shadows / 100) * (1 - bounded) * input +
     (highlights / 100) * bounded * (1 - bounded)
   );
+};
+
+export const sanitizeCurvePoints = (points: CurvePoint[] = []) => {
+  const byInput = new Map<number, CurvePoint>();
+  for (const point of points.slice(0, 14)) {
+    const x = Math.round(clamp(Number(point.x)) * 10000) / 10000;
+    const y = Math.round(clamp(Number(point.y)) * 10000) / 10000;
+    if (Number.isFinite(x) && Number.isFinite(y)) byInput.set(x, { x, y });
+  }
+  if (!byInput.has(0)) byInput.set(0, { x: 0, y: 0 });
+  if (!byInput.has(1)) byInput.set(1, { x: 1, y: 1 });
+  return [...byInput.values()].sort((a, b) => a.x - b.x).slice(0, 16);
+};
+
+/** Evaluate an editable multi-point curve using stable linear interpolation. */
+export const pointCurveValue = (input: number, points: CurvePoint[] = []) => {
+  const bounded = clamp(input);
+  const normalized = sanitizeCurvePoints(points);
+  for (let index = 1; index < normalized.length; index++) {
+    const right = normalized[index];
+    if (bounded > right.x) continue;
+    const left = normalized[index - 1];
+    const distance = Math.max(0.0001, right.x - left.x);
+    return clamp(left.y + ((bounded - left.x) / distance) * (right.y - left.y));
+  }
+  return normalized.at(-1)?.y ?? bounded;
+};
+
+export const levelCurveValue = (
+  input: number,
+  level: Partial<ChannelLevel> = {},
+) => {
+  const black = clamp((level.black ?? 0) / 255);
+  const white = Math.max(black + 1 / 255, (level.white ?? 255) / 255);
+  const gamma = Math.max(0.01, level.gamma ?? 1);
+  const outputBlack = clamp((level.outputBlack ?? 0) / 255);
+  const outputWhite = Math.max(outputBlack, (level.outputWhite ?? 255) / 255);
+  const normalized = clamp((input - black) / (white - black)) ** (1 / gamma);
+  return outputBlack + normalized * (outputWhite - outputBlack);
 };
 
 const maximumFor = (data: PrecisionPixels) =>
@@ -156,9 +213,6 @@ export function adjustHighDepth(
   const brightness = Math.max(0, 1 + (settings.brightness ?? 0) / 100);
   const contrast = Math.max(0, 1 + (settings.contrast ?? 0) / 100);
   const exposure = 2 ** (settings.exposure ?? 0);
-  const black = clamp((settings.levelsBlack ?? 0) / 255);
-  const white = Math.max(black + 1 / 255, (settings.levelsWhite ?? 255) / 255);
-  const levelGamma = Math.max(0.01, settings.levelsGamma ?? 1);
   const exposureGamma = Math.max(0.01, settings.exposureGamma ?? 1);
   const saturation = Math.max(0, 1 + (settings.saturation ?? 0) / 100);
   const density = clamp((settings.photoFilterDensity ?? 0) / 100);
@@ -170,13 +224,19 @@ export function adjustHighDepth(
     let blue = sample(image.data, index + 2) * brightness;
 
     const remap = (value: number) => {
-      let normalized = Math.max(0, (value - black) / (white - black));
-      normalized = normalized ** (1 / levelGamma);
+      let normalized = levelCurveValue(value, {
+        black: settings.levelsBlack,
+        white: settings.levelsWhite,
+        gamma: settings.levelsGamma,
+        outputBlack: settings.outputBlack,
+        outputWhite: settings.outputWhite,
+      });
       normalized = toneCurveValue(
         normalized,
         settings.curveShadows,
         settings.curveHighlights,
       );
+      normalized = pointCurveValue(normalized, settings.curves?.rgb);
       normalized = Math.max(0, normalized * exposure) ** (1 / exposureGamma);
       return (normalized - 0.5) * contrast + 0.5;
     };
@@ -197,6 +257,18 @@ export function adjustHighDepth(
       blue,
       settings.blueCurveShadows,
       settings.blueCurveHighlights,
+    );
+    red = pointCurveValue(
+      levelCurveValue(red, settings.channelLevels?.red),
+      settings.curves?.red,
+    );
+    green = pointCurveValue(
+      levelCurveValue(green, settings.channelLevels?.green),
+      settings.curves?.green,
+    );
+    blue = pointCurveValue(
+      levelCurveValue(blue, settings.channelLevels?.blue),
+      settings.curves?.blue,
     );
 
     red += ((settings.balanceCyanRed ?? 0) / 100) * 0.25;
