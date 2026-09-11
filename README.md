@@ -50,6 +50,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Soft Color Range and Similar matching, Focus Range, shadows/midtones/highlights luminosity masks, Grow, and numeric Transform Selection
 - Dedicated Select and Mask workspace with six live preview modes, Smart Radius, Smooth, Feather, Shift Edge, edge-color cleanup, and nondestructive layer-mask output
 - Browser-local Subject/People, Sky, Hair, Skin, Clothing, and object selections with adjustable detail sensitivity and color-aware Refine Hair
+- Cross-browser deterministic subpixel marquee masks with reference-tested rectangle and supersampled ellipse coverage
 - Browser-local Match Color, HDR toning, perceptual vibrance, and lift/gamma/gain grading wheels
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 

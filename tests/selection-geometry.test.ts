@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   marqueeBounds,
   marqueeContains,
+  marqueeCoverage,
   strongestEdgeInPatch,
 } from '../lib/selection-geometry.ts';
 
@@ -27,6 +28,22 @@ void test('elliptical marquee includes its center and excludes its corners', () 
   assert.equal(marqueeContains('ellipse', bounds, 29, 29), true);
   assert.equal(marqueeContains('ellipse', bounds, 10, 20), false);
   assert.equal(marqueeContains('rectangle', bounds, 10, 20), true);
+});
+
+void test('fractional rectangle coverage matches subpixel reference values', () => {
+  const bounds = { x: 0.25, y: 0.25, w: 1, h: 1 };
+  assert.equal(marqueeCoverage('rectangle', bounds, 0, 0), 0.5625);
+  assert.equal(marqueeCoverage('rectangle', bounds, 1, 0), 0.1875);
+  assert.equal(marqueeCoverage('rectangle', bounds, 1, 1), 0.0625);
+  assert.equal(marqueeCoverage('rectangle', bounds, 2, 2), 0);
+});
+
+void test('supersampled ellipse coverage is symmetric and stable', () => {
+  const bounds = { x: 0.25, y: 0.25, w: 2.5, h: 2.5 };
+  assert.equal(marqueeCoverage('ellipse', bounds, 0, 0), 0.265625);
+  assert.equal(marqueeCoverage('ellipse', bounds, 2, 0), 0.265625);
+  assert.equal(marqueeCoverage('ellipse', bounds, 1, 1), 1);
+  assert.equal(marqueeCoverage('ellipse', bounds, 0, 2), 0.265625);
 });
 
 void test('magnetic selection finds a high-contrast edge in one pixel read', () => {

@@ -46,6 +46,40 @@ export const marqueeContains = (
   return dx * dx + dy * dy <= 1;
 };
 
+export const marqueeCoverage = (
+  shape: Exclude<MarqueeShape, 'row' | 'column'>,
+  bounds: SelectionRect,
+  x: number,
+  y: number,
+  samples = 8,
+) => {
+  if (bounds.w <= 0 || bounds.h <= 0) return 0;
+  if (shape === 'rectangle') {
+    const horizontal = Math.max(
+        0,
+        Math.min(x + 1, bounds.x + bounds.w) - Math.max(x, bounds.x),
+      ),
+      vertical = Math.max(
+        0,
+        Math.min(y + 1, bounds.y + bounds.h) - Math.max(y, bounds.y),
+      );
+    return horizontal * vertical;
+  }
+  const count = Math.max(2, Math.min(16, Math.round(samples))),
+    radiusX = bounds.w / 2,
+    radiusY = bounds.h / 2,
+    centerX = bounds.x + radiusX,
+    centerY = bounds.y + radiusY;
+  let inside = 0;
+  for (let sampleY = 0; sampleY < count; sampleY++)
+    for (let sampleX = 0; sampleX < count; sampleX++) {
+      const dx = (x + (sampleX + 0.5) / count - centerX) / radiusX,
+        dy = (y + (sampleY + 0.5) / count - centerY) / radiusY;
+      if (dx * dx + dy * dy <= 1) inside++;
+    }
+  return inside / (count * count);
+};
+
 const luminance = (pixels: Uint8ClampedArray, index: number) =>
   0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
 

@@ -77,7 +77,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Dedicated Select and Mask workspace with Overlay, On Black, On White, Black & White, On Layers, and Onion Skin previews.
 - [x] Color-aware Refine Hair and object-bounded Smart Radius refinement.
 - [x] Smart Radius, decontamination, live edge controls, and selection, layer-mask, or new-layer-with-mask output choices.
-- [ ] Subpixel selection-reference tests.
+- [x] Deterministic subpixel rectangle and supersampled ellipse coverage with reference tests.
 
 ## 5. Painting and retouching
 

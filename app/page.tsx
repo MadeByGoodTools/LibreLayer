@@ -231,6 +231,7 @@ import {
 } from '@/lib/group-compositing';
 import {
   marqueeBounds,
+  marqueeCoverage,
   strongestEdgeInPatch,
   type MarqueeShape,
 } from '@/lib/selection-geometry';
@@ -4012,20 +4013,29 @@ export default function Home() {
           const chosen = marqueeBounds(selectionShape, dragRect, doc.w, doc.h),
             mask = makeCanvas(doc.w, doc.h),
             ctx = mask.getContext('2d')!;
-          ctx.fillStyle = 'white';
-          if (selectionShape === 'ellipse') {
-            ctx.beginPath();
-            ctx.ellipse(
-              chosen.x + chosen.w / 2,
-              chosen.y + chosen.h / 2,
-              chosen.w / 2,
-              chosen.h / 2,
-              0,
-              0,
-              Math.PI * 2,
-            );
-            ctx.fill();
-          } else ctx.fillRect(chosen.x, chosen.y, chosen.w, chosen.h);
+          if (selectionShape === 'row' || selectionShape === 'column') {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(chosen.x, chosen.y, chosen.w, chosen.h);
+          } else {
+            const image = ctx.createImageData(doc.w, doc.h),
+              left = Math.max(0, Math.floor(chosen.x)),
+              top = Math.max(0, Math.floor(chosen.y)),
+              right = Math.min(doc.w, Math.ceil(chosen.x + chosen.w)),
+              bottom = Math.min(doc.h, Math.ceil(chosen.y + chosen.h));
+            for (let y = top; y < bottom; y++)
+              for (let x = left; x < right; x++) {
+                const alpha = Math.round(
+                    marqueeCoverage(selectionShape, chosen, x, y) * 255,
+                  ),
+                  index = (y * doc.w + x) * 4;
+                image.data[index] =
+                  image.data[index + 1] =
+                  image.data[index + 2] =
+                    255;
+                image.data[index + 3] = alpha;
+              }
+            ctx.putImageData(image, 0, 0);
+          }
           commitSelectionMask(mask, `${selectionShape} marquee`);
         } else {
           setSelection(dragRect);
