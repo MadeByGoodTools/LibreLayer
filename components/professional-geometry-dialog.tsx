@@ -18,11 +18,16 @@ export type GeometryOperation =
         | 'distort'
         | 'perspective'
         | 'warp'
+        | 'mesh'
+        | 'split'
+        | 'cylindrical'
         | 'puppet'
         | 'perspective-warp'
+        | 'preset-warp'
         | 'content-aware-scale';
       x: number;
       y: number;
+      preset?: 'arc' | 'flag' | 'fisheye' | 'twist';
     }
   | {
       kind: 'crop';
@@ -38,8 +43,12 @@ const transformLabels = {
   distort: 'Distort',
   perspective: 'Perspective',
   warp: 'Warp',
+  mesh: 'Mesh Warp',
+  split: 'Split Warp',
+  cylindrical: 'Cylindrical Warp',
   puppet: 'Puppet Warp',
   'perspective-warp': 'Perspective Warp',
+  'preset-warp': 'Warp Preset',
   'content-aware-scale': 'Content-Aware Scale',
 };
 
@@ -61,6 +70,9 @@ export function ProfessionalGeometryDialog({
   const [x, setX] = useState(12);
   const [y, setY] = useState(0);
   const [preset, setPreset] = useState('1:1');
+  const [warpPreset, setWarpPreset] = useState<
+    'arc' | 'flag' | 'fisheye' | 'twist'
+  >('arc');
   useEffect(() => {
     if (open) {
       setX(12);
@@ -69,7 +81,13 @@ export function ProfessionalGeometryDialog({
   }, [open]);
   const apply = () => {
     if (tab === 'transform')
-      onApply({ kind: 'transform', mode: transformMode, x, y });
+      onApply({
+        kind: 'transform',
+        mode: transformMode,
+        x,
+        y,
+        preset: transformMode === 'preset-warp' ? warpPreset : undefined,
+      });
     else if (tab === 'crop')
       onApply({ kind: 'crop', mode: cropMode, x, y, preset });
     else onApply({ kind: 'image', mode: 'rotate', x, y });
@@ -112,6 +130,23 @@ export function ProfessionalGeometryDialog({
                 ))}
               </select>
             </label>
+            {transformMode === 'preset-warp' && (
+              <label>
+                Preset
+                <select
+                  aria-label="Warp preset"
+                  value={warpPreset}
+                  onChange={(event) =>
+                    setWarpPreset(event.target.value as typeof warpPreset)
+                  }
+                >
+                  <option value="arc">Arc</option>
+                  <option value="flag">Flag</option>
+                  <option value="fisheye">Fisheye</option>
+                  <option value="twist">Twist</option>
+                </select>
+              </label>
+            )}
             <div className="geometry-number-grid">
               <label>
                 {transformMode === 'content-aware-scale'
@@ -145,10 +180,10 @@ export function ProfessionalGeometryDialog({
               </label>
             </div>
             <p className="geometry-help">
-              Distort and perspective use two-axis corner displacement. Warp
-              bends a pixel grid; Puppet Warp pulls around a centre pin.
-              Content-Aware Scale protects detailed pixels and the active
-              selection.
+              Distort and perspective use two-axis corner displacement. Mesh,
+              split, cylindrical, Puppet, and four named warp presets provide
+              different editable deformation fields. Content-Aware Scale
+              protects detailed pixels and the active selection.
             </p>
           </TabsContent>
           <TabsContent value="crop">

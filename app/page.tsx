@@ -266,6 +266,7 @@ import {
   type ContentAwareSamplingMode,
 } from '@/lib/content-aware';
 import { contentAwareScale as scaleContentAwarePixels } from '@/lib/content-aware-scale';
+import { warpSourcePoint, type WarpMode } from '@/lib/warp-engine';
 import {
   historyExceedsPolicy,
   normalizeHistoryPolicy,
@@ -699,41 +700,21 @@ const transformRasterPixels = (
   mode: Extract<GeometryOperation, { kind: 'transform' }>['mode'],
   horizontal: number,
   vertical: number,
+  preset?: 'arc' | 'flag' | 'fisheye' | 'twist',
 ) => {
-  const amountX = Math.max(-1, Math.min(1, horizontal / 100)),
-    amountY = Math.max(-1, Math.min(1, vertical / 100));
   if (mode === 'content-aware-scale') return;
-  remapRaster(canvas, (x, y, w, h) => {
-    const nx = x / Math.max(1, w - 1) - 0.5,
-      ny = y / Math.max(1, h - 1) - 0.5;
-    if (mode === 'skew') return [x - amountX * ny * w, y - amountY * nx * h];
-    if (mode === 'distort')
-      return [
-        x - amountX * ny * w * (0.5 + nx),
-        y - amountY * nx * h * (0.5 + ny),
-      ];
-    if (mode === 'perspective') {
-      const scaleX = Math.max(0.2, 1 + amountX * ny * 1.6),
-        scaleY = Math.max(0.2, 1 + amountY * nx * 1.6);
-      return [(nx / scaleX + 0.5) * w, (ny / scaleY + 0.5) * h];
-    }
-    if (mode === 'warp')
-      return [
-        x - Math.sin((y / h) * Math.PI) * amountX * w * 0.22,
-        y - Math.sin((x / w) * Math.PI) * amountY * h * 0.22,
-      ];
-    if (mode === 'puppet') {
-      const distance = Math.hypot(nx, ny),
-        influence = Math.max(0, 1 - distance * 2);
-      return [
-        x - amountX * w * 0.35 * influence,
-        y - amountY * h * 0.35 * influence,
-      ];
-    }
-    const scaleX = Math.max(0.2, 1 + amountX * ny * 1.8),
-      scaleY = Math.max(0.2, 1 + amountY * nx * 1.8);
-    return [(nx / scaleX + 0.5) * w, (ny / scaleY + 0.5) * h];
-  });
+  remapRaster(canvas, (x, y, w, h) =>
+    warpSourcePoint(
+      mode as WarpMode,
+      x,
+      y,
+      w,
+      h,
+      horizontal,
+      vertical,
+      preset,
+    ),
+  );
 };
 
 const rotateCanvasPixels = (source: HTMLCanvasElement, degrees: number) => {
@@ -6521,6 +6502,7 @@ export default function Home() {
           operation.mode,
           operation.x,
           operation.y,
+          operation.preset,
         );
         const surface = surfacesRef.current.get(meta.id);
         if (surface?.mask)
@@ -6529,6 +6511,7 @@ export default function Home() {
             operation.mode,
             operation.x,
             operation.y,
+            operation.preset,
           );
       }
       snapshot(
