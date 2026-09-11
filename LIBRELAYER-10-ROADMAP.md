@@ -54,7 +54,9 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Monotonic spline Curves with a direct numeric point editor.
 - [ ] Freehand Curves, smoothing, and clipping controls.
 - [ ] Hue/Saturation color ranges and on-image adjustment.
-- [ ] Selective Color, Channel Mixer, Gradient Map, and Color Lookup preset library.
+- [x] Full RGB Channel Mixer with output-channel recipes and constants.
+- [x] Editable two-color Gradient Map with reverse and live strength.
+- [ ] Selective Color and a built-in Color Lookup preset library.
 - [ ] Shadows/Highlights, Replace Color, Match Color, HDR toning, and perceptual vibrance.
 - [ ] Lift/gamma/gain wheels, waveform scale controls, and reference comparison.
 

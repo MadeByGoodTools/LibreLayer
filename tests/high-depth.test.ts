@@ -223,6 +223,47 @@ void test('input and output levels remain bounded and work per channel', () => {
   assert.equal(adjusted[1], adjusted[2]);
 });
 
+void test('Channel Mixer can remap output channels without changing alpha', () => {
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Float32Array([0.2, 0.6, 0.9, 0.4]),
+    },
+    {
+      channelMixer: {
+        red: { red: 0, green: 0, blue: 100, constant: 0 },
+        green: { red: 0, green: 100, blue: 0, constant: 0 },
+        blue: { red: 100, green: 0, blue: 0, constant: 0 },
+      },
+    },
+  );
+  assert.ok(Math.abs(adjusted[0] - 0.9) < 1e-6);
+  assert.ok(Math.abs(adjusted[1] - 0.6) < 1e-6);
+  assert.ok(Math.abs(adjusted[2] - 0.2) < 1e-6);
+  assert.ok(Math.abs(adjusted[3] - 0.4) < 1e-6);
+});
+
+void test('Gradient Map blends luminance between editable endpoint colors', () => {
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Float32Array([0.5, 0.5, 0.5, 1]),
+    },
+    {
+      gradientMap: {
+        shadows: '#ff0000',
+        highlights: '#0000ff',
+        amount: 100,
+      },
+    },
+  );
+  assert.ok(Math.abs(adjusted[0] - 0.5) < 1e-6);
+  assert.equal(adjusted[1], 0);
+  assert.ok(Math.abs(adjusted[2] - 0.5) < 1e-6);
+});
+
 void test('new adjustment defaults are a neutral full recipe', () => {
   const defaults = createDefaultHighDepthAdjustments();
   const source = new Float32Array([0.2, 0.4, 0.7, 0.5]);

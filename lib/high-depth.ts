@@ -23,6 +23,16 @@ export type ChannelLevel = {
   outputBlack: number;
   outputWhite: number;
 };
+export type ChannelMixer = Record<
+  'red' | 'green' | 'blue',
+  { red: number; green: number; blue: number; constant: number }
+>;
+export type GradientMap = {
+  shadows: string;
+  highlights: string;
+  amount: number;
+  reverse?: boolean;
+};
 
 export type PrecisionLayer = PrecisionImage & {
   opacity?: number;
@@ -65,6 +75,8 @@ export type HighDepthAdjustments = {
   photoFilterDensity?: number;
   lut3d?: CubeLut;
   lutAmount?: number;
+  channelMixer?: ChannelMixer;
+  gradientMap?: GradientMap;
 };
 
 export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
@@ -100,6 +112,16 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
   photoFilter: '#ec8a32',
   photoFilterDensity: 0,
   lutAmount: 100,
+  channelMixer: {
+    red: { red: 100, green: 0, blue: 0, constant: 0 },
+    green: { red: 0, green: 100, blue: 0, constant: 0 },
+    blue: { red: 0, green: 0, blue: 100, constant: 0 },
+  },
+  gradientMap: {
+    shadows: '#000000',
+    highlights: '#ffffff',
+    amount: 0,
+  },
 });
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -314,6 +336,18 @@ export function adjustHighDepth(
       settings.curves?.blue,
     );
 
+    if (settings.channelMixer) {
+      const source = [red, green, blue] as const,
+        mix = (recipe: ChannelMixer['red']) =>
+          source[0] * (recipe.red / 100) +
+          source[1] * (recipe.green / 100) +
+          source[2] * (recipe.blue / 100) +
+          recipe.constant / 100;
+      red = mix(settings.channelMixer.red);
+      green = mix(settings.channelMixer.green);
+      blue = mix(settings.channelMixer.blue);
+    }
+
     red += ((settings.balanceCyanRed ?? 0) / 100) * 0.25;
     green += ((settings.balanceMagentaGreen ?? 0) / 100) * 0.25;
     blue += ((settings.balanceYellowBlue ?? 0) / 100) * 0.25;
@@ -332,6 +366,21 @@ export function adjustHighDepth(
       settings.lut3d,
       (settings.lutAmount ?? 100) / 100,
     );
+
+    if ((settings.gradientMap?.amount ?? 0) > 0) {
+      const map = settings.gradientMap!,
+        shadow = parseHexColor(map.shadows),
+        highlight = parseHexColor(map.highlights),
+        sourceLuma = clamp(0.2126 * red + 0.7152 * green + 0.0722 * blue),
+        position = map.reverse ? 1 - sourceLuma : sourceLuma,
+        amount = clamp(map.amount / 100),
+        mapped = shadow.map(
+          (value, channel) => value + (highlight[channel] - value) * position,
+        );
+      red += (mapped[0] - red) * amount;
+      green += (mapped[1] - green) * amount;
+      blue += (mapped[2] - blue) * amount;
+    }
 
     let luma = 0.299 * red + 0.587 * green + 0.114 * blue;
     const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);

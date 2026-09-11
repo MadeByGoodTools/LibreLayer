@@ -1052,6 +1052,86 @@ button {
   color: #ff9ca2;
   font-size: 11px;
 }
+.advanced-color-controls {
+  display: grid;
+  gap: 6px;
+}
+.advanced-color-controls > details {
+  border: 1px solid #393c43;
+  border-radius: 6px;
+  background: #17191d;
+}
+.advanced-color-controls summary {
+  padding: 8px 10px;
+  color: #e2e5ea;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.advanced-color-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+.channel-mixer-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.channel-mixer-tabs button,
+.color-reset-button {
+  min-height: 25px;
+  border: 1px solid #41454e;
+  border-radius: 4px;
+  background: #22252b;
+  color: #adb2bc;
+  font-size: 11px;
+}
+.channel-mixer-tabs button.active.red {
+  border-color: #ff777b;
+  color: #ffb0b3;
+}
+.channel-mixer-tabs button.active.green {
+  border-color: #5ed795;
+  color: #9aebbd;
+}
+.channel-mixer-tabs button.active.blue {
+  border-color: #6d9cff;
+  color: #aec7ff;
+}
+.advanced-color-slider {
+  display: grid;
+  gap: 3px;
+}
+.advanced-color-slider label {
+  display: flex;
+  justify-content: space-between;
+  color: #aeb3bd;
+  font-size: 11px;
+}
+.advanced-color-slider label span {
+  color: #edf0f4;
+  font-variant-numeric: tabular-nums;
+}
+.gradient-map-colors {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 4px;
+}
+.gradient-map-colors label {
+  display: grid;
+  gap: 3px;
+  color: white;
+  font-size: 10px;
+  text-shadow: 0 1px 2px black;
+}
+.gradient-map-colors input {
+  width: 34px;
+  height: 24px;
+  padding: 1px;
+}
 .levels-control {
   display: grid;
   gap: 7px;

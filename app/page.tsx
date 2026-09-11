@@ -204,6 +204,7 @@ import { AdjustmentPresets } from '@/components/adjustment-presets';
 import { LevelsControl } from '@/components/levels-control';
 import { ToneCurve } from '@/components/tone-curve';
 import { LutControl } from '@/components/lut-control';
+import { AdvancedColorControls } from '@/components/advanced-color-controls';
 import { SoftProofOverlay } from '@/components/soft-proof-overlay';
 import {
   createPsdCompatibilityReport,
@@ -12350,6 +12351,11 @@ export default function Home() {
                                   }}
                                 />
                                 <LutControl
+                                  adjustments={active.precisionAdjustment ?? {}}
+                                  onChange={updatePrecisionAdjustment}
+                                  onCommit={(label) => snapshot(label)}
+                                />
+                                <AdvancedColorControls
                                   adjustments={active.precisionAdjustment ?? {}}
                                   onChange={updatePrecisionAdjustment}
                                   onCommit={(label) => snapshot(label)}
