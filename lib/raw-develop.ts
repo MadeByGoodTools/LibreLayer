@@ -21,6 +21,12 @@ export type RawDevelopSettings = {
   highlightRecovery: number;
 };
 
+export type RawOutputColorSpace =
+  | 'srgb'
+  | 'display-p3'
+  | 'adobe-rgb'
+  | 'prophoto-rgb';
+
 export const defaultRawDevelopSettings: RawDevelopSettings = {
   exposure: 0,
   contrast: 0,
@@ -34,6 +40,34 @@ export const defaultRawDevelopSettings: RawDevelopSettings = {
   saturation: 0,
   highlightRecovery: 35,
 };
+
+export function isRawDevelopSettings(
+  value: unknown,
+): value is RawDevelopSettings {
+  if (!value || typeof value !== 'object') return false;
+  const settings = value as Record<string, unknown>;
+  const ranges: Record<keyof RawDevelopSettings, [number, number]> = {
+    exposure: [-5, 5],
+    contrast: [-100, 100],
+    highlights: [-100, 100],
+    shadows: [-100, 100],
+    whites: [-100, 100],
+    blacks: [-100, 100],
+    temperature: [-100, 100],
+    tint: [-100, 100],
+    vibrance: [-100, 100],
+    saturation: [-100, 100],
+    highlightRecovery: [0, 100],
+  };
+  return (
+    Object.entries(ranges) as [keyof RawDevelopSettings, [number, number]][]
+  ).every(
+    ([key, [minimum, maximum]]) =>
+      Number.isFinite(settings[key]) &&
+      Number(settings[key]) >= minimum &&
+      Number(settings[key]) <= maximum,
+  );
+}
 
 const clamp = (value: number, low = 0, high = 1) =>
   Math.max(low, Math.min(high, value));
@@ -55,11 +89,43 @@ const d50ToD65 = [
 const xyzD65ToSrgb = [
   3.2406, -1.5372, -0.4986, -0.9689, 1.8758, 0.0415, 0.0557, -0.204, 1.057,
 ];
+const xyzD65ToDisplayP3 = [
+  2.4935, -0.9314, -0.4027, -0.8295, 1.7627, 0.0236, 0.0358, -0.0762, 0.9569,
+];
+const xyzD65ToAdobeRgb = [
+  2.0416, -0.565, -0.3447, -0.9692, 1.876, 0.0416, 0.0134, -0.1184, 1.0154,
+];
 
 const encodeSrgb = (value: number) => {
   const safe = clamp(value);
   return safe <= 0.0031308 ? safe * 12.92 : 1.055 * safe ** (1 / 2.4) - 0.055;
 };
+
+function encodeProPhotoPixel(
+  proPhoto: number[],
+  colorSpace: RawOutputColorSpace,
+) {
+  if (colorSpace === 'prophoto-rgb')
+    return proPhoto.map((value) => {
+      const safe = clamp(value);
+      return safe < 1 / 512 ? safe * 16 : safe ** (1 / 1.8);
+    });
+  const xyzD50 = multiply3(proPhotoToXyzD50, proPhoto);
+  const xyzD65 = multiply3(d50ToD65, xyzD50);
+  const target = multiply3(
+    colorSpace === 'srgb'
+      ? xyzD65ToSrgb
+      : colorSpace === 'display-p3'
+        ? xyzD65ToDisplayP3
+        : xyzD65ToAdobeRgb,
+    xyzD65,
+  );
+  return target.map((value) =>
+    colorSpace === 'adobe-rgb'
+      ? clamp(value) ** (1 / 2.19921875)
+      : encodeSrgb(value),
+  );
+}
 
 export async function decodeCameraRaw(file: Blob): Promise<RawLinearImage> {
   const { default: LibRaw } = await import('libraw-wasm');
@@ -130,7 +196,7 @@ function bilinear(
   return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
 }
 
-function developPixel(rgb: number[], settings: RawDevelopSettings) {
+function adjustRawPixel(rgb: number[], settings: RawDevelopSettings) {
   const gain = 2 ** settings.exposure;
   const warmth = settings.temperature / 300;
   const tint = settings.tint / 350;
@@ -178,9 +244,7 @@ function developPixel(rgb: number[], settings: RawDevelopSettings) {
   g = luma + (g - luma) * saturation;
   b = luma + (b - luma) * saturation;
 
-  const xyzD50 = multiply3(proPhotoToXyzD50, [r, g, b]);
-  const xyzD65 = multiply3(d50ToD65, xyzD50);
-  return multiply3(xyzD65ToSrgb, xyzD65).map(encodeSrgb);
+  return [r, g, b];
 }
 
 export function developRawRgba(
@@ -198,9 +262,14 @@ export function developRawRgba(
     const sourceY = ((y + 0.5) / height) * image.height - 0.5;
     for (let x = 0; x < width; x++) {
       const sourceX = ((x + 0.5) / width) * image.width - 0.5;
-      const rgb = developPixel(
-        [0, 1, 2].map((channel) => bilinear(image, sourceX, sourceY, channel)),
-        settings,
+      const rgb = encodeProPhotoPixel(
+        adjustRawPixel(
+          [0, 1, 2].map((channel) =>
+            bilinear(image, sourceX, sourceY, channel),
+          ),
+          settings,
+        ),
+        'srgb',
       );
       const target = (y * width + x) * 4;
       data[target] = Math.round(rgb[0] * 255);
@@ -210,4 +279,29 @@ export function developRawRgba(
     }
   }
   return { width, height, data };
+}
+
+/** Develop the scene-linear RAW master directly into true 16-bit RGB samples. */
+export function developRawRgb16(
+  image: RawLinearImage,
+  settings: RawDevelopSettings,
+  colorSpace: RawOutputColorSpace,
+) {
+  const data = new Uint8Array(image.width * image.height * 6);
+  const view = new DataView(data.buffer);
+  for (let pixel = 0; pixel < image.width * image.height; pixel++) {
+    const source = pixel * 3;
+    const encoded = encodeProPhotoPixel(
+      adjustRawPixel(
+        [image.data[source], image.data[source + 1], image.data[source + 2]],
+        settings,
+      ),
+      colorSpace,
+    );
+    const target = pixel * 6;
+    view.setUint16(target, Math.round(clamp(encoded[0]) * 65535), true);
+    view.setUint16(target + 2, Math.round(clamp(encoded[1]) * 65535), true);
+    view.setUint16(target + 4, Math.round(clamp(encoded[2]) * 65535), true);
+  }
+  return { width: image.width, height: image.height, data };
 }

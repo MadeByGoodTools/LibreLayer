@@ -1,6 +1,7 @@
 import TiffWorker from './tiff-worker?worker';
 export type PagedImage = {
   count: number;
+  bitDepth?: number;
   render: (
     page: number,
     dpi: number,
@@ -12,7 +13,7 @@ function tiff(
   buffer: ArrayBuffer,
   page?: number,
 ): Promise<{
-  pages: { width: number; height: number }[];
+  pages: { width: number; height: number; bitDepth: number }[];
   width: number;
   height: number;
   orientation: number;
@@ -47,6 +48,7 @@ export async function openPagedImage(file: File): Promise<PagedImage> {
     const info = await tiff(await file.arrayBuffer());
     return {
       count: info.pages.length,
+      bitDepth: Math.max(...info.pages.map((page) => page.bitDepth)),
       close: () => {},
       render: async (page, _dpi, check) => {
         if (!Number.isInteger(page) || page < 1 || page > info.pages.length)

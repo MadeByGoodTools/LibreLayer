@@ -1756,6 +1756,39 @@ button {
   border-top: 1px solid #3d3e44;
   border-bottom: 1px solid #3d3e44;
 }
+.raw-smart-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid #3d3e44;
+  background: linear-gradient(90deg, #20332f, #292a2f);
+}
+.raw-smart-summary div,
+.raw-smart-summary strong,
+.raw-smart-summary small {
+  display: block;
+}
+.raw-smart-summary strong {
+  color: #dff8ee;
+  font-size: 12px;
+}
+.raw-smart-summary small {
+  margin-top: 2px;
+  color: #91afa4;
+  font-size: 10px;
+}
+.raw-smart-summary button {
+  flex: none;
+  min-height: 27px;
+  border: 1px solid #477b6b;
+  border-radius: 5px;
+  background: #31594d;
+  color: #effff9;
+  padding: 4px 8px;
+  font-size: 11px;
+}
 .smart-filter-stack > header,
 .smart-filter-heading {
   display: flex;

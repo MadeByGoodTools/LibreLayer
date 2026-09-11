@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import UTIF from 'utif';
 import {
   convertRgbaColorSpace,
   createIccProfile,
+  encodeRawTiff16,
   encodeTiff,
   type ExportColorSpace,
 } from '../lib/image-export.ts';
@@ -90,4 +92,51 @@ void test('TIFF rejects invalid print resolution metadata', () => {
     data: new Uint8ClampedArray([0, 0, 0, 255]),
   } as ImageData;
   assert.throws(() => encodeTiff(image, { resolution: 0 }), /36 to 2400/);
+});
+
+void test('RAW master TIFF contains real 16-bit RGB samples and an ICC profile', async () => {
+  const blob = encodeRawTiff16(
+    {
+      image: {
+        width: 2,
+        height: 1,
+        data: new Float32Array([0.01234, 0.23456, 0.78901, 0.5, 0.4, 0.3]),
+        bitDepth: 14,
+        camera: 'Test Camera',
+        lens: 'Test Lens',
+      },
+      settings: {
+        exposure: 0,
+        contrast: 0,
+        highlights: 0,
+        shadows: 0,
+        whites: 0,
+        blacks: 0,
+        temperature: 0,
+        tint: 0,
+        vibrance: 0,
+        saturation: 0,
+        highlightRecovery: 35,
+      },
+    },
+    { colorSpace: 'prophoto-rgb', resolution: 300 },
+  );
+  const buffer = await blob.arrayBuffer(),
+    entries = tiffEntries(buffer),
+    view = new DataView(buffer);
+  assert.equal(entries.get(258)?.count, 3);
+  const bitsOffset = entries.get(258)?.value ?? 0;
+  assert.deepEqual(
+    [0, 1, 2].map((index) => view.getUint16(bitsOffset + index * 2, true)),
+    [16, 16, 16],
+  );
+  assert.equal((entries.get(277)?.value ?? 0) & 0xffff, 3);
+  assert.equal(entries.has(338), false);
+  assert.ok((entries.get(34675)?.count ?? 0) > 300);
+  const pixelOffset = entries.get(273)?.value ?? 0;
+  const firstSample = view.getUint16(pixelOffset, true);
+  assert.notEqual(firstSample % 257, 0);
+  const pages = UTIF.decode(buffer);
+  UTIF.decodeImage(buffer, pages[0]);
+  assert.equal(UTIF.toRGBA8(pages[0]).length, 8);
 });

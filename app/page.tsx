@@ -73,11 +73,13 @@ import {
   deleteVersion,
   forgetRecentFile,
   getDefaultSaveDirectory,
+  loadRawAsset,
   loadWorkspaceState,
   recentFiles,
   recoveryRecords,
   rememberRecentFile,
   saveRecovery,
+  saveRawAsset,
   saveVersion,
   saveWorkspaceState,
   setDefaultSaveDirectory,
@@ -183,9 +185,11 @@ import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
   developRawRgba,
+  isRawDevelopSettings,
   type RawDevelopSettings,
   type RawLinearImage,
 } from '@/lib/raw-develop';
+import type { HighPrecisionRawSource } from '@/lib/image-export';
 const Mask = Focus;
 
 type Tool =
@@ -249,6 +253,15 @@ type SmartObjectData = {
   sourceData: string;
   filters: SmartFilter[];
   filterMask: boolean;
+  raw?: {
+    assetId: string;
+    width: number;
+    height: number;
+    bitDepth: number;
+    camera: string;
+    lens: string;
+    settings: RawDevelopSettings;
+  };
 };
 type TextLayerData = {
   content: string;
@@ -1167,6 +1180,9 @@ export default function Home() {
   const [exportSource, setExportSource] = useState<HTMLCanvasElement | null>(
     null,
   );
+  const [exportRawSource, setExportRawSource] =
+    useState<HighPrecisionRawSource | null>(null);
+  const [exportRawLoading, setExportRawLoading] = useState(false);
   const [pagedFile, setPagedFile] = useState<File | null>(null);
   const [recoveries, setRecoveries] = useState<RecoveryRecord[] | null>(null),
     [versions, setVersions] = useState<VersionRecord[] | null>(null),
@@ -1375,6 +1391,9 @@ export default function Home() {
     [rawDevelop, setRawDevelop] = useState<{
       name: string;
       image: RawLinearImage;
+      sourceFile?: File;
+      targetLayerId?: string;
+      assetId?: string;
     } | null>(null),
     [rawSettings, setRawSettings] = useState<RawDevelopSettings>(
       defaultRawDevelopSettings,
@@ -1438,6 +1457,8 @@ export default function Home() {
   const cloneHasOffset = useRef(false);
   const cloneOffset = useRef({ x: 0, y: 0 });
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
+  const rawMasterCache = useRef(new Map<string, RawLinearImage>());
+  const exportRawGeneration = useRef(0);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
   const smartObjectFileRef = useRef<HTMLInputElement>(null);
   const smartFileAction = useRef<'link' | 'replace' | 'relink'>('link');
@@ -4691,9 +4712,55 @@ export default function Home() {
       if (smartObjectFileRef.current) smartObjectFileRef.current.value = '';
     }
   };
-  const editSmartContents = () => {
-    const smart = selected()?.smartObject;
+  const resolveRawMaster = async (raw: NonNullable<SmartObjectData['raw']>) => {
+    const cached = rawMasterCache.current.get(raw.assetId);
+    if (cached) return { image: cached, file: undefined };
+    const file = await loadRawAsset(raw.assetId);
+    if (!file)
+      throw Error(
+        'The original RAW source is not stored on this computer. The embedded preview is still available.',
+      );
+    const image = await decodeCameraRaw(file);
+    if (image.width !== raw.width || image.height !== raw.height)
+      throw Error(
+        'The stored RAW source dimensions no longer match this Smart Object.',
+      );
+    rawMasterCache.current.clear();
+    rawMasterCache.current.set(raw.assetId, image);
+    return { image, file };
+  };
+  const editSmartContents = async () => {
+    const meta = selected(),
+      smart = meta?.smartObject;
     if (!smart) return;
+    if (smart.raw && meta) {
+      if (psdBusyRef.current) return;
+      psdBusyRef.current = true;
+      setPsdBusy(true);
+      setStatus('Reopening the high-precision Camera Raw master…');
+      try {
+        const { image, file } = await resolveRawMaster(smart.raw);
+        setRawSettings({ ...smart.raw.settings });
+        setRawDevelop({
+          name: smart.sourceName,
+          image,
+          sourceFile: file,
+          targetLayerId: meta.id,
+          assetId: smart.raw.assetId,
+        });
+        setStatus('Camera Raw settings ready for non-destructive editing');
+      } catch (error) {
+        setPsdError(
+          error instanceof Error
+            ? error.message
+            : 'The Camera Raw master could not be reopened.',
+        );
+      } finally {
+        psdBusyRef.current = false;
+        setPsdBusy(false);
+      }
+      return;
+    }
     const image = new Image();
     image.src = smart.sourceData;
     image.onload = () => {
@@ -6561,6 +6628,24 @@ export default function Home() {
           throw Error('Invalid layer link');
         if (item.clipping !== undefined && typeof item.clipping !== 'boolean')
           throw Error('Invalid clipping mask');
+        if (item.smartObject?.raw) {
+          const raw = item.smartObject.raw;
+          if (
+            typeof raw.assetId !== 'string' ||
+            !raw.assetId ||
+            !Number.isInteger(raw.width) ||
+            !Number.isInteger(raw.height) ||
+            raw.width < 1 ||
+            raw.height < 1 ||
+            !Number.isInteger(raw.bitDepth) ||
+            raw.bitDepth < 8 ||
+            raw.bitDepth > 16 ||
+            typeof raw.camera !== 'string' ||
+            typeof raw.lens !== 'string' ||
+            !isRawDevelopSettings(raw.settings)
+          )
+            throw Error('Invalid Camera Raw Smart Object');
+        }
         const { pixels, mask, ...meta } = item;
         surfaces.set(meta.id, {
           pixels: await decode(pixels),
@@ -7304,6 +7389,7 @@ export default function Home() {
       setRawDevelop({
         name: file.name,
         image,
+        sourceFile: file,
       });
       setStatus(
         `RAW sensor data ready — ${image.width} × ${image.height} · ${image.bitDepth}-bit${image.camera ? ` · ${image.camera}` : ''}`,
@@ -7328,15 +7414,79 @@ export default function Home() {
         requestAnimationFrame(() => resolve()),
       );
       const developed = developRawRgba(rawDevelop.image, rawSettings);
-      const pixels = makeCanvas(developed.width, developed.height);
-      pixels
+      const developedCanvas = makeCanvas(developed.width, developed.height);
+      developedCanvas
         .getContext('2d')!
         .putImageData(
           new ImageData(developed.data, developed.width, developed.height),
           0,
           0,
         );
-      const id = crypto.randomUUID();
+      const target = rawDevelop.targetLayerId
+        ? layersRef.current.find(
+            (layer) => layer.id === rawDevelop.targetLayerId,
+          )
+        : undefined;
+      const id = target?.id ?? crypto.randomUUID();
+      const assetId = rawDevelop.assetId ?? crypto.randomUUID();
+      let storedLocally = false;
+      if (rawDevelop.sourceFile) {
+        try {
+          await saveRawAsset(assetId, rawDevelop.sourceFile);
+          storedLocally = true;
+        } catch {
+          storedLocally = false;
+        }
+      } else {
+        try {
+          storedLocally = Boolean(await loadRawAsset(assetId));
+        } catch {
+          storedLocally = false;
+        }
+      }
+      rawMasterCache.current.clear();
+      rawMasterCache.current.set(assetId, rawDevelop.image);
+      const pixels = target ? makeCanvas(doc.w, doc.h) : developedCanvas;
+      if (target) {
+        pixels
+          .getContext('2d')!
+          .drawImage(developedCanvas, 0, 0, pixels.width, pixels.height);
+        developedCanvas.width = developedCanvas.height = 1;
+      }
+      const smartObject: SmartObjectData = {
+        kind: 'embedded',
+        sourceName: rawDevelop.name,
+        sourceData: pixels.toDataURL('image/png'),
+        filters: target?.smartObject?.filters ?? [],
+        filterMask: target?.smartObject?.filterMask ?? false,
+        raw: {
+          assetId,
+          width: rawDevelop.image.width,
+          height: rawDevelop.image.height,
+          bitDepth: rawDevelop.image.bitDepth,
+          camera: rawDevelop.image.camera,
+          lens: rawDevelop.image.lens,
+          settings: { ...rawSettings },
+        },
+      };
+      if (target) {
+        const surface = surfacesRef.current.get(target.id);
+        if (!surface) throw Error('The RAW Smart Object pixels are missing.');
+        surface.pixels = pixels;
+        patchLayer(
+          target.id,
+          { smartObject },
+          'Update Camera Raw Smart Object',
+        );
+        render();
+        setRawDevelop(null);
+        setStatus(
+          storedLocally
+            ? 'Camera Raw Smart Object updated non-destructively'
+            : 'Camera Raw Smart Object updated; keep the original RAW file available for future edits',
+        );
+        return;
+      }
       loadImportedDocument(
         `${rawDevelop.name} — developed`,
         pixels.width,
@@ -7353,13 +7503,18 @@ export default function Home() {
             hasMask: false,
             maskEnabled: true,
             kind: 'pixel',
+            smartObject,
           },
         ],
         new Map([[id, { pixels }]]),
         'Open Camera Raw',
       );
       setRawDevelop(null);
-      setStatus('RAW development opened as an editable pixel layer');
+      setStatus(
+        storedLocally
+          ? 'RAW opened as a re-editable 16-bit Camera Raw Smart Object'
+          : 'RAW opened as a Smart Object; keep the original RAW file available for future edits',
+      );
     } catch (error) {
       setPsdError(
         error instanceof Error
@@ -7960,6 +8115,32 @@ export default function Home() {
     const canvas = makeCanvas(doc.w, doc.h);
     renderLayers(canvas.getContext('2d')!);
     setExportSource(canvas);
+    setExportRawSource(null);
+    const raw = selected()?.smartObject?.raw;
+    const generation = ++exportRawGeneration.current;
+    if (!raw) {
+      setExportRawLoading(false);
+      return;
+    }
+    setExportRawLoading(true);
+    void resolveRawMaster(raw)
+      .then(({ image }) => {
+        if (generation !== exportRawGeneration.current) return;
+        setExportRawSource({ image, settings: { ...raw.settings } });
+        setStatus('16-bit RAW master ready in Export');
+      })
+      .catch((error) => {
+        if (generation !== exportRawGeneration.current) return;
+        setStatus(
+          error instanceof Error
+            ? error.message
+            : 'The 16-bit RAW master is unavailable.',
+        );
+      })
+      .finally(() => {
+        if (generation === exportRawGeneration.current)
+          setExportRawLoading(false);
+      });
   };
   const showRecoveries = async () => {
     try {
@@ -11237,34 +11418,57 @@ export default function Home() {
                         ))}
                       </div>
                       {active?.smartObject && (
-                        <SmartFilterStack
-                          filters={active.smartObject.filters}
-                          disabled={isLocked(active.id)}
-                          filterMask={active.smartObject.filterMask}
-                          blendOptions={(
-                            Object.keys(blendLabels) as BlendMode[]
-                          )
-                            .filter((value) => !(value in extraBlends))
-                            .map((value) => ({
-                              value,
-                              label: blendLabels[value],
-                            }))}
-                          onAdd={addSmartFilter}
-                          onChange={(id, patch) =>
-                            patchSmartFilter(id, patch as Partial<SmartFilter>)
-                          }
-                          onCommit={(label) => snapshot(label)}
-                          onMove={moveSmartFilter}
-                          onRemove={removeSmartFilter}
-                          onEditMask={() => {
-                            if (
-                              active.smartObject?.filterMask &&
-                              active.hasMask
+                        <>
+                          {active.smartObject.raw && (
+                            <div className="raw-smart-summary">
+                              <div>
+                                <strong>
+                                  {active.smartObject.raw.bitDepth}-bit RAW
+                                  Smart Object
+                                </strong>
+                                <small>
+                                  Scene-linear master ·{' '}
+                                  {active.smartObject.raw.width} ×{' '}
+                                  {active.smartObject.raw.height}
+                                </small>
+                              </div>
+                              <button onClick={() => void editSmartContents()}>
+                                Edit Camera Raw
+                              </button>
+                            </div>
+                          )}
+                          <SmartFilterStack
+                            filters={active.smartObject.filters}
+                            disabled={isLocked(active.id)}
+                            filterMask={active.smartObject.filterMask}
+                            blendOptions={(
+                              Object.keys(blendLabels) as BlendMode[]
                             )
-                              setEditing('mask');
-                            else addSmartFilterMask();
-                          }}
-                        />
+                              .filter((value) => !(value in extraBlends))
+                              .map((value) => ({
+                                value,
+                                label: blendLabels[value],
+                              }))}
+                            onAdd={addSmartFilter}
+                            onChange={(id, patch) =>
+                              patchSmartFilter(
+                                id,
+                                patch as Partial<SmartFilter>,
+                              )
+                            }
+                            onCommit={(label) => snapshot(label)}
+                            onMove={moveSmartFilter}
+                            onRemove={removeSmartFilter}
+                            onEditMask={() => {
+                              if (
+                                active.smartObject?.filterMask &&
+                                active.hasMask
+                              )
+                                setEditing('mask');
+                              else addSmartFilterMask();
+                            }}
+                          />
+                        </>
                       )}
                       <div className="layer-organize">
                         <details className="layer-comps">
@@ -12202,7 +12406,11 @@ export default function Home() {
         onOpenChange={(open) => !open && setRawDevelop(null)}
       >
         <DialogContent className="raw-develop-dialog">
-          <DialogTitle>Camera Raw</DialogTitle>
+          <DialogTitle>
+            {rawDevelop?.targetLayerId
+              ? 'Camera Raw Smart Object'
+              : 'Camera Raw'}
+          </DialogTitle>
           <DialogDescription>
             Develop the camera sensor data in a scene-linear, wide-gamut
             workspace. The original RAW file is never changed.
@@ -12264,7 +12472,9 @@ export default function Home() {
               Reset
             </Button>
             <Button onClick={() => void applyRawDevelop()}>
-              Open full resolution
+              {rawDevelop?.targetLayerId
+                ? 'Update Smart Object'
+                : 'Open as RAW Smart Object'}
             </Button>
             <Button variant="outline" onClick={() => setRawDevelop(null)}>
               Cancel
@@ -12482,8 +12692,15 @@ export default function Home() {
       </Dialog>
       <ExportDialog
         source={exportSource}
+        highPrecision={exportRawSource}
+        highPrecisionLoading={exportRawLoading}
         name={fileName}
-        onClose={() => setExportSource(null)}
+        onClose={() => {
+          exportRawGeneration.current++;
+          setExportSource(null);
+          setExportRawSource(null);
+          setExportRawLoading(false);
+        }}
       />
       <PagedImportDialog
         onCheck={(w, h) => requireRoom(w, h, w * h)}

@@ -6,9 +6,18 @@ export type ExportColorSpace =
   | 'prophoto-rgb';
 
 import { checkDimensions } from './document-limits.ts';
+import {
+  developRawRgb16,
+  type RawDevelopSettings,
+  type RawLinearImage,
+} from './raw-develop.ts';
 
 type TiffOptions = { colorSpace?: ExportColorSpace; resolution?: number };
 type TiffEntry = { tag: number; type: number; count: number; data: Uint8Array };
+export type HighPrecisionRawSource = {
+  image: RawLinearImage;
+  settings: RawDevelopSettings;
+};
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const ascii = (value: string) => new TextEncoder().encode(value);
@@ -241,36 +250,47 @@ export function createIccProfile(space: ExportColorSpace) {
   return profile;
 }
 
-export function encodeTiff(
-  image: ImageData,
-  options: TiffOptions = {},
-): ArrayBuffer {
-  const colorSpace = options.colorSpace ?? 'srgb';
-  const resolution = options.resolution ?? 300;
+function validateResolution(resolution: number) {
   if (!Number.isInteger(resolution) || resolution < 36 || resolution > 2400)
     throw Error('Choose a resolution from 36 to 2400 pixels per inch.');
-  const profile = createIccProfile(colorSpace);
-  const pixels = convertRgbaColorSpace(image.data, colorSpace);
+}
+
+function encodeTiffParts(
+  width: number,
+  height: number,
+  pixels: Uint8Array,
+  bits: 8 | 16,
+  samples: 3 | 4,
+  profile: Uint8Array,
+  resolution: number,
+) {
   const software = nullTerminated('LibreLayer 1.0');
   const entries: TiffEntry[] = [
-    { tag: 256, type: 4, count: 1, data: u32([image.width]) },
-    { tag: 257, type: 4, count: 1, data: u32([image.height]) },
-    { tag: 258, type: 3, count: 4, data: u16([8, 8, 8, 8]) },
+    { tag: 256, type: 4, count: 1, data: u32([width]) },
+    { tag: 257, type: 4, count: 1, data: u32([height]) },
+    { tag: 258, type: 3, count: samples, data: u16(Array(samples).fill(bits)) },
     { tag: 259, type: 3, count: 1, data: u16([1]) },
     { tag: 262, type: 3, count: 1, data: u16([2]) },
     { tag: 273, type: 4, count: 1, data: u32([0]) },
     { tag: 274, type: 3, count: 1, data: u16([1]) },
-    { tag: 277, type: 3, count: 1, data: u16([4]) },
-    { tag: 278, type: 4, count: 1, data: u32([image.height]) },
+    { tag: 277, type: 3, count: 1, data: u16([samples]) },
+    { tag: 278, type: 4, count: 1, data: u32([height]) },
     { tag: 279, type: 4, count: 1, data: u32([pixels.length]) },
     { tag: 282, type: 5, count: 1, data: rational(resolution) },
     { tag: 283, type: 5, count: 1, data: rational(resolution) },
     { tag: 284, type: 3, count: 1, data: u16([1]) },
     { tag: 296, type: 3, count: 1, data: u16([2]) },
     { tag: 305, type: 2, count: software.length, data: software },
-    { tag: 338, type: 3, count: 1, data: u16([2]) },
+    ...(samples === 4 ? [{ tag: 338, type: 3, count: 1, data: u16([2]) }] : []),
+    {
+      tag: 339,
+      type: 3,
+      count: samples,
+      data: u16(Array(samples).fill(1)),
+    },
     { tag: 34675, type: 7, count: profile.length, data: profile },
   ];
+  entries.sort((a, b) => a.tag - b.tag);
   const ifdOffset = 8;
   const ifdSize = 2 + entries.length * 12 + 4;
   let externalOffset = ifdOffset + ifdSize;
@@ -299,7 +319,50 @@ export function encodeTiff(
   const headerView = new DataView(header.buffer);
   headerView.setUint16(2, 42, true);
   headerView.setUint32(4, ifdOffset, true);
-  return concat(header, ifd, ...external, new Uint8Array(pixels)).buffer;
+  return [header, ifd, ...external, pixels];
+}
+
+export function encodeTiff(
+  image: ImageData,
+  options: TiffOptions = {},
+): ArrayBuffer {
+  const colorSpace = options.colorSpace ?? 'srgb';
+  const resolution = options.resolution ?? 300;
+  validateResolution(resolution);
+  const pixels = new Uint8Array(convertRgbaColorSpace(image.data, colorSpace));
+  return concat(
+    ...encodeTiffParts(
+      image.width,
+      image.height,
+      pixels,
+      8,
+      4,
+      createIccProfile(colorSpace),
+      resolution,
+    ),
+  ).buffer;
+}
+
+/** Export a RAW master without passing through the browser's 8-bit canvas. */
+export function encodeRawTiff16(
+  source: HighPrecisionRawSource,
+  options: TiffOptions = {},
+) {
+  const colorSpace = options.colorSpace ?? 'prophoto-rgb';
+  const resolution = options.resolution ?? 300;
+  validateResolution(resolution);
+  checkDimensions(source.image.width, source.image.height);
+  const developed = developRawRgb16(source.image, source.settings, colorSpace);
+  const parts = encodeTiffParts(
+    developed.width,
+    developed.height,
+    developed.data,
+    16,
+    3,
+    createIccProfile(colorSpace),
+    resolution,
+  );
+  return new Blob(parts as unknown as BlobPart[], { type: 'image/tiff' });
 }
 
 function encodePdf(jpeg: Uint8Array, width: number, height: number): Blob {

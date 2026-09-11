@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   defaultRawDevelopSettings,
   developRawRgba,
+  developRawRgb16,
+  isRawDevelopSettings,
   type RawLinearImage,
 } from '../lib/raw-develop.ts';
 
@@ -57,4 +59,24 @@ void test('exposure and highlight recovery materially affect the developed resul
   });
   assert.ok(brighter.data[0] > neutral.data[0]);
   assert.ok(recovered.data[12] <= brighter.data[12]);
+});
+
+void test('16-bit RAW development preserves precision beyond 8-bit expansion', () => {
+  const result = developRawRgb16(
+    image,
+    defaultRawDevelopSettings,
+    'prophoto-rgb',
+  );
+  const samples = new Uint16Array(result.data.buffer);
+  assert.equal(samples.length, image.width * image.height * 3);
+  assert.ok(samples.some((sample) => sample % 257 !== 0));
+});
+
+void test('saved Camera Raw recipes require every bounded adjustment', () => {
+  assert.equal(isRawDevelopSettings(defaultRawDevelopSettings), true);
+  assert.equal(
+    isRawDevelopSettings({ ...defaultRawDevelopSettings, exposure: 8 }),
+    false,
+  );
+  assert.equal(isRawDevelopSettings({ exposure: 0, contrast: 0 }), false);
 });

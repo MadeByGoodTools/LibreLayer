@@ -31,6 +31,15 @@ export type RecentFileRecord = {
   handle: LocalFileHandle;
 };
 
+export type RawAssetRecord = {
+  id: string;
+  name: string;
+  type: string;
+  lastModified: number;
+  blob: Blob;
+  updated: number;
+};
+
 export type LocalDirectoryHandle = {
   name: string;
   queryPermission: (options: { mode: 'readwrite' }) => Promise<PermissionState>;
@@ -55,7 +64,7 @@ const databaseName = 'pixel-studio-recovery';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 3);
+    const request = indexedDB.open(databaseName, 4);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains('documents'))
         request.result.createObjectStore('documents', { keyPath: 'id' });
@@ -71,6 +80,8 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!request.result.objectStoreNames.contains('recent'))
         request.result.createObjectStore('recent', { keyPath: 'id' });
+      if (!request.result.objectStoreNames.contains('raw-assets'))
+        request.result.createObjectStore('raw-assets', { keyPath: 'id' });
     };
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
@@ -315,4 +326,24 @@ export async function clearDefaultSaveDirectory(): Promise<void> {
       reject(tx.error);
     };
   });
+}
+
+export const saveRawAsset = (id: string, file: File) =>
+  writeOne('raw-assets', {
+    id,
+    name: file.name,
+    type: file.type,
+    lastModified: file.lastModified,
+    blob: file,
+    updated: Date.now(),
+  } satisfies RawAssetRecord);
+
+export async function loadRawAsset(id: string): Promise<File | null> {
+  const record = await readOne<RawAssetRecord>('raw-assets', id);
+  return record
+    ? new File([record.blob], record.name, {
+        type: record.type,
+        lastModified: record.lastModified,
+      })
+    : null;
 }
