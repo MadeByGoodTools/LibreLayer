@@ -95,7 +95,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Content-Aware Fill workspace with editable sampling overlay.
 - [x] Auto, rectangular, custom, and all-layer sampling.
 - [x] Color, rotation, scale, and mirror adaptation with live preview.
-- [ ] Content-Aware Scale and Move.
+- [x] Detail-weighted Content-Aware Scale with active-selection protection, plus Content-Aware Move.
 - [ ] Perspective, Puppet, mesh, split, cylindrical, and preset warps.
 - [ ] Vanishing Point and Adaptive Wide Angle workspaces.
 - [ ] Liquify with forward, reconstruct, twirl, pucker, bloat, push, freeze, thaw, face controls, and reusable meshes.

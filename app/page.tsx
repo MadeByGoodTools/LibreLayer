@@ -265,6 +265,7 @@ import {
   contentAwareFill,
   type ContentAwareSamplingMode,
 } from '@/lib/content-aware';
+import { contentAwareScale as scaleContentAwarePixels } from '@/lib/content-aware-scale';
 import {
   historyExceedsPolicy,
   normalizeHistoryPolicy,
@@ -6486,29 +6487,34 @@ export default function Home() {
       if (operation.mode === 'content-aware-scale') {
         const scaleX = Math.max(0.5, Math.min(2, operation.x / 100)),
           scaleY = Math.max(0.5, Math.min(2, (operation.y || 100) / 100)),
-          original = makeCanvas(doc.w, doc.h),
-          oc = original.getContext('2d')!;
-        oc.drawImage(target.ctx.canvas, 0, 0);
+          width = Math.max(1, Math.round(doc.w * scaleX)),
+          height = Math.max(1, Math.round(doc.h * scaleY)),
+          source = target.ctx.getImageData(0, 0, doc.w, doc.h),
+          protection = selectionRef.current
+            ? selectionMask(doc.w, doc.h, 0, 0)
+            : undefined,
+          protectionData = protection
+            ?.getContext('2d', { willReadFrequently: true })!
+            .getImageData(0, 0, doc.w, doc.h).data,
+          scaled = scaleContentAwarePixels(
+            { width: doc.w, height: doc.h, data: source.data },
+            width,
+            height,
+            protectionData,
+          ),
+          output = makeCanvas(width, height),
+          outputContext = output.getContext('2d')!,
+          outputPixels = outputContext.createImageData(width, height);
+        outputPixels.data.set(scaled.data);
+        outputContext.putImageData(outputPixels, 0, 0);
         target.ctx.clearRect(0, 0, doc.w, doc.h);
         target.ctx.drawImage(
-          original,
-          (doc.w * (1 - scaleX)) / 2,
-          (doc.h * (1 - scaleY)) / 2,
-          doc.w * scaleX,
-          doc.h * scaleY,
+          output,
+          Math.round((doc.w - width) / 2),
+          Math.round((doc.h - height) / 2),
         );
-        if (selectionRef.current) {
-          const protectedPixels = makeCanvas(doc.w, doc.h),
-            pc = protectedPixels.getContext('2d')!,
-            mask = selectionMask(doc.w, doc.h, 0, 0);
-          pc.drawImage(original, 0, 0);
-          pc.globalCompositeOperation = 'destination-in';
-          pc.drawImage(mask, 0, 0);
-          target.ctx.drawImage(protectedPixels, 0, 0);
-          protectedPixels.width = protectedPixels.height = 1;
-          mask.width = mask.height = 1;
-        }
-        original.width = original.height = 1;
+        output.width = output.height = 1;
+        if (protection) protection.width = protection.height = 1;
       } else {
         transformRasterPixels(
           target.ctx.canvas,
@@ -6532,7 +6538,11 @@ export default function Home() {
           .join(' '),
       );
       render();
-      setStatus('Advanced transform applied');
+      setStatus(
+        operation.mode === 'content-aware-scale'
+          ? `Content-Aware Scale applied at ${operation.x}% × ${operation.y || 100}%${selectionRef.current ? ' with selection protection' : ''}`
+          : 'Advanced transform applied',
+      );
       return;
     }
     if (operation.kind === 'crop') {

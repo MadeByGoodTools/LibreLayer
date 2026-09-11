@@ -95,11 +95,15 @@ export function ProfessionalGeometryDialog({
               <select
                 aria-label="Advanced transform mode"
                 value={transformMode}
-                onChange={(event) =>
-                  setTransformMode(
-                    event.target.value as keyof typeof transformLabels,
-                  )
-                }
+                onChange={(event) => {
+                  const next = event.target
+                    .value as keyof typeof transformLabels;
+                  setTransformMode(next);
+                  if (next === 'content-aware-scale') {
+                    setX(100);
+                    setY(100);
+                  }
+                }}
               >
                 {Object.entries(transformLabels).map(([value, label]) => (
                   <option key={value} value={value}>
