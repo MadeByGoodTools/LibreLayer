@@ -37,7 +37,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Native editable solid-color, gradient, and pattern fill layers with masks, transforms, and persisted recipes.
 - [x] Editable layer effects with alpha contours, synchronized global light, independent scaling, and copy/paste/clear.
 - [x] Reference-equation separable and nonseparable blend-mode math with per-layer gamma or linear-light compositing.
-- [ ] Complete knockout, group isolation, and nested clipping behavior.
+- [x] Recursive pass-through/isolated group compositing with shallow/deep knockout and nested clipping-base resolution.
 - [x] Mask density, feather, live overlay, direct edge refinement, and independent position, rotation, and two-axis transforms.
 - [x] Cross-document layer-tree copying that preserves groups, masks, links, Smart Objects, fills, adjustments, and effects without rasterization.
 - [x] Versioned pixel-reference compositing fixtures covering opaque, partial-alpha, transparent, gamma, and linear-light output.

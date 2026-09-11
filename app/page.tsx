@@ -220,6 +220,12 @@ import {
 } from '@/lib/mask-transform';
 import { planLayerTransfer } from '@/lib/layer-transfer';
 import {
+  clippingBaseId,
+  groupCanPassThrough,
+  type GroupIsolation,
+  type KnockoutMode,
+} from '@/lib/group-compositing';
+import {
   marqueeBounds,
   strongestEdgeInPatch,
   type MarqueeShape,
@@ -371,6 +377,8 @@ type LayerMeta = {
   opacity: number;
   blend: BlendMode;
   blendSpace?: BlendSpace;
+  groupIsolation?: GroupIsolation;
+  knockout?: KnockoutMode;
   x: number;
   y: number;
   hasMask: boolean;
@@ -1943,63 +1951,90 @@ export default function Home() {
   ) => {
     const visible = (layer: LayerMeta) =>
       layer.visible && !ancestors(stack, layer.id).some((p) => !p.visible);
-    ctx.clearRect(0, 0, size.w, size.h);
-    for (const layer of [...treeOrder(stack)].reverse()) {
-      if (!visible(layer) || layer.kind === 'group') continue;
-      if (layer.kind === 'adjustment') {
-        applyAdjustment(ctx, layer, size.w, size.h, surfaceMap.get(layer.id));
-        continue;
+    const erase = (
+      target: CanvasRenderingContext2D,
+      mask: HTMLCanvasElement,
+    ) => {
+      target.save();
+      target.globalAlpha = 1;
+      target.globalCompositeOperation = 'destination-out';
+      target.drawImage(mask, 0, 0);
+      target.restore();
+    };
+    const nodeAppearance = (layer: LayerMeta): HTMLCanvasElement | null => {
+      if (layer.kind === 'adjustment') return null;
+      const appearance = makeCanvas(size.w, size.h);
+      if (layer.kind === 'group') {
+        const masks = paintSiblings(appearance.getContext('2d')!, layer.id);
+        for (const mask of masks) mask.width = mask.height = 1;
+        return appearance;
       }
       const surface = surfaceMap.get(layer.id);
-      if (!surface) continue;
-      if (
-        !layer.clipping &&
-        !layer.blendIf &&
-        !pixelBlendModes.has(layer.blend) &&
-        layer.blendSpace !== 'linear'
-      ) {
-        drawLayer(ctx, layer, surface, size.w, size.h);
-        continue;
+      if (!surface) {
+        appearance.width = appearance.height = 1;
+        return null;
       }
-      const source = makeCanvas(size.w, size.h),
-        sc = source.getContext('2d')!;
       drawLayer(
-        sc,
-        { ...layer, blend: 'source-over' },
+        appearance.getContext('2d')!,
+        {
+          ...layer,
+          opacity: 100,
+          fill: 100,
+          blend: 'source-over',
+          blendIf: undefined,
+          clipping: false,
+          knockout: 'none',
+        },
+        surface,
+        size.w,
+        size.h,
+      );
+      return appearance;
+    };
+    const paintSurface = (
+      target: CanvasRenderingContext2D,
+      layer: LayerMeta,
+      surface: LayerSurface,
+      siblings: LayerMeta[],
+    ) => {
+      const source = makeCanvas(size.w, size.h),
+        sourceContext = source.getContext('2d')!;
+      drawLayer(
+        sourceContext,
+        {
+          ...layer,
+          kind: 'pixel',
+          blend: 'source-over',
+          blendIf: undefined,
+          clipping: false,
+          knockout: 'none',
+        },
         surface,
         size.w,
         size.h,
       );
       if (layer.clipping) {
-        const siblings = stack.filter((l) => l.parentId === layer.parentId),
-          index = siblings.findIndex((l) => l.id === layer.id),
-          base = siblings.slice(index + 1).find((l) => !l.clipping);
-        if (
-          !base ||
-          !visible(base) ||
-          base.kind === 'group' ||
-          base.kind === 'adjustment'
-        ) {
+        const baseId = clippingBaseId(siblings, layer.id),
+          base = stack.find((candidate) => candidate.id === baseId),
+          alpha = base && visible(base) ? nodeAppearance(base) : null;
+        if (!alpha) {
           source.width = source.height = 1;
-          continue;
+          return [] as HTMLCanvasElement[];
         }
-        const baseSurface = surfaceMap.get(base.id);
-        if (!baseSurface) {
-          source.width = source.height = 1;
-          continue;
-        }
-        const alpha = makeCanvas(size.w, size.h);
-        drawLayer(
-          alpha.getContext('2d')!,
-          { ...base, opacity: 100, fill: 100, blend: 'source-over' },
-          baseSurface,
-          size.w,
-          size.h,
-        );
-        sc.globalCompositeOperation = 'destination-in';
-        sc.drawImage(alpha, 0, 0);
-        sc.globalCompositeOperation = 'source-over';
+        sourceContext.globalCompositeOperation = 'destination-in';
+        sourceContext.drawImage(alpha, 0, 0);
+        sourceContext.globalCompositeOperation = 'source-over';
         alpha.width = alpha.height = 1;
+      }
+      const knockout = layer.knockout ?? 'none',
+        deepMasks: HTMLCanvasElement[] = [];
+      if (knockout !== 'none') {
+        erase(target, source);
+        if (knockout === 'deep') {
+          const mask = makeCanvas(size.w, size.h);
+          mask.getContext('2d')!.drawImage(source, 0, 0);
+          deepMasks.push(mask);
+        }
       }
       if (
         layer.blendIf ||
@@ -2007,21 +2042,70 @@ export default function Home() {
         layer.blendSpace === 'linear'
       )
         compositePixels(
-          ctx,
+          target,
           source,
           layer.blend,
           layer.blendIf,
           layer.blendSpace,
         );
       else {
-        ctx.save();
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = layer.blend as GlobalCompositeOperation;
-        ctx.drawImage(source, 0, 0);
-        ctx.restore();
+        target.save();
+        target.globalAlpha = 1;
+        target.globalCompositeOperation =
+          layer.blend as GlobalCompositeOperation;
+        target.drawImage(source, 0, 0);
+        target.restore();
       }
       source.width = source.height = 1;
+      return deepMasks;
+    };
+    const paintNode = (
+      target: CanvasRenderingContext2D,
+      layer: LayerMeta,
+      siblings: LayerMeta[],
+    ): HTMLCanvasElement[] => {
+      if (!visible(layer)) return [];
+      if (layer.kind === 'adjustment') {
+        applyAdjustment(
+          target,
+          layer,
+          size.w,
+          size.h,
+          surfaceMap.get(layer.id),
+        );
+        return [];
+      }
+      if (layer.kind === 'group') {
+        if (groupCanPassThrough(layer)) return paintSiblings(target, layer.id);
+        const groupCanvas = makeCanvas(size.w, size.h),
+          nestedDeep = paintSiblings(groupCanvas.getContext('2d')!, layer.id);
+        for (const mask of nestedDeep) erase(target, mask);
+        const groupSurface = surfaceMap.get(layer.id),
+          applied = paintSurface(
+            target,
+            layer,
+            { pixels: groupCanvas, mask: groupSurface?.mask },
+            siblings,
+          );
+        groupCanvas.width = groupCanvas.height = 1;
+        return [...nestedDeep, ...applied];
+      }
+      const surface = surfaceMap.get(layer.id);
+      return surface ? paintSurface(target, layer, surface, siblings) : [];
+    };
+    function paintSiblings(
+      target: CanvasRenderingContext2D,
+      parentId?: string,
+    ) {
+      const siblings = stack.filter((layer) => layer.parentId === parentId),
+        deepMasks: HTMLCanvasElement[] = [];
+      for (const layer of [...siblings].reverse())
+        deepMasks.push(...paintNode(target, layer, siblings));
+      return deepMasks;
     }
+    ctx.clearRect(0, 0, size.w, size.h);
+    const deepMasks = paintSiblings(ctx);
+    for (const mask of deepMasks) mask.width = mask.height = 1;
   };
   const render = useCallback(() => {
     const out = displayRef.current;
@@ -7212,6 +7296,8 @@ export default function Home() {
           l.clipping ||
           l.blendIf ||
           l.blendSpace === 'linear' ||
+          l.groupIsolation === 'isolated' ||
+          (l.knockout !== undefined && l.knockout !== 'none') ||
           l.blend in extraBlends ||
           !!l.vectorMask ||
           (l.hasMask &&
@@ -7665,6 +7751,19 @@ export default function Home() {
           item.blendSpace !== 'linear'
         )
           throw Error('Invalid layer blend calculation');
+        if (
+          item.groupIsolation !== undefined &&
+          item.groupIsolation !== 'pass-through' &&
+          item.groupIsolation !== 'isolated'
+        )
+          throw Error('Invalid group compositing mode');
+        if (
+          item.knockout !== undefined &&
+          item.knockout !== 'none' &&
+          item.knockout !== 'shallow' &&
+          item.knockout !== 'deep'
+        )
+          throw Error('Invalid knockout mode');
         if (item.linkId !== undefined && typeof item.linkId !== 'string')
           throw Error('Invalid layer link');
         if (item.clipping !== undefined && typeof item.clipping !== 'boolean')
@@ -12640,7 +12739,7 @@ export default function Home() {
                               </strong>
                               <small>
                                 {layer.kind === 'group'
-                                  ? 'Group'
+                                  ? `${layer.groupIsolation ?? 'Pass-through'} group${layer.knockout && layer.knockout !== 'none' ? ` · ${layer.knockout} knockout` : ''}`
                                   : layer.kind === 'adjustment'
                                     ? 'Adjustment layer'
                                     : layer.kind === 'fill'
@@ -13024,6 +13123,55 @@ export default function Home() {
                               : 'Clip to layer below'}
                           </button>
                         </div>
+                        {active?.kind === 'group' && (
+                          <label>
+                            Group compositing
+                            <select
+                              aria-label="Group compositing"
+                              value={active.groupIsolation ?? 'pass-through'}
+                              disabled={isLocked(active.id)}
+                              onChange={(event) =>
+                                patchLayer(
+                                  active.id,
+                                  {
+                                    groupIsolation: event.target
+                                      .value as GroupIsolation,
+                                  },
+                                  'Group compositing',
+                                )
+                              }
+                            >
+                              <option value="pass-through">Pass-through</option>
+                              <option value="isolated">Isolated</option>
+                            </select>
+                          </label>
+                        )}
+                        <label>
+                          Knockout
+                          <select
+                            aria-label="Layer knockout"
+                            value={active?.knockout ?? 'none'}
+                            disabled={
+                              !active ||
+                              active.kind === 'adjustment' ||
+                              isLocked(active.id)
+                            }
+                            onChange={(event) =>
+                              active &&
+                              patchLayer(
+                                active.id,
+                                {
+                                  knockout: event.target.value as KnockoutMode,
+                                },
+                                'Layer knockout',
+                              )
+                            }
+                          >
+                            <option value="none">None</option>
+                            <option value="shallow">Shallow</option>
+                            <option value="deep">Deep</option>
+                          </select>
+                        </label>
                         <BlendIfControls
                           value={active?.blendIf}
                           disabled={
