@@ -5,6 +5,7 @@ import {
   compositeHighDepth,
   precisionToEncodedRgba,
   precisionToDisplayRgba,
+  toneCurveValue,
 } from '../lib/high-depth.ts';
 import { readSupportedPsdHeader } from '../lib/psd-header.ts';
 
@@ -142,4 +143,16 @@ void test('editable black-and-white channel mixes remain high precision', () => 
   assert.equal(adjusted[1], adjusted[2]);
   assert.ok(adjusted[0] > 0 && adjusted[0] < 1);
   assert.ok(Math.abs(adjusted[3] - 40000 / 65535) < 1e-7);
+});
+
+void test('tone curve stays neutral at zero and pins black and white', () => {
+  assert.equal(toneCurveValue(0.25), 0.25);
+  assert.equal(toneCurveValue(0.75), 0.75);
+  assert.equal(toneCurveValue(0, 100, -100), 0);
+  assert.equal(toneCurveValue(1, 100, -100), 1);
+});
+
+void test('tone curve zones independently lift and lower their handles', () => {
+  assert.ok(toneCurveValue(0.25, 50, 0) > 0.25);
+  assert.ok(toneCurveValue(0.75, 0, -50) < 0.75);
 });

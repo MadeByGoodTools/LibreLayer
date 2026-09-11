@@ -199,6 +199,7 @@ import {
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
 import { Histogram } from '@/components/histogram';
+import { ToneCurve } from '@/components/tone-curve';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
 import {
   decodeCameraRaw,
@@ -12170,6 +12171,20 @@ export default function Home() {
                                 <p className="precision-adjustment-note">
                                   Combined floating-point recipe · editable
                                 </p>
+                                <ToneCurve
+                                  shadows={Number(
+                                    active.precisionAdjustment?.curveShadows ??
+                                      0,
+                                  )}
+                                  highlights={Number(
+                                    active.precisionAdjustment
+                                      ?.curveHighlights ?? 0,
+                                  )}
+                                  onChange={updatePrecisionAdjustment}
+                                  onCommit={() =>
+                                    snapshot('Tone curve adjustment')
+                                  }
+                                />
                                 {(
                                   [
                                     [

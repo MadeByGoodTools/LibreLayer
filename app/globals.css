@@ -969,6 +969,69 @@ button {
 .histogram-clipping .warning {
   color: #ffbd69;
 }
+.tone-curve-editor {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #393c43;
+  border-radius: 6px;
+  background: #17191d;
+}
+.tone-curve-heading,
+.tone-curve-values {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #aeb3bd;
+  font-size: 12px;
+}
+.tone-curve-heading strong {
+  color: #eff1f4;
+  font-size: 13px;
+}
+.tone-curve-editor svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 126px;
+  border: 1px solid #34373d;
+  background: linear-gradient(135deg, #14161a, #1c1f24);
+  touch-action: none;
+}
+.tone-curve-grid,
+.tone-curve-baseline,
+.tone-curve-line {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.tone-curve-grid {
+  stroke: #2d3036;
+  stroke-width: 1;
+}
+.tone-curve-baseline {
+  stroke: #626873;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.tone-curve-line {
+  stroke: #d9e4ff;
+  stroke-width: 2;
+}
+.tone-curve-editor circle {
+  fill: #76a5ff;
+  stroke: #f5f8ff;
+  stroke-width: 2;
+  cursor: ns-resize;
+  vector-effect: non-scaling-stroke;
+}
+.tone-curve-editor circle:hover,
+.tone-curve-editor circle:focus,
+.tone-curve-editor circle.dragging {
+  fill: #a9c6ff;
+  outline: none;
+  filter: drop-shadow(0 0 4px rgb(118 165 255 / 0.75));
+}
 .layer-controls [data-slot='slider'] {
   grid-column: 1/-1;
   width: 100%;

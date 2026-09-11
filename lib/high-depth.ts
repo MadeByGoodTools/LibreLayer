@@ -46,6 +46,16 @@ export type HighDepthAdjustments = {
 const clamp = (value: number, low = 0, high = 1) =>
   Math.max(low, Math.min(high, value));
 
+/** Evaluate the two-zone editable tone curve used by adjustment layers. */
+export const toneCurveValue = (input: number, shadows = 0, highlights = 0) => {
+  const bounded = clamp(input);
+  return (
+    input +
+    (shadows / 100) * (1 - bounded) * input +
+    (highlights / 100) * bounded * (1 - bounded)
+  );
+};
+
 const maximumFor = (data: PrecisionPixels) =>
   data instanceof Float32Array ? 1 : data instanceof Uint16Array ? 65535 : 255;
 
@@ -126,10 +136,11 @@ export function adjustHighDepth(
     const remap = (value: number) => {
       let normalized = Math.max(0, (value - black) / (white - black));
       normalized = normalized ** (1 / levelGamma);
-      const bounded = clamp(normalized);
-      normalized +=
-        ((settings.curveShadows ?? 0) / 100) * (1 - bounded) * normalized +
-        ((settings.curveHighlights ?? 0) / 100) * bounded * (1 - bounded);
+      normalized = toneCurveValue(
+        normalized,
+        settings.curveShadows,
+        settings.curveHighlights,
+      );
       normalized = Math.max(0, normalized * exposure) ** (1 / exposureGamma);
       return (normalized - 0.5) * contrast + 0.5;
     };
