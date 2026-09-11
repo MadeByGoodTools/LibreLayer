@@ -23,7 +23,62 @@ export const extraBlends = {
   dissolve: 'Dissolve',
 };
 export type ExtraBlend = keyof typeof extraBlends;
+export type BlendSpace = 'gamma' | 'linear';
+export const pixelBlendModes = new Set([
+  'multiply',
+  'screen',
+  'overlay',
+  'darken',
+  'lighten',
+  'color-dodge',
+  'color-burn',
+  'hard-light',
+  'soft-light',
+  'difference',
+  'exclusion',
+  'hue',
+  'saturation',
+  'color',
+  'luminosity',
+  ...Object.keys(extraBlends),
+]);
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
+const srgbToLinear = (value: number) =>
+  value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+const linearToSrgb = (value: number) =>
+  value <= 0.0031308 ? value * 12.92 : 1.055 * Math.pow(value, 1 / 2.4) - 0.055;
+const luminance = ([r, g, b]: number[]) => 0.3 * r + 0.59 * g + 0.11 * b;
+const saturation = (rgb: number[]) => Math.max(...rgb) - Math.min(...rgb);
+const clipColor = (rgb: number[]) => {
+  const light = luminance(rgb),
+    low = Math.min(...rgb),
+    high = Math.max(...rgb);
+  let next = [...rgb];
+  if (low < 0)
+    next = next.map(
+      (value) => light + ((value - light) * light) / (light - low),
+    );
+  if (high > 1)
+    next = next.map(
+      (value) => light + ((value - light) * (1 - light)) / (high - light),
+    );
+  return next.map(clamp);
+};
+const setLuminance = (rgb: number[], light: number) =>
+  clipColor(rgb.map((value) => value + light - luminance(rgb)));
+const setSaturation = (rgb: number[], target: number) => {
+  const order = [0, 1, 2].sort((a, b) => rgb[a] - rgb[b]),
+    [minimum, middle, maximum] = order,
+    next = [...rgb];
+  if (next[maximum] > next[minimum]) {
+    next[middle] =
+      ((next[middle] - next[minimum]) * target) /
+      (next[maximum] - next[minimum]);
+    next[maximum] = target;
+  } else next[middle] = next[maximum] = 0;
+  next[minimum] = 0;
+  return next;
+};
 export function rangeAlpha(value: number, [low, start, end, high]: BlendRange) {
   if (value < low || value > high) return 0;
   return Math.min(
@@ -53,8 +108,33 @@ export function validBlendIf(value: unknown): value is BlendIf {
     })
   );
 }
-export function blendChannel(b: number, s: number, mode: ExtraBlend): number {
+export function blendChannel(b: number, s: number, mode: string): number {
   switch (mode) {
+    case 'multiply':
+      return b * s;
+    case 'screen':
+      return b + s - b * s;
+    case 'overlay':
+      return b <= 0.5 ? 2 * b * s : 1 - 2 * (1 - b) * (1 - s);
+    case 'darken':
+      return Math.min(b, s);
+    case 'lighten':
+      return Math.max(b, s);
+    case 'color-dodge':
+      return s >= 1 ? 1 : clamp(b / (1 - s));
+    case 'color-burn':
+      return s <= 0 ? 0 : 1 - clamp((1 - b) / s);
+    case 'hard-light':
+      return s <= 0.5 ? 2 * b * s : 1 - 2 * (1 - b) * (1 - s);
+    case 'soft-light': {
+      if (s <= 0.5) return b - (1 - 2 * s) * b * (1 - b);
+      const d = b <= 0.25 ? ((16 * b - 12) * b + 4) * b : Math.sqrt(b);
+      return b + (2 * s - 1) * (d - b);
+    }
+    case 'difference':
+      return Math.abs(b - s);
+    case 'exclusion':
+      return b + s - 2 * b * s;
     case 'linear-dodge':
       return Math.min(1, b + s);
     case 'linear-burn':
@@ -81,15 +161,51 @@ export function blendChannel(b: number, s: number, mode: ExtraBlend): number {
       return s;
   }
 }
+export function blendRgb(backdrop: number[], source: number[], mode: string) {
+  if (mode === 'hue')
+    return setLuminance(
+      setSaturation(source, saturation(backdrop)),
+      luminance(backdrop),
+    );
+  if (mode === 'saturation')
+    return setLuminance(
+      setSaturation(backdrop, saturation(source)),
+      luminance(backdrop),
+    );
+  if (mode === 'color') return setLuminance(source, luminance(backdrop));
+  if (mode === 'luminosity') return setLuminance(backdrop, luminance(source));
+  if (mode === 'darker-color')
+    return luminance(source) < luminance(backdrop) ? source : backdrop;
+  if (mode === 'lighter-color')
+    return luminance(source) > luminance(backdrop) ? source : backdrop;
+  return backdrop.map((value, index) =>
+    blendChannel(value, source[index], mode),
+  );
+}
+export function blendRgbInSpace(
+  backdrop: number[],
+  source: number[],
+  mode: string,
+  space: BlendSpace,
+) {
+  const convertIn = (value: number) =>
+      space === 'linear' ? srgbToLinear(clamp(value)) : clamp(value),
+    convertOut = (value: number) =>
+      space === 'linear' ? linearToSrgb(clamp(value)) : clamp(value);
+  return blendRgb(backdrop.map(convertIn), source.map(convertIn), mode).map(
+    convertOut,
+  );
+}
 // Tile-sized reads bound temporary pixel arrays; source/backdrop remain full-resolution canvases.
 export function compositePixels(
   target: CanvasRenderingContext2D,
   source: HTMLCanvasElement,
   mode: string,
   blendIf?: BlendIf,
+  blendSpace: BlendSpace = 'gamma',
 ) {
   const sourceCtx = source.getContext('2d')!,
-    custom = mode in extraBlends;
+    custom = pixelBlendModes.has(mode) || blendSpace === 'linear';
   for (let y = 0; y < source.height; y += 256)
     for (let x = 0; x < source.width; x += 256) {
       const w = Math.min(256, source.width - x),
@@ -135,25 +251,25 @@ export function compositePixels(
           sa = (seed >>> 0) / 4294967296 < sa ? 1 : 0;
         }
         const alpha = sa + ba * (1 - sa),
-          sSum = s.data[i] + s.data[i + 1] + s.data[i + 2],
-          bSum = b.data[i] + b.data[i + 1] + b.data[i + 2];
+          sourceRgb = [s.data[i], s.data[i + 1], s.data[i + 2]].map((value) =>
+            blendSpace === 'linear' ? srgbToLinear(value / 255) : value / 255,
+          ),
+          backdropRgb = [b.data[i], b.data[i + 1], b.data[i + 2]].map(
+            (value) =>
+              blendSpace === 'linear' ? srgbToLinear(value / 255) : value / 255,
+          ),
+          blendedRgb = blendRgb(backdropRgb, sourceRgb, mode);
         for (let c = 0; c < 3; c++) {
-          const sv = s.data[i + c] / 255,
-            bv = b.data[i + c] / 255,
-            blend =
-              mode === 'darker-color'
-                ? sSum < bSum
-                  ? sv
-                  : bv
-                : mode === 'lighter-color'
-                  ? sSum > bSum
-                    ? sv
-                    : bv
-                  : blendChannel(bv, sv, mode as ExtraBlend);
-          b.data[i + c] = alpha
-            ? (255 * ((1 - sa) * ba * bv + sa * ((1 - ba) * sv + ba * blend))) /
-              alpha
-            : 0;
+          const sv = sourceRgb[c],
+            bv = backdropRgb[c],
+            encoded = alpha
+              ? ((1 - sa) * ba * bv +
+                  sa * ((1 - ba) * sv + ba * blendedRgb[c])) /
+                alpha
+              : 0;
+          b.data[i + c] =
+            255 *
+            (blendSpace === 'linear' ? linearToSrgb(clamp(encoded)) : encoded);
         }
         b.data[i + 3] = alpha * 255;
       }

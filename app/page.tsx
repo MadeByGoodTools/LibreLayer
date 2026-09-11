@@ -191,10 +191,12 @@ import {
 } from '@/lib/layer-tree';
 import {
   extraBlends,
+  pixelBlendModes,
   compositePixels,
   validBlendIf,
   type ExtraBlend,
   type BlendIf,
+  type BlendSpace,
 } from '@/lib/layer-compositing';
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
@@ -368,6 +370,7 @@ type LayerMeta = {
   visible: boolean;
   opacity: number;
   blend: BlendMode;
+  blendSpace?: BlendSpace;
   x: number;
   y: number;
   hasMask: boolean;
@@ -1949,7 +1952,12 @@ export default function Home() {
       }
       const surface = surfaceMap.get(layer.id);
       if (!surface) continue;
-      if (!layer.clipping && !layer.blendIf && !(layer.blend in extraBlends)) {
+      if (
+        !layer.clipping &&
+        !layer.blendIf &&
+        !pixelBlendModes.has(layer.blend) &&
+        layer.blendSpace !== 'linear'
+      ) {
         drawLayer(ctx, layer, surface, size.w, size.h);
         continue;
       }
@@ -1993,8 +2001,18 @@ export default function Home() {
         sc.globalCompositeOperation = 'source-over';
         alpha.width = alpha.height = 1;
       }
-      if (layer.blendIf || layer.blend in extraBlends)
-        compositePixels(ctx, source, layer.blend, layer.blendIf);
+      if (
+        layer.blendIf ||
+        pixelBlendModes.has(layer.blend) ||
+        layer.blendSpace === 'linear'
+      )
+        compositePixels(
+          ctx,
+          source,
+          layer.blend,
+          layer.blendIf,
+          layer.blendSpace,
+        );
       else {
         ctx.save();
         ctx.globalAlpha = 1;
@@ -7193,6 +7211,7 @@ export default function Home() {
           l.kind === 'adjustment' ||
           l.clipping ||
           l.blendIf ||
+          l.blendSpace === 'linear' ||
           l.blend in extraBlends ||
           !!l.vectorMask ||
           (l.hasMask &&
@@ -7640,6 +7659,12 @@ export default function Home() {
           throw Error('Invalid vector mask');
         if (item.blendIf !== undefined && !validBlendIf(item.blendIf))
           throw Error('Invalid Blend If range');
+        if (
+          item.blendSpace !== undefined &&
+          item.blendSpace !== 'gamma' &&
+          item.blendSpace !== 'linear'
+        )
+          throw Error('Invalid layer blend calculation');
         if (item.linkId !== undefined && typeof item.linkId !== 'string')
           throw Error('Invalid layer link');
         if (item.clipping !== undefined && typeof item.clipping !== 'boolean')
@@ -13016,6 +13041,32 @@ export default function Home() {
                             )
                           }
                         />
+                        <label>
+                          Blend calculation
+                          <select
+                            aria-label="Layer blend calculation"
+                            value={active?.blendSpace ?? 'gamma'}
+                            disabled={
+                              !active ||
+                              active.kind === 'group' ||
+                              active.kind === 'adjustment' ||
+                              isLocked(active.id)
+                            }
+                            onChange={(event) =>
+                              active &&
+                              patchLayer(
+                                active.id,
+                                {
+                                  blendSpace: event.target.value as BlendSpace,
+                                },
+                                'Layer blend calculation',
+                              )
+                            }
+                          >
+                            <option value="gamma">Gamma encoded</option>
+                            <option value="linear">Linear light</option>
+                          </select>
+                        </label>
                         <div className="layer-effects-controls">
                           <div>
                             <strong>Layer effects</strong>
