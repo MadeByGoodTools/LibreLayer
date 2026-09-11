@@ -53,6 +53,8 @@ export type EditorPreferences = {
   historyDepth?: number;
   historyBudgetMb?: number;
   toolbar?: ToolbarPreferences;
+  theme?: 'dark' | 'light' | 'contrast';
+  interfaceScale?: 85 | 100 | 115 | 125;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -65,6 +67,8 @@ export const defaultPreferences: EditorPreferences = {
   historyDepth: 32,
   historyBudgetMb: 512,
   toolbar: { order: [], hidden: [], groupByFamily: true },
+  theme: 'dark',
+  interfaceScale: 100,
 };
 export function WorkspaceSettings({
   commands,
@@ -129,6 +133,7 @@ export function WorkspaceSettings({
             <TabsTrigger value="layout">Workspace</TabsTrigger>
             <TabsTrigger value="keys">Shortcuts</TabsTrigger>
             <TabsTrigger value="toolbar">Toolbar</TabsTrigger>
+            <TabsTrigger value="appearance">Appearance</TabsTrigger>
             <TabsTrigger value="presets">Tool presets</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
@@ -503,6 +508,60 @@ export function WorkspaceSettings({
               }}
             >
               Reset shortcuts
+            </Button>
+          </TabsContent>
+          <TabsContent value="appearance" className="grid gap-3">
+            <label>
+              Interface theme
+              <select
+                className="block w-full rounded border bg-background p-2"
+                value={value.theme ?? 'dark'}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    theme: event.target.value as EditorPreferences['theme'],
+                  })
+                }
+              >
+                <option value="dark">Dark studio</option>
+                <option value="light">Light studio</option>
+                <option value="contrast">High contrast</option>
+              </select>
+            </label>
+            <label>
+              Interface scale
+              <select
+                className="block w-full rounded border bg-background p-2"
+                value={value.interfaceScale ?? 100}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    interfaceScale: +event.target
+                      .value as EditorPreferences['interfaceScale'],
+                  })
+                }
+              >
+                <option value="85">Compact · 85%</option>
+                <option value="100">Standard · 100%</option>
+                <option value="115">Large · 115%</option>
+                <option value="125">Extra large · 125%</option>
+              </select>
+            </label>
+            <p>
+              Scaling changes the application controls and spacing, not image
+              pixels, zoom accuracy, or export dimensions.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() =>
+                onChange({
+                  ...value,
+                  theme: defaultPreferences.theme,
+                  interfaceScale: defaultPreferences.interfaceScale,
+                })
+              }
+            >
+              Reset appearance
             </Button>
           </TabsContent>
           <TabsContent value="toolbar" className="grid gap-3">

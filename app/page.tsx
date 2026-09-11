@@ -1436,6 +1436,13 @@ export default function Home() {
       window.removeEventListener('keydown', onKey);
     };
   }, [contextMenu]);
+  useEffect(() => {
+    document.documentElement.dataset.librelayerTheme =
+      preferences.theme ?? 'dark';
+    return () => {
+      delete document.documentElement.dataset.librelayerTheme;
+    };
+  }, [preferences.theme]);
   const menuCommands = useRef(
     new Map<string, { name: string; shortcut: string; action: () => void }>(),
   );
@@ -1478,6 +1485,16 @@ export default function Home() {
       )
         setPreferences({
           ...p,
+          theme: ['dark', 'light', 'contrast'].includes(p.theme)
+            ? p.theme
+            : 'dark',
+          interfaceScale: [85, 100, 115, 125].includes(p.interfaceScale)
+            ? p.interfaceScale
+            : 100,
+          toolbar: normalizeToolbar(
+            toolItems.map((item) => item.id),
+            p.toolbar,
+          ),
           historyDepth: normalizeHistoryPolicy(
             p.historyDepth,
             p.historyBudgetMb,
@@ -11126,7 +11143,7 @@ export default function Home() {
 
   return (
     <main
-      className="editor-shell"
+      className={`editor-shell theme-${preferences.theme ?? 'dark'} ui-scale-${preferences.interfaceScale ?? 100}`}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -13273,8 +13290,8 @@ export default function Home() {
         style={{
           gridTemplateColumns:
             preferences.layout.side === 'left'
-              ? `54px ${preferences.layout.width}px minmax(0,1fr)`
-              : `54px minmax(0,1fr) ${preferences.layout.width}px`,
+              ? `calc(54px * var(--ui-scale)) calc(${preferences.layout.width}px * var(--ui-scale)) minmax(0,1fr)`
+              : `calc(54px * var(--ui-scale)) minmax(0,1fr) calc(${preferences.layout.width}px * var(--ui-scale))`,
         }}
       >
         <aside className="tool-rail" aria-label="Tools">

@@ -45,6 +45,42 @@
   --input: #414e49;
   --ring: #62d5ab;
 }
+html[data-librelayer-theme='light'] {
+  --background: #f5f7f6;
+  --foreground: #1e2723;
+  --card: #ffffff;
+  --card-foreground: #1e2723;
+  --popover: #ffffff;
+  --popover-foreground: #1e2723;
+  --secondary: #e5ebe8;
+  --secondary-foreground: #17201c;
+  --muted: #e9eeec;
+  --muted-foreground: #5b6862;
+  --accent: #dcebe5;
+  --accent-foreground: #17201c;
+  --border: #bdc9c4;
+  --input: #aebcb6;
+  --ring: #167f5c;
+}
+html[data-librelayer-theme='contrast'] {
+  --background: #000;
+  --foreground: #fff;
+  --card: #000;
+  --card-foreground: #fff;
+  --popover: #000;
+  --popover-foreground: #fff;
+  --primary: #5cffbd;
+  --primary-foreground: #000;
+  --secondary: #171717;
+  --secondary-foreground: #fff;
+  --muted: #111;
+  --muted-foreground: #e2e2e2;
+  --accent: #252525;
+  --accent-foreground: #fff;
+  --border: #fff;
+  --input: #fff;
+  --ring: #ffe66d;
+}
 * {
   box-sizing: border-box;
 }
@@ -53,18 +89,121 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #151a18;
-  color: #eee;
+  background: var(--background);
+  color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
 button {
   font: inherit;
 }
 .editor-shell {
+  --ui-scale: 1;
   height: 100vh;
   display: grid;
   grid-template-rows: 46px 42px minmax(0, 1fr) 30px;
   background: #1b211f;
+}
+.editor-shell.ui-scale-85 {
+  --ui-scale: 0.85;
+}
+.editor-shell.ui-scale-115 {
+  --ui-scale: 1.15;
+}
+.editor-shell.ui-scale-125 {
+  --ui-scale: 1.25;
+}
+.editor-shell[class*='ui-scale-'] {
+  grid-template-rows:
+    calc(46px * var(--ui-scale)) calc(42px * var(--ui-scale)) minmax(0, 1fr)
+    calc(30px * var(--ui-scale));
+  font-size: calc(13px * var(--ui-scale));
+}
+.editor-shell[class*='ui-scale-'] .tool-button {
+  width: calc(40px * var(--ui-scale));
+  height: calc(40px * var(--ui-scale));
+}
+.editor-shell[class*='ui-scale-'] .tool-button svg {
+  width: calc(18px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+}
+.editor-shell[class*='ui-scale-'] .document-tab {
+  height: calc(31px * var(--ui-scale));
+}
+.editor-shell[class*='ui-scale-'] .panel-title {
+  height: calc(35px * var(--ui-scale));
+}
+.editor-shell.theme-light {
+  background: #e2e6e4;
+  color: #1d2521;
+}
+.theme-light .app-bar,
+.theme-light .options-bar {
+  background: #f4f6f5;
+  border-color: #b9c2be;
+  box-shadow: none;
+  color: #48534e;
+}
+.theme-light .menus button,
+.theme-light .tool-button,
+.theme-light .color-card {
+  color: #35413b !important;
+}
+.theme-light .active-tool,
+.theme-light .options-bar strong {
+  color: #14201a;
+}
+.theme-light .tool-rail,
+.theme-light .panel-rail,
+.theme-light .document-tabs {
+  background: #e8ecea;
+  border-color: #b5bfba;
+  box-shadow: none;
+}
+.theme-light .panel,
+.theme-light .dock-tabs,
+.theme-light .dock-tab-content,
+.theme-light .status-bar {
+  background: #f5f7f6;
+  border-color: #b9c2be;
+  color: #44514b;
+}
+.theme-light .document-tab {
+  background: #d8dedb;
+  border-color: #abb6b1;
+  color: #26312c;
+}
+.theme-light .document-tab.active {
+  background: #fff;
+}
+.theme-light .canvas-stage {
+  background-color: #cbd0ce;
+  background-image: radial-gradient(#a8afac 0.7px, transparent 0.7px);
+}
+.editor-shell.theme-contrast,
+.theme-contrast .app-bar,
+.theme-contrast .options-bar,
+.theme-contrast .tool-rail,
+.theme-contrast .panel-rail,
+.theme-contrast .panel,
+.theme-contrast .document-tabs,
+.theme-contrast .document-tab,
+.theme-contrast .dock-tabs,
+.theme-contrast .dock-tab-content,
+.theme-contrast .status-bar {
+  background: #000;
+  border-color: #fff;
+  color: #fff;
+  box-shadow: none;
+}
+.theme-contrast button:focus-visible,
+.theme-contrast input:focus-visible,
+.theme-contrast select:focus-visible {
+  outline: 3px solid #ffe66d;
+  outline-offset: 1px;
+}
+.theme-contrast .canvas-stage {
+  background-color: #101010;
+  background-image: radial-gradient(#555 0.8px, transparent 0.8px);
 }
 .app-bar {
   display: flex;
@@ -285,7 +424,11 @@ button {
   background: #202126;
   color: #e7e8ed;
   cursor: ew-resize;
-  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   text-align: right;
 }
 .precision-slider-value:focus {

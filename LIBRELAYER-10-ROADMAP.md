@@ -26,7 +26,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Contextual task bar and complete right-click menus.
 - [x] Scrubby labels, direct numeric entry, per-control reset, and fine/coarse modifiers.
 - [x] Configurable toolbar and tool groups.
-- [ ] Interface scaling, light, dark, and high-contrast themes.
+- [x] Interface scaling, light, dark, and high-contrast themes.
 - [ ] Side-by-side document views with matched zoom, pan, and rotation.
 
 ## 2. Layers, masks, and compositing
