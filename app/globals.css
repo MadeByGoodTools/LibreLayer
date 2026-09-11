@@ -3133,6 +3133,8 @@ button {
   top: 32px;
   left: 0;
   width: 265px;
+  max-height: min(620px, calc(100vh - 116px));
+  overflow: auto;
   padding: 10px;
   display: grid;
   gap: 8px;

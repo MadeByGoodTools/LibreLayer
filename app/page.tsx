@@ -256,6 +256,7 @@ import {
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
+import { interpolateStrokeDabs } from '@/lib/brush-engine';
 import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
@@ -1673,6 +1674,7 @@ export default function Home() {
   const drawing = useRef(false);
   const start = useRef({ x: 0, y: 0 });
   const last = useRef({ x: 0, y: 0 });
+  const brushDistanceSinceDab = useRef(0);
   const moveOrigin = useRef({ x: 0, y: 0 });
   const historyRef = useRef<Snapshot[]>([]);
   const historyIndex = useRef(-1);
@@ -1767,10 +1769,19 @@ export default function Home() {
     [pressureOpacity, setPressureOpacity] = useState(false),
     [tiltShape, setTiltShape] = useState(true),
     [brushSmoothing, setBrushSmoothing] = useState(20),
+    [brushAngle, setBrushAngle] = useState(0),
+    [brushRoundness, setBrushRoundness] = useState(100),
     [sizeJitter, setSizeJitter] = useState(0),
     [hueJitter, setHueJitter] = useState(0),
+    [opacityJitter, setOpacityJitter] = useState(0),
+    [flowJitter, setFlowJitter] = useState(0),
     [brushScatter, setBrushScatter] = useState(0),
     [brushTexture, setBrushTexture] = useState(0),
+    [dualBrush, setDualBrush] = useState(false),
+    [dualBrushScale, setDualBrushScale] = useState(55),
+    [dualBrushOffset, setDualBrushOffset] = useState(30),
+    [wetEdges, setWetEdges] = useState(false),
+    [airbrushBuildUp, setAirbrushBuildUp] = useState(false),
     [mixerWet, setMixerWet] = useState(50),
     [mixerLoad, setMixerLoad] = useState(50),
     [mixerMix, setMixerMix] = useState(50),
@@ -3506,6 +3517,13 @@ export default function Home() {
     }
     start.current = p;
     last.current = p;
+    if (tool === 'brush' || tool === 'eraser')
+      brushDistanceSinceDab.current = Math.max(
+        0.25,
+        paintMode === 'pencil'
+          ? Math.max(1, size * 0.2)
+          : (size * brushSpacing) / 100,
+      );
     drawing.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
     if (meta) moveOrigin.current = { x: meta.x, y: meta.y };
@@ -3644,21 +3662,26 @@ export default function Home() {
                 : tool === 'eraser'
                   ? 'white'
                   : color,
-            dx = local.x - prev.x,
-            dy = local.y - prev.y,
-            distance = Math.hypot(dx, dy),
             step = Math.max(
               1,
               paintMode === 'pencil'
                 ? Math.max(1, size * 0.2)
-                : (size * brushSpacing) / 100,
+                : airbrushBuildUp
+                  ? Math.min((size * brushSpacing) / 100, size * 0.04)
+                  : (size * brushSpacing) / 100,
             ),
-            count = Math.max(1, Math.ceil(distance / step));
+            stroke = interpolateStrokeDabs(
+              prev,
+              local,
+              step,
+              brushDistanceSinceDab.current,
+            );
+          brushDistanceSinceDab.current = stroke.distanceSinceLastDab;
           ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha;
-          for (let i = 0; i <= count; i++) {
-            const baseX = prev.x + (dx * i) / count,
-              baseY = prev.y + (dy * i) / count,
+          for (const point of stroke.points) {
+            const baseX = point.x,
+              baseY = point.y,
               scatterRadius = (brushScatter / 100) * size,
               scatterAngle = Math.random() * Math.PI * 2,
               x =
@@ -3699,11 +3722,18 @@ export default function Home() {
                   .join('')}`;
               })();
             const baseAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha,
+              transferredAlpha =
+                (1 - (opacityJitter / 100) * Math.random()) *
+                (1 - (flowJitter / 100) * Math.random()),
               textureAlpha =
                 1 -
                 (brushTexture / 100) *
                   (0.25 + 0.75 * Math.abs(Math.sin(x * 0.37 + y * 0.19)));
-            ctx.globalAlpha = baseAlpha * textureAlpha;
+            ctx.globalAlpha =
+              baseAlpha *
+              textureAlpha *
+              transferredAlpha *
+              (airbrushBuildUp ? 0.2 : 1);
             if (paintMode === 'pencil') {
               ctx.fillStyle = dabPaint;
               ctx.fillRect(
@@ -3729,6 +3759,8 @@ export default function Home() {
             g.addColorStop(1, transparentPaint);
             ctx.save();
             ctx.translate(x, y);
+            ctx.rotate((brushAngle * Math.PI) / 180);
+            ctx.scale(1, Math.max(0.05, brushRoundness / 100));
             if (tilt) {
               ctx.rotate(tiltAngle);
               ctx.scale(1, Math.max(0.18, 1 - tiltMagnitude));
@@ -3737,7 +3769,31 @@ export default function Home() {
             ctx.beginPath();
             ctx.arc(0, 0, radius, 0, Math.PI * 2);
             ctx.fill();
+            if (wetEdges) {
+              ctx.globalAlpha *= 0.75;
+              ctx.strokeStyle = dabPaint;
+              ctx.lineWidth = Math.max(1, radius * 0.16);
+              ctx.stroke();
+            }
             ctx.restore();
+            if (dualBrush) {
+              const offset = (dualBrushOffset / 100) * radius,
+                dualRadius = radius * (dualBrushScale / 100),
+                angle = (brushAngle * Math.PI) / 180;
+              ctx.save();
+              ctx.globalAlpha *= 0.72;
+              ctx.translate(
+                x + Math.cos(angle) * offset,
+                y + Math.sin(angle) * offset,
+              );
+              ctx.rotate(angle + Math.PI / 4);
+              ctx.scale(1, Math.max(0.05, brushRoundness / 100));
+              ctx.fillStyle = g;
+              ctx.beginPath();
+              ctx.arc(0, 0, dualRadius, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+            }
           }
         };
       if (!quickMaskRef.current && (selectionChannelRef.current || feather)) {
@@ -5907,10 +5963,21 @@ export default function Home() {
       flow,
       spacing: brushSpacing,
       smoothing: brushSmoothing,
+      angle: brushAngle,
+      roundness: brushRoundness,
       sizeJitter,
       hueJitter,
+      opacityJitter,
+      flowJitter,
       scatter: brushScatter,
       texture: brushTexture,
+      wetEdges,
+      airbrushBuildUp,
+      dualBrush: {
+        enabled: dualBrush,
+        scale: dualBrushScale,
+        offset: dualBrushOffset,
+      },
       mixer: {
         enabled: mixerBrush,
         wet: mixerWet,
@@ -5952,10 +6019,26 @@ export default function Home() {
       setFlow(number('flow', flow, 1, 100));
       setBrushSpacing(number('spacing', brushSpacing, 1, 200));
       setBrushSmoothing(number('smoothing', brushSmoothing, 0, 100));
+      setBrushAngle(number('angle', brushAngle, -180, 180));
+      setBrushRoundness(number('roundness', brushRoundness, 5, 100));
       setSizeJitter(number('sizeJitter', sizeJitter, 0, 100));
       setHueJitter(number('hueJitter', hueJitter, 0, 100));
+      setOpacityJitter(number('opacityJitter', opacityJitter, 0, 100));
+      setFlowJitter(number('flowJitter', flowJitter, 0, 100));
       setBrushScatter(number('scatter', brushScatter, 0, 300));
       setBrushTexture(number('texture', brushTexture, 0, 100));
+      setWetEdges(Boolean(preset.wetEdges));
+      setAirbrushBuildUp(Boolean(preset.airbrushBuildUp));
+      const dual = preset.dualBrush as Record<string, unknown> | undefined;
+      if (dual) {
+        setDualBrush(Boolean(dual.enabled));
+        setDualBrushScale(
+          Math.max(10, Math.min(100, Number(dual.scale ?? 55))),
+        );
+        setDualBrushOffset(
+          Math.max(0, Math.min(200, Number(dual.offset ?? 30))),
+        );
+      }
       const mixer = preset.mixer as Record<string, unknown> | undefined;
       if (mixer) {
         setMixerBrush(Boolean(mixer.enabled));
@@ -11233,6 +11316,46 @@ export default function Home() {
                       %
                     </label>
                     <label>
+                      Tip angle
+                      <input
+                        aria-label="Brush tip angle"
+                        className="number-option compact-number"
+                        type="number"
+                        min="-180"
+                        max="180"
+                        value={brushAngle}
+                        onChange={(event) =>
+                          setBrushAngle(
+                            Math.max(
+                              -180,
+                              Math.min(180, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      °
+                    </label>
+                    <label>
+                      Roundness
+                      <input
+                        aria-label="Brush tip roundness"
+                        className="number-option compact-number"
+                        type="number"
+                        min="5"
+                        max="100"
+                        value={brushRoundness}
+                        onChange={(event) =>
+                          setBrushRoundness(
+                            Math.max(
+                              5,
+                              Math.min(100, +event.target.value || 5),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label>
                       Size jitter
                       <input
                         aria-label="Brush size jitter"
@@ -11263,6 +11386,46 @@ export default function Home() {
                         value={hueJitter}
                         onChange={(event) =>
                           setHueJitter(
+                            Math.max(
+                              0,
+                              Math.min(100, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label>
+                      Opacity jitter
+                      <input
+                        aria-label="Brush opacity jitter"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={opacityJitter}
+                        onChange={(event) =>
+                          setOpacityJitter(
+                            Math.max(
+                              0,
+                              Math.min(100, +event.target.value || 0),
+                            ),
+                          )
+                        }
+                      />
+                      %
+                    </label>
+                    <label>
+                      Flow jitter
+                      <input
+                        aria-label="Brush flow jitter"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={flowJitter}
+                        onChange={(event) =>
+                          setFlowJitter(
                             Math.max(
                               0,
                               Math.min(100, +event.target.value || 0),
@@ -11312,6 +11475,76 @@ export default function Home() {
                       />
                       %
                     </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={wetEdges}
+                        onChange={(event) => setWetEdges(event.target.checked)}
+                      />
+                      Wet edges
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={airbrushBuildUp}
+                        onChange={(event) =>
+                          setAirbrushBuildUp(event.target.checked)
+                        }
+                      />
+                      Airbrush buildup
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={dualBrush}
+                        onChange={(event) => setDualBrush(event.target.checked)}
+                      />
+                      Dual brush
+                    </label>
+                    {dualBrush && (
+                      <div className="mixer-controls">
+                        {[
+                          [
+                            'Dual scale',
+                            dualBrushScale,
+                            setDualBrushScale,
+                            10,
+                            100,
+                          ],
+                          [
+                            'Dual offset',
+                            dualBrushOffset,
+                            setDualBrushOffset,
+                            0,
+                            200,
+                          ],
+                        ].map(([label, value, setter, min, max]) => (
+                          <label key={label as string}>
+                            {label as string}
+                            <input
+                              aria-label={label as string}
+                              className="number-option compact-number"
+                              type="number"
+                              min={min as number}
+                              max={max as number}
+                              value={value as number}
+                              onChange={(event) =>
+                                (setter as (next: number) => void)(
+                                  Math.max(
+                                    min as number,
+                                    Math.min(
+                                      max as number,
+                                      +event.target.value || (min as number),
+                                    ),
+                                  ),
+                                )
+                              }
+                            />
+                            %
+                          </label>
+                        ))}
+                      </div>
+                    )}
                     <label className="inline-check">
                       <input
                         type="checkbox"
