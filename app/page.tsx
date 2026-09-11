@@ -207,6 +207,11 @@ import { LutControl } from '@/components/lut-control';
 import { AdvancedColorControls } from '@/components/advanced-color-controls';
 import { SoftProofOverlay } from '@/components/soft-proof-overlay';
 import {
+  defaultFillLayerRecipe,
+  normalizeFillLayerRecipe,
+  type FillLayerRecipe,
+} from '@/lib/fill-layer';
+import {
   createPsdCompatibilityReport,
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
@@ -322,7 +327,7 @@ type TextLayerData = {
   smallCaps: boolean;
   ligatures: boolean;
 };
-type LayerKind = 'pixel' | 'group' | 'adjustment';
+type LayerKind = 'pixel' | 'group' | 'adjustment' | 'fill';
 type LayerMeta = {
   fill?: number;
   clipping?: boolean;
@@ -358,6 +363,7 @@ type LayerMeta = {
   textLayer?: TextLayerData;
   colorGrade?: ColorGrade;
   precisionAdjustment?: HighDepthAdjustments;
+  fillLayer?: FillLayerRecipe;
 };
 type LayerSurface = { pixels: HTMLCanvasElement; mask?: HTMLCanvasElement };
 type LayerComp = {
@@ -817,6 +823,63 @@ const maskToAlpha = (mask: HTMLCanvasElement, density = 100, feather = 0) => {
 };
 const sliderNumber = (value: number | readonly number[]) =>
   Number(Array.isArray(value) ? value[0] : value);
+const nativeFillCanvas = (input: FillLayerRecipe, w: number, h: number) => {
+  const recipe = normalizeFillLayerRecipe(input),
+    output = makeCanvas(w, h),
+    context = output.getContext('2d')!;
+  if (recipe.mode === 'solid') {
+    context.fillStyle = recipe.color;
+    context.fillRect(0, 0, w, h);
+    return output;
+  }
+  const offsetX = (recipe.offsetX / 100) * w,
+    offsetY = (recipe.offsetY / 100) * h;
+  if (recipe.mode === 'gradient') {
+    const angle = (recipe.angle * Math.PI) / 180,
+      radius = (Math.hypot(w, h) * recipe.scale) / 200,
+      centerX = w / 2 + offsetX,
+      centerY = h / 2 + offsetY,
+      gradient = context.createLinearGradient(
+        centerX - Math.cos(angle) * radius,
+        centerY - Math.sin(angle) * radius,
+        centerX + Math.cos(angle) * radius,
+        centerY + Math.sin(angle) * radius,
+      );
+    gradient.addColorStop(0, recipe.color);
+    gradient.addColorStop(1, recipe.color2);
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, w, h);
+    return output;
+  }
+  const unit = Math.max(4, Math.round(16 * (recipe.scale / 100))),
+    tile = makeCanvas(unit * 2, unit * 2),
+    tileContext = tile.getContext('2d')!;
+  tileContext.fillStyle = recipe.color;
+  tileContext.fillRect(0, 0, tile.width, tile.height);
+  tileContext.fillStyle = recipe.color2;
+  if (recipe.pattern === 'checker') {
+    tileContext.fillRect(0, 0, unit, unit);
+    tileContext.fillRect(unit, unit, unit, unit);
+  } else if (recipe.pattern === 'dots') {
+    tileContext.beginPath();
+    tileContext.arc(unit, unit, unit * 0.45, 0, Math.PI * 2);
+    tileContext.fill();
+  } else {
+    tileContext.translate(unit, unit);
+    tileContext.rotate((recipe.angle * Math.PI) / 180);
+    tileContext.fillRect(-tile.width, -unit / 3, tile.width * 2, unit / 1.5);
+  }
+  const pattern = context.createPattern(tile, 'repeat');
+  if (pattern) {
+    pattern.setTransform(
+      new DOMMatrix().translate(offsetX % tile.width, offsetY % tile.height),
+    );
+    context.fillStyle = pattern;
+    context.fillRect(0, 0, w, h);
+  }
+  tile.width = tile.height = 1;
+  return output;
+};
 const colorGradedCanvas = (
   source: HTMLCanvasElement,
   grade: ColorGrade | undefined,
@@ -849,7 +912,10 @@ const drawLayer = (
   w: number,
   h: number,
 ) => {
-  let source = surface.pixels;
+  let source =
+    layer.kind === 'fill' && layer.fillLayer
+      ? nativeFillCanvas(layer.fillLayer, w, h)
+      : surface.pixels;
   const masks: HTMLCanvasElement[] = [];
   if (layer.vectorMask?.length && layer.vectorMask.length > 2) {
     const vector = makeCanvas(w, h),
@@ -879,6 +945,7 @@ const drawLayer = (
       tc.drawImage(alpha, 0, 0);
       alpha.width = alpha.height = 1;
     }
+    if (source !== surface.pixels) source.width = source.height = 1;
     source = temp;
   }
   for (const smartFilter of layer.smartObject?.filters ?? []) {
@@ -2623,7 +2690,8 @@ export default function Home() {
       !surface ||
       isLocked(meta.id) ||
       meta.kind === 'group' ||
-      (meta.kind === 'adjustment' && editing !== 'mask')
+      ((meta.kind === 'adjustment' || meta.kind === 'fill') &&
+        editing !== 'mask')
     )
       return null;
     if (editing === 'mask' && surface.mask)
@@ -4854,47 +4922,51 @@ export default function Home() {
       return;
     }
     if (operation.kind === 'fill') {
-      const id = createLayer(
-        operation.mode === 'solid'
-          ? 'Solid Color Fill'
-          : operation.mode === 'gradient'
-            ? 'Gradient Fill'
-            : 'Pattern Fill',
-      );
-      if (!id) return;
-      const surface = surfacesRef.current.get(id)!,
-        ctx = surface.pixels.getContext('2d')!;
-      if (operation.mode === 'solid') {
-        ctx.fillStyle = operation.color;
-        ctx.fillRect(0, 0, doc.w, doc.h);
-      } else if (operation.mode === 'gradient') {
-        const gradient = ctx.createLinearGradient(0, 0, doc.w, doc.h);
-        gradient.addColorStop(0, operation.color);
-        gradient.addColorStop(1, operation.color2);
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, doc.w, doc.h);
-      } else {
-        const unit = Math.max(8, Math.round(Math.min(doc.w, doc.h) / 30));
-        for (let y = 0; y < doc.h; y += unit)
-          for (let x = 0; x < doc.w; x += unit) {
-            ctx.fillStyle =
-              (x / unit + y / unit) & 1 ? operation.color : operation.color2;
-            ctx.fillRect(x, y, unit, unit);
-          }
-      }
+      if (!roomForLayers()) return;
+      const current = selected(),
+        parent = current?.kind === 'group' ? current.id : current?.parentId;
+      if (parent && !permit([parent])) return;
+      if (!hasRoom(doc.w * doc.h)) return;
+      const id = crypto.randomUUID(),
+        surface: LayerSurface = { pixels: makeCanvas(doc.w, doc.h) },
+        fillLayer = normalizeFillLayerRecipe({
+          ...defaultFillLayerRecipe(),
+          mode: operation.mode,
+          color: operation.color,
+          color2: operation.color2,
+        }),
+        layer: LayerMeta = {
+          id,
+          name:
+            operation.mode === 'solid'
+              ? 'Solid Color Fill'
+              : operation.mode === 'gradient'
+                ? 'Gradient Fill'
+                : 'Pattern Fill',
+          visible: true,
+          opacity: 100,
+          blend: 'source-over',
+          x: 0,
+          y: 0,
+          hasMask: operation.masked,
+          maskEnabled: true,
+          maskDensity: 100,
+          maskFeather: 0,
+          maskLinked: true,
+          kind: 'fill',
+          parentId: parent,
+          fillLayer,
+        };
       if (operation.masked) {
         surface.mask = makeCanvas(doc.w, doc.h);
         const mask = surface.mask.getContext('2d')!;
         mask.fillStyle = 'white';
         mask.fillRect(0, 0, doc.w, doc.h);
-        patchLayer(id, {
-          hasMask: true,
-          maskEnabled: true,
-          maskDensity: 100,
-          maskFeather: 0,
-          maskLinked: true,
-        });
       }
+      surfacesRef.current.set(id, surface);
+      insertLayer(layer);
+      select(id);
+      setEditing('pixels');
       snapshot(`Create ${operation.mode} fill layer`);
       render();
       setStatus(
@@ -9422,6 +9494,7 @@ export default function Home() {
     );
   };
   const active = selected();
+  const activeFill = normalizeFillLayerRecipe(active?.fillLayer);
   const updatePrecisionAdjustment = (
     key: keyof HighDepthAdjustments,
     value: HighDepthAdjustments[keyof HighDepthAdjustments],
@@ -9436,11 +9509,19 @@ export default function Home() {
       },
     });
   };
+  const updateFillLayer = (patch: Partial<FillLayerRecipe>) => {
+    if (!active || active.kind !== 'fill' || isLocked(active.id)) return;
+    const current = normalizeFillLayerRecipe(active.fillLayer);
+    patchLayer(active.id, {
+      fillLayer: normalizeFillLayerRecipe({ ...current, ...patch }),
+    });
+  };
   const activeColorGrade = resolveColorGrade(active?.colorGrade);
   const canGradeActive =
     !!active &&
     active.kind !== 'group' &&
     active.kind !== 'adjustment' &&
+    active.kind !== 'fill' &&
     !isLocked(active.id);
   const commitColorGrade = (grade: ColorGrade, record?: string) => {
     if (!active || !canGradeActive) {
@@ -10934,9 +11015,11 @@ export default function Home() {
             ? 'Layer mask'
             : active?.kind === 'adjustment'
               ? 'Adjustment layer'
-              : active?.kind === 'group'
-                ? 'Layer group'
-                : 'Layer pixels'}
+              : active?.kind === 'fill'
+                ? 'Fill layer'
+                : active?.kind === 'group'
+                  ? 'Layer group'
+                  : 'Layer pixels'}
         </span>
         <span className="options-hint">
           {active?.locked
@@ -11606,6 +11689,7 @@ export default function Home() {
                           <option value="pixel">Pixels</option>
                           <option value="group">Groups</option>
                           <option value="adjustment">Adjustments</option>
+                          <option value="fill">Fill layers</option>
                         </select>
                         <select
                           aria-label="Filter layer state"
@@ -11796,6 +11880,8 @@ export default function Home() {
                                 <FolderPlus />
                               ) : layer.kind === 'adjustment' ? (
                                 <SlidersHorizontal />
+                              ) : layer.kind === 'fill' ? (
+                                <PaintBucket />
                               ) : (
                                 <Layers />
                               )}
@@ -11846,7 +11932,9 @@ export default function Home() {
                                   ? 'Group'
                                   : layer.kind === 'adjustment'
                                     ? 'Adjustment layer'
-                                    : `${blendLabels[layer.blend]} · ${layer.opacity}%`}
+                                    : layer.kind === 'fill'
+                                      ? `${layer.fillLayer?.mode ?? 'Solid'} fill layer`
+                                      : `${blendLabels[layer.blend]} · ${layer.opacity}%`}
                               </small>
                             </div>
                             {layer.hasMask && (
@@ -12343,9 +12431,20 @@ export default function Home() {
                               <strong>
                                 {active?.kind === 'adjustment'
                                   ? 'Adjustment layer'
-                                  : 'Layer adjustments'}
+                                  : active?.kind === 'fill'
+                                    ? 'Fill layer'
+                                    : 'Layer adjustments'}
                               </strong>
-                              <button onClick={resetAdjustments}>Reset</button>
+                              <button
+                                onClick={() => {
+                                  if (active?.kind === 'fill') {
+                                    updateFillLayer(defaultFillLayerRecipe());
+                                    snapshot('Reset fill layer');
+                                  } else resetAdjustments();
+                                }}
+                              >
+                                Reset
+                              </button>
                             </div>
                             {active?.kind === 'adjustment' ? (
                               <>
@@ -12683,6 +12782,131 @@ export default function Home() {
                                   />
                                 </div>
                               </>
+                            ) : active?.kind === 'fill' ? (
+                              <div className="native-fill-properties">
+                                <label>
+                                  Fill type
+                                  <select
+                                    aria-label="Native fill type"
+                                    value={activeFill.mode}
+                                    onChange={(event) => {
+                                      updateFillLayer({
+                                        mode: event.target
+                                          .value as FillLayerRecipe['mode'],
+                                      });
+                                      snapshot('Change fill type');
+                                    }}
+                                  >
+                                    <option value="solid">Solid color</option>
+                                    <option value="gradient">Gradient</option>
+                                    <option value="pattern">Pattern</option>
+                                  </select>
+                                </label>
+                                <div className="native-fill-colors">
+                                  <label>
+                                    Primary
+                                    <input
+                                      aria-label="Fill primary color"
+                                      type="color"
+                                      value={activeFill.color}
+                                      onChange={(event) =>
+                                        updateFillLayer({
+                                          color: event.target.value,
+                                        })
+                                      }
+                                      onBlur={() =>
+                                        snapshot('Fill primary color')
+                                      }
+                                    />
+                                  </label>
+                                  {activeFill.mode !== 'solid' && (
+                                    <label>
+                                      Secondary
+                                      <input
+                                        aria-label="Fill secondary color"
+                                        type="color"
+                                        value={activeFill.color2}
+                                        onChange={(event) =>
+                                          updateFillLayer({
+                                            color2: event.target.value,
+                                          })
+                                        }
+                                        onBlur={() =>
+                                          snapshot('Fill secondary color')
+                                        }
+                                      />
+                                    </label>
+                                  )}
+                                </div>
+                                {activeFill.mode === 'pattern' && (
+                                  <label>
+                                    Pattern
+                                    <select
+                                      aria-label="Fill pattern"
+                                      value={activeFill.pattern}
+                                      onChange={(event) => {
+                                        updateFillLayer({
+                                          pattern: event.target
+                                            .value as FillLayerRecipe['pattern'],
+                                        });
+                                        snapshot('Change fill pattern');
+                                      }}
+                                    >
+                                      <option value="checker">Checker</option>
+                                      <option value="dots">Dots</option>
+                                      <option value="stripes">Stripes</option>
+                                    </select>
+                                  </label>
+                                )}
+                                {activeFill.mode !== 'solid' &&
+                                  (
+                                    [
+                                      ['Angle', 'angle', 0, 359, '°'],
+                                      ['Scale', 'scale', 10, 400, '%'],
+                                      [
+                                        'Horizontal offset',
+                                        'offsetX',
+                                        -100,
+                                        100,
+                                        '%',
+                                      ],
+                                      [
+                                        'Vertical offset',
+                                        'offsetY',
+                                        -100,
+                                        100,
+                                        '%',
+                                      ],
+                                    ] as const
+                                  ).map(([label, key, min, max, suffix]) => (
+                                    <div className="property-slider" key={key}>
+                                      <label>
+                                        {label}
+                                        <span>
+                                          {Math.round(activeFill[key])}
+                                          {suffix}
+                                        </span>
+                                      </label>
+                                      <Slider
+                                        aria-label={`Fill ${label.toLowerCase()}`}
+                                        min={min}
+                                        max={max}
+                                        value={activeFill[key]}
+                                        onValueChange={(next) =>
+                                          updateFillLayer({
+                                            [key]: sliderNumber(next),
+                                          })
+                                        }
+                                        onValueCommitted={() =>
+                                          snapshot(
+                                            `Fill ${label.toLowerCase()}`,
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                  ))}
+                                <p>Native recipe · editable after reopening</p>
+                              </div>
                             ) : (
                               (
                                 [
