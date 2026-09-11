@@ -11141,6 +11141,19 @@ export default function Home() {
     doc.h,
   ]);
 
+  const renderComparisonDocument = (id: string) => {
+    const comparison = documentStoreRef.current.get(id);
+    if (!comparison) return null;
+    const canvas = makeCanvas(comparison.doc.w, comparison.doc.h);
+    renderLayers(
+      canvas.getContext('2d')!,
+      comparison.layers,
+      comparison.surfaces,
+      comparison.doc,
+    );
+    return canvas;
+  };
+
   return (
     <main
       className={`editor-shell theme-${preferences.theme ?? 'dark'} ui-scale-${preferences.interfaceScale ?? 100}`}
@@ -13417,6 +13430,11 @@ export default function Home() {
             tool={tool}
             sourceCanvas={displayRef.current}
             revision={layers}
+            activeDocumentName={fileName}
+            comparisonDocuments={documents
+              .filter((item) => item.id !== activeDocumentId)
+              .map(({ id, name }) => ({ id, name }))}
+            getComparisonCanvas={renderComparisonDocument}
           >
             <canvas
               ref={displayRef}

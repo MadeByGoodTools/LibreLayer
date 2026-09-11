@@ -18,6 +18,7 @@ import {
   clampZoom,
   documentPoint,
   fitZoom,
+  containRect,
   type EditorView,
 } from '@/lib/editor-view';
 export type ViewportHandle = {
@@ -36,6 +37,9 @@ type Props = {
   children: ReactNode;
   sourceCanvas?: HTMLCanvasElement | null;
   revision?: unknown;
+  activeDocumentName?: string;
+  comparisonDocuments?: { id: string; name: string }[];
+  getComparisonCanvas?: (id: string) => HTMLCanvasElement | null;
 };
 export const CanvasViewport = forwardRef<ViewportHandle, Props>(
   function CanvasViewport(
@@ -50,6 +54,9 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
       children,
       sourceCanvas,
       revision,
+      activeDocumentName = 'Current',
+      comparisonDocuments = [],
+      getComparisonCanvas,
     },
     ref,
   ) {
@@ -65,6 +72,8 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
         'off' | 'split' | 'side'
       >('off'),
       [referenceReady, setReferenceReady] = useState(false),
+      [referenceName, setReferenceName] = useState('Reference'),
+      [comparisonDocumentId, setComparisonDocumentId] = useState(''),
       [splitPosition, setSplitPosition] = useState(50),
       referenceSource = useRef<HTMLCanvasElement | null>(null),
       referenceView = useRef<HTMLCanvasElement | null>(null),
@@ -186,7 +195,8 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
           target.height = h;
           const ctx = target.getContext('2d')!;
           ctx.clearRect(0, 0, w, h);
-          ctx.drawImage(reference, 0, 0, w, h);
+          const rect = containRect(reference.width, reference.height, w, h);
+          ctx.drawImage(reference, rect.x, rect.y, rect.width, rect.height);
         }
         if (sourceCanvas && currentView.current) {
           const target = currentView.current;
@@ -208,9 +218,44 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
       if (referenceSource.current)
         referenceSource.current.width = referenceSource.current.height = 1;
       referenceSource.current = copy;
+      setComparisonDocumentId('');
+      setReferenceName('Snapshot');
       setReferenceReady(true);
       setComparisonMode('split');
     };
+    const chooseComparisonDocument = (id: string) => {
+      setComparisonDocumentId(id);
+      if (!id) return;
+      const copy = getComparisonCanvas?.(id),
+        match = comparisonDocuments.find((item) => item.id === id);
+      if (!copy || !match) return;
+      if (referenceSource.current)
+        referenceSource.current.width = referenceSource.current.height = 1;
+      referenceSource.current = copy;
+      setReferenceName(match.name);
+      setReferenceReady(true);
+      setComparisonMode('side');
+    };
+    useEffect(() => {
+      if (
+        comparisonDocumentId &&
+        !comparisonDocuments.some((item) => item.id === comparisonDocumentId)
+      ) {
+        setComparisonDocumentId('');
+        setComparisonMode('off');
+        setReferenceReady(false);
+        if (referenceSource.current)
+          referenceSource.current.width = referenceSource.current.height = 1;
+        referenceSource.current = null;
+      }
+    }, [comparisonDocumentId, comparisonDocuments]);
+    useEffect(
+      () => () => {
+        if (referenceSource.current)
+          referenceSource.current.width = referenceSource.current.height = 1;
+      },
+      [],
+    );
     const ruler = (extent: number, vertical: boolean) => {
       const scale = zoom / 100,
         axis = vertical ? 'y' : 'x',
@@ -343,6 +388,19 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
           >
             Set reference
           </Button>
+          <select
+            aria-label="Comparison document"
+            value={comparisonDocumentId}
+            disabled={!comparisonDocuments.length}
+            onChange={(event) => chooseComparisonDocument(event.target.value)}
+          >
+            <option value="">Choose open document…</option>
+            {comparisonDocuments.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
           <select
             aria-label="Reference comparison"
             value={comparisonMode}
@@ -481,7 +539,7 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
                   ref={referenceView}
                   style={{ width: `${10000 / splitPosition}%` }}
                 />
-                <span>Reference</span>
+                <span>{referenceName}</span>
                 <i />
               </div>
             )}
@@ -492,11 +550,11 @@ export const CanvasViewport = forwardRef<ViewportHandle, Props>(
               >
                 <div>
                   <canvas ref={referenceView} />
-                  <span>Reference</span>
+                  <span>{referenceName}</span>
                 </div>
                 <div>
                   <canvas ref={currentView} />
-                  <span>Current</span>
+                  <span>{activeDocumentName}</span>
                 </div>
               </div>
             )}

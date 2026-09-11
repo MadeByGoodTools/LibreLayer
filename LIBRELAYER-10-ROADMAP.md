@@ -27,7 +27,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Scrubby labels, direct numeric entry, per-control reset, and fine/coarse modifiers.
 - [x] Configurable toolbar and tool groups.
 - [x] Interface scaling, light, dark, and high-contrast themes.
-- [ ] Side-by-side document views with matched zoom, pan, and rotation.
+- [x] Side-by-side document views with matched zoom, pan, and rotation.
 
 ## 2. Layers, masks, and compositing
 
