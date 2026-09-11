@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { parseCubeLut } from '@/lib/cube-lut';
+import { BUILT_IN_LUT_OPTIONS, BUILT_IN_LUTS } from '@/lib/builtin-luts';
 import type { HighDepthAdjustments } from '@/lib/high-depth';
 
 const sliderNumber = (value: number | readonly number[]) =>
@@ -32,7 +33,7 @@ export function LutControl({
         throw new Error('LUT files must be 5 MB or smaller.');
       const lut = parseCubeLut(await file.text());
       onChange('lut3d', lut);
-      onChange('lutAmount', 100);
+      if (amount !== 100) onChange('lutAmount', 100);
       onCommit(`Imported ${lut.title} LUT`);
     } catch (reason) {
       setError(
@@ -55,6 +56,27 @@ export function LutControl({
         accept=".cube,text/plain"
         onChange={(event) => void openFile(event.target.files?.[0])}
       />
+      <div className="lut-library-label">
+        <span>Built-in looks</span>
+        <div className="lut-library-grid">
+          {BUILT_IN_LUT_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              className={
+                adjustments.lut3d?.title === option.label ? 'active' : ''
+              }
+              aria-pressed={adjustments.lut3d?.title === option.label}
+              onClick={() => {
+                onChange('lut3d', BUILT_IN_LUTS[option.id]);
+                if (amount !== 100) onChange('lutAmount', 100);
+                onCommit(`Applied ${option.label} LUT`);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {adjustments.lut3d ? (
         <>
           <div className="lut-file-row">

@@ -6,6 +6,8 @@ import type {
   ChannelMixer,
   GradientMap,
   HighDepthAdjustments,
+  SelectiveColor,
+  SelectiveColorTarget,
 } from '@/lib/high-depth';
 
 const identityMixer: ChannelMixer = {
@@ -18,6 +20,19 @@ const defaultGradient: GradientMap = {
   highlights: '#ffffff',
   amount: 0,
 };
+const emptySelectiveColor: SelectiveColor = { mode: 'relative', colors: {} };
+const emptyRecipe = { cyan: 0, magenta: 0, yellow: 0, black: 0 };
+const selectiveTargets: SelectiveColorTarget[] = [
+  'reds',
+  'yellows',
+  'greens',
+  'cyans',
+  'blues',
+  'magentas',
+  'whites',
+  'neutrals',
+  'blacks',
+];
 const sliderNumber = (value: number | readonly number[]) =>
   Array.isArray(value) ? Number(value[0]) : Number(value);
 
@@ -34,8 +49,12 @@ export function AdvancedColorControls({
   onCommit: (label: string) => void;
 }) {
   const [output, setOutput] = useState<'red' | 'green' | 'blue'>('red');
+  const [selectiveTarget, setSelectiveTarget] =
+    useState<SelectiveColorTarget>('reds');
   const mixer = adjustments.channelMixer ?? identityMixer,
-    gradient = adjustments.gradientMap ?? defaultGradient;
+    gradient = adjustments.gradientMap ?? defaultGradient,
+    selective = adjustments.selectiveColor ?? emptySelectiveColor,
+    selectiveRecipe = selective.colors[selectiveTarget] ?? emptyRecipe;
   const updateMixer = (input: keyof ChannelMixer['red'], value: number) =>
     onChange('channelMixer', {
       ...mixer,
@@ -43,6 +62,14 @@ export function AdvancedColorControls({
     });
   const updateGradient = (patch: Partial<GradientMap>) =>
     onChange('gradientMap', { ...gradient, ...patch });
+  const updateSelective = (channel: keyof typeof emptyRecipe, value: number) =>
+    onChange('selectiveColor', {
+      ...selective,
+      colors: {
+        ...selective.colors,
+        [selectiveTarget]: { ...selectiveRecipe, [channel]: value },
+      },
+    });
   return (
     <div className="advanced-color-controls">
       <details>
@@ -154,6 +181,64 @@ export function AdvancedColorControls({
               }
               onValueCommitted={() => onCommit('Gradient Map amount')}
             />
+          </div>
+        </div>
+      </details>
+      <details>
+        <summary>Selective Color</summary>
+        <div className="advanced-color-body">
+          <label className="selective-color-target">
+            Colors
+            <select
+              value={selectiveTarget}
+              onChange={(event) =>
+                setSelectiveTarget(event.target.value as SelectiveColorTarget)
+              }
+            >
+              {selectiveTargets.map((target) => (
+                <option key={target} value={target}>
+                  {target[0].toUpperCase() + target.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(['cyan', 'magenta', 'yellow', 'black'] as const).map((channel) => (
+            <div className="advanced-color-slider" key={channel}>
+              <label>
+                {channel[0].toUpperCase() + channel.slice(1)}{' '}
+                <span>{selectiveRecipe[channel]}%</span>
+              </label>
+              <Slider
+                aria-label={`${selectiveTarget} ${channel}`}
+                min={-100}
+                max={100}
+                step={1}
+                value={selectiveRecipe[channel]}
+                onValueChange={(value) =>
+                  updateSelective(channel, sliderNumber(value))
+                }
+                onValueCommitted={() => onCommit('Selective Color adjustment')}
+              />
+            </div>
+          ))}
+          <div
+            className="selective-color-mode"
+            role="group"
+            aria-label="Selective Color method"
+          >
+            {(['relative', 'absolute'] as const).map((mode) => (
+              <button
+                key={mode}
+                className={selective.mode === mode ? 'active' : ''}
+                aria-pressed={selective.mode === mode}
+                onClick={() => {
+                  onChange('selectiveColor', { ...selective, mode });
+                  onCommit(`Selective Color ${mode} method`);
+                }}
+              >
+                {mode[0].toUpperCase() + mode.slice(1)}
+              </button>
+            ))}
           </div>
         </div>
       </details>

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   adjustHighDepth,
+  applySelectiveColor,
   compositeHighDepth,
   createDefaultHighDepthAdjustments,
   levelCurveValue,
@@ -10,6 +11,7 @@ import {
   precisionToDisplayRgba,
   toneCurveValue,
 } from '../lib/high-depth.ts';
+import { BUILT_IN_LUTS } from '../lib/builtin-luts.ts';
 import { readSupportedPsdHeader } from '../lib/psd-header.ts';
 
 function psdHeader(bitDepth: number, colorMode = 3) {
@@ -262,6 +264,33 @@ void test('Gradient Map blends luminance between editable endpoint colors', () =
   assert.ok(Math.abs(adjusted[0] - 0.5) < 1e-6);
   assert.equal(adjusted[1], 0);
   assert.ok(Math.abs(adjusted[2] - 0.5) < 1e-6);
+});
+
+void test('Selective Color targets red without shifting an unrelated blue pixel', () => {
+  const adjustment = {
+    mode: 'relative' as const,
+    colors: { reds: { cyan: 100, magenta: 0, yellow: 0, black: 0 } },
+  };
+  const red = applySelectiveColor(0.9, 0.1, 0.1, adjustment);
+  const blue = applySelectiveColor(0.1, 0.1, 0.9, adjustment);
+  assert.ok(red[0] < 0.3);
+  assert.deepEqual(blue, [0.1, 0.1, 0.9]);
+});
+
+void test('built-in LUT library provides distinct, valid live looks', () => {
+  assert.equal(Object.keys(BUILT_IN_LUTS).length, 4);
+  for (const lut of Object.values(BUILT_IN_LUTS)) {
+    assert.equal(lut.data.length, lut.size ** 3 * 3);
+    const adjusted = adjustHighDepth(
+      {
+        width: 1,
+        height: 1,
+        data: new Float32Array([0.25, 0.5, 0.75, 1]),
+      },
+      { lut3d: lut, lutAmount: 100 },
+    );
+    assert.ok(adjusted.slice(0, 3).every(Number.isFinite));
+  }
 });
 
 void test('new adjustment defaults are a neutral full recipe', () => {

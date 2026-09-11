@@ -56,7 +56,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Hue/Saturation color ranges and on-image adjustment.
 - [x] Full RGB Channel Mixer with output-channel recipes and constants.
 - [x] Editable two-color Gradient Map with reverse and live strength.
-- [ ] Selective Color and a built-in Color Lookup preset library.
+- [x] Selective Color with nine color/tonal targets, relative/absolute modes, and CMYK recipes.
+- [x] Built-in Color Lookup library with four live, adjustable 3D looks.
 - [ ] Shadows/Highlights, Replace Color, Match Color, HDR toning, and perceptual vibrance.
 - [ ] Lift/gamma/gain wheels, waveform scale controls, and reference comparison.
 

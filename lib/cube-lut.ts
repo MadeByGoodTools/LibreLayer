@@ -4,6 +4,7 @@ export type CubeLut = {
   domainMin: [number, number, number];
   domainMax: [number, number, number];
   data: number[];
+  builtInTransform?: 'cinema' | 'warm-fade' | 'cool-chrome' | 'mono-punch';
 };
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -69,39 +70,94 @@ export function applyCubeLut(
   amount = 1,
 ): [number, number, number] {
   if (!lut || !lut.data.length || amount <= 0) return [red, green, blue];
-  const input = [red, green, blue].map((value, channel) =>
-    clamp(
-      (value - lut.domainMin[channel]) /
-        (lut.domainMax[channel] - lut.domainMin[channel]),
-    ),
-  );
-  const scaled = input.map((value) => value * (lut.size - 1));
-  const low = scaled.map(Math.floor),
-    high = scaled.map((value, index) => Math.min(lut.size - 1, low[index] + 1)),
-    mix = scaled.map((value, index) => value - low[index]);
-  const sample = (r: number, g: number, b: number, channel: number) =>
-    lut.data[(b * lut.size * lut.size + g * lut.size + r) * 3 + channel] ?? 0;
-  const output = [0, 1, 2].map((channel) => {
-    const c000 = sample(low[0], low[1], low[2], channel),
-      c100 = sample(high[0], low[1], low[2], channel),
-      c010 = sample(low[0], high[1], low[2], channel),
-      c110 = sample(high[0], high[1], low[2], channel),
-      c001 = sample(low[0], low[1], high[2], channel),
-      c101 = sample(high[0], low[1], high[2], channel),
-      c011 = sample(low[0], high[1], high[2], channel),
-      c111 = sample(high[0], high[1], high[2], channel),
-      x00 = c000 + (c100 - c000) * mix[0],
-      x10 = c010 + (c110 - c010) * mix[0],
-      x01 = c001 + (c101 - c001) * mix[0],
-      x11 = c011 + (c111 - c011) * mix[0],
-      y0 = x00 + (x10 - x00) * mix[1],
-      y1 = x01 + (x11 - x01) * mix[1];
-    return y0 + (y1 - y0) * mix[2];
-  });
+  if (lut.builtInTransform) {
+    let output: number[];
+    if (lut.builtInTransform === 'cinema') {
+      const luma = red * 0.299 + green * 0.587 + blue * 0.114,
+        shadow = 1 - luma;
+      output = [
+        red * 1.04 + luma * 0.035,
+        green * 1.01 + shadow * 0.025,
+        blue * 1.04 + shadow * 0.055 - luma * 0.025,
+      ];
+    } else if (lut.builtInTransform === 'warm-fade')
+      output = [
+        0.055 + red * 0.91 + green * 0.035,
+        0.035 + green * 0.91 + red * 0.02,
+        0.025 + blue * 0.86,
+      ];
+    else if (lut.builtInTransform === 'cool-chrome') {
+      const contrast = (value: number) => (value - 0.5) * 1.12 + 0.5;
+      output = [
+        contrast(red) * 0.96,
+        contrast(green) * 1.01,
+        contrast(blue) * 1.08 + 0.015,
+      ];
+    } else {
+      const luma = (red * 0.25 + green * 0.67 + blue * 0.08 - 0.5) * 1.22 + 0.5;
+      output = [luma, luma, luma];
+    }
+    const strength = clamp(amount);
+    return [
+      red + (clamp(output[0]) - red) * strength,
+      green + (clamp(output[1]) - green) * strength,
+      blue + (clamp(output[2]) - blue) * strength,
+    ];
+  }
+  const edge = lut.size - 1,
+    scaledRed =
+      clamp((red - lut.domainMin[0]) / (lut.domainMax[0] - lut.domainMin[0])) *
+      edge,
+    scaledGreen =
+      clamp(
+        (green - lut.domainMin[1]) / (lut.domainMax[1] - lut.domainMin[1]),
+      ) * edge,
+    scaledBlue =
+      clamp((blue - lut.domainMin[2]) / (lut.domainMax[2] - lut.domainMin[2])) *
+      edge,
+    redLow = Math.floor(scaledRed),
+    greenLow = Math.floor(scaledGreen),
+    blueLow = Math.floor(scaledBlue),
+    redHigh = Math.min(edge, redLow + 1),
+    greenHigh = Math.min(edge, greenLow + 1),
+    blueHigh = Math.min(edge, blueLow + 1),
+    redMix = scaledRed - redLow,
+    greenMix = scaledGreen - greenLow,
+    blueMix = scaledBlue - blueLow,
+    plane = lut.size * lut.size,
+    i000 = (blueLow * plane + greenLow * lut.size + redLow) * 3,
+    i100 = (blueLow * plane + greenLow * lut.size + redHigh) * 3,
+    i010 = (blueLow * plane + greenHigh * lut.size + redLow) * 3,
+    i110 = (blueLow * plane + greenHigh * lut.size + redHigh) * 3,
+    i001 = (blueHigh * plane + greenLow * lut.size + redLow) * 3,
+    i101 = (blueHigh * plane + greenLow * lut.size + redHigh) * 3,
+    i011 = (blueHigh * plane + greenHigh * lut.size + redLow) * 3,
+    i111 = (blueHigh * plane + greenHigh * lut.size + redHigh) * 3,
+    interpolate = (channel: number) => {
+      const data = lut.data,
+        x00 =
+          data[i000 + channel] +
+          (data[i100 + channel] - data[i000 + channel]) * redMix,
+        x10 =
+          data[i010 + channel] +
+          (data[i110 + channel] - data[i010 + channel]) * redMix,
+        x01 =
+          data[i001 + channel] +
+          (data[i101 + channel] - data[i001 + channel]) * redMix,
+        x11 =
+          data[i011 + channel] +
+          (data[i111 + channel] - data[i011 + channel]) * redMix,
+        y0 = x00 + (x10 - x00) * greenMix,
+        y1 = x01 + (x11 - x01) * greenMix;
+      return y0 + (y1 - y0) * blueMix;
+    },
+    outputRed = interpolate(0),
+    outputGreen = interpolate(1),
+    outputBlue = interpolate(2);
   const strength = clamp(amount);
   return [
-    red + (output[0] - red) * strength,
-    green + (output[1] - green) * strength,
-    blue + (output[2] - blue) * strength,
+    red + (outputRed - red) * strength,
+    green + (outputGreen - green) * strength,
+    blue + (outputBlue - blue) * strength,
   ];
 }

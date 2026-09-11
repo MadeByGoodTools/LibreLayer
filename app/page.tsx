@@ -9380,9 +9380,11 @@ export default function Home() {
     value: HighDepthAdjustments[keyof HighDepthAdjustments],
   ) => {
     if (!active || active.kind !== 'adjustment' || isLocked(active.id)) return;
+    const current = layersRef.current.find((layer) => layer.id === active.id);
+    if (!current || current.kind !== 'adjustment') return;
     patchLayer(active.id, {
       precisionAdjustment: {
-        ...active.precisionAdjustment,
+        ...current.precisionAdjustment,
         [key]: value,
       },
     });

@@ -1056,6 +1056,67 @@ button {
   display: grid;
   gap: 6px;
 }
+
+.lut-library-label,
+.selective-color-target {
+  display: grid;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.selective-color-target select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input);
+  color: var(--foreground);
+  padding: 5px 7px;
+}
+
+.lut-library-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.lut-library-grid button {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input);
+  color: var(--muted-foreground);
+  padding: 5px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.lut-library-grid button.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--foreground);
+}
+
+.selective-color-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.selective-color-mode button {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  padding: 5px;
+}
+
+.selective-color-mode button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--foreground);
+}
 .advanced-color-controls > details {
   border: 1px solid #393c43;
   border-radius: 6px;

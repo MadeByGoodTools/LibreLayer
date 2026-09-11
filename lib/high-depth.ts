@@ -33,6 +33,26 @@ export type GradientMap = {
   amount: number;
   reverse?: boolean;
 };
+export type SelectiveColorTarget =
+  | 'reds'
+  | 'yellows'
+  | 'greens'
+  | 'cyans'
+  | 'blues'
+  | 'magentas'
+  | 'whites'
+  | 'neutrals'
+  | 'blacks';
+export type SelectiveColorRecipe = {
+  cyan: number;
+  magenta: number;
+  yellow: number;
+  black: number;
+};
+export type SelectiveColor = {
+  mode: 'relative' | 'absolute';
+  colors: Partial<Record<SelectiveColorTarget, SelectiveColorRecipe>>;
+};
 
 export type PrecisionLayer = PrecisionImage & {
   opacity?: number;
@@ -77,6 +97,7 @@ export type HighDepthAdjustments = {
   lutAmount?: number;
   channelMixer?: ChannelMixer;
   gradientMap?: GradientMap;
+  selectiveColor?: SelectiveColor;
 };
 
 export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
@@ -122,6 +143,7 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
     highlights: '#ffffff',
     amount: 0,
   },
+  selectiveColor: { mode: 'relative', colors: {} },
 });
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -261,6 +283,73 @@ const parseHexColor = (value = '#ec8a32') => {
   ) as [number, number, number];
 };
 
+const selectiveColorWeights = (red: number, green: number, blue: number) => {
+  const maximum = Math.max(red, green, blue),
+    minimum = Math.min(red, green, blue),
+    chroma = maximum - minimum,
+    hue =
+      chroma <= 1e-6
+        ? 0
+        : maximum === red
+          ? ((green - blue) / chroma + (green < blue ? 6 : 0)) / 6
+          : maximum === green
+            ? ((blue - red) / chroma + 2) / 6
+            : ((red - green) / chroma + 4) / 6,
+    sector = (center: number) => {
+      const distance = Math.min(
+        Math.abs(hue - center),
+        1 - Math.abs(hue - center),
+      );
+      return clamp(1 - distance * 6) * clamp(chroma * 3);
+    },
+    lightness = (maximum + minimum) / 2;
+  return {
+    reds: sector(0),
+    yellows: sector(1 / 6),
+    greens: sector(2 / 6),
+    cyans: sector(3 / 6),
+    blues: sector(4 / 6),
+    magentas: sector(5 / 6),
+    whites: clamp((lightness - 0.55) / 0.45) * (1 - chroma * 0.35),
+    neutrals: clamp(1 - Math.abs(lightness - 0.5) / 0.35) * (1 - chroma * 0.2),
+    blacks: clamp((0.45 - lightness) / 0.45) * (1 - chroma * 0.35),
+  } satisfies Record<SelectiveColorTarget, number>;
+};
+
+export const applySelectiveColor = (
+  red: number,
+  green: number,
+  blue: number,
+  adjustment?: SelectiveColor,
+) => {
+  if (!adjustment) return [red, green, blue] as const;
+  const weights = selectiveColorWeights(red, green, blue),
+    channels = [red, green, blue],
+    adjust = (channel: number, amount: number) =>
+      adjustment.mode === 'absolute'
+        ? -amount / 100
+        : amount >= 0
+          ? -channel * (amount / 100)
+          : (1 - channel) * (-amount / 100);
+  for (const [target, recipe] of Object.entries(adjustment.colors) as [
+    SelectiveColorTarget,
+    SelectiveColorRecipe,
+  ][]) {
+    const weight = weights[target];
+    if (!recipe || weight <= 0) continue;
+    channels[0] += adjust(channels[0], recipe.cyan) * weight;
+    channels[1] += adjust(channels[1], recipe.magenta) * weight;
+    channels[2] += adjust(channels[2], recipe.yellow) * weight;
+    const black = recipe.black / 100;
+    for (let channel = 0; channel < 3; channel++)
+      channels[channel] +=
+        (black >= 0
+          ? -channels[channel] * black
+          : (1 - channels[channel]) * -black) * weight;
+  }
+  return channels.map((value) => clamp(value)) as [number, number, number];
+};
+
 /**
  * Apply a complete color correction recipe in one floating-point pass.
  * The input may be 8, 16 or 32-bit RGBA and the result stays Float32 until
@@ -282,6 +371,50 @@ export function adjustHighDepth(
   const saturation = Math.max(0, 1 + (settings.saturation ?? 0) / 100);
   const density = clamp((settings.photoFilterDensity ?? 0) / 100);
   const filter = parseHexColor(settings.photoFilter);
+  const mixer = settings.channelMixer;
+  const mixerActive =
+    !!mixer &&
+    (mixer.red.red !== 100 ||
+      mixer.red.green !== 0 ||
+      mixer.red.blue !== 0 ||
+      mixer.red.constant !== 0 ||
+      mixer.green.red !== 0 ||
+      mixer.green.green !== 100 ||
+      mixer.green.blue !== 0 ||
+      mixer.green.constant !== 0 ||
+      mixer.blue.red !== 0 ||
+      mixer.blue.green !== 0 ||
+      mixer.blue.blue !== 100 ||
+      mixer.blue.constant !== 0);
+  const selective = settings.selectiveColor;
+  const selectiveActive =
+    !!selective &&
+    Object.values(selective.colors).some(
+      (recipe) =>
+        !!recipe &&
+        (recipe.cyan !== 0 ||
+          recipe.magenta !== 0 ||
+          recipe.yellow !== 0 ||
+          recipe.black !== 0),
+    );
+  const masterLevelsActive =
+    (settings.levelsBlack ?? 0) !== 0 ||
+    (settings.levelsWhite ?? 255) !== 255 ||
+    (settings.levelsGamma ?? 1) !== 1 ||
+    (settings.outputBlack ?? 0) !== 0 ||
+    (settings.outputWhite ?? 255) !== 255;
+  const masterToneActive =
+    (settings.curveShadows ?? 0) !== 0 || (settings.curveHighlights ?? 0) !== 0;
+  const masterPoints = settings.curves?.rgb;
+  const masterPointsActive = !!masterPoints?.length;
+  const channelActive = (channel: Exclude<CurveChannel, 'rgb'>) =>
+    !!settings.channelLevels?.[channel] ||
+    (settings[`${channel}CurveShadows`] ?? 0) !== 0 ||
+    (settings[`${channel}CurveHighlights`] ?? 0) !== 0 ||
+    !!settings.curves?.[channel]?.length;
+  const redChannelActive = channelActive('red'),
+    greenChannelActive = channelActive('green'),
+    blueChannelActive = channelActive('blue');
 
   for (let index = 0; index < image.data.length; index += 4) {
     let red = sample(image.data, index) * brightness;
@@ -289,63 +422,58 @@ export function adjustHighDepth(
     let blue = sample(image.data, index + 2) * brightness;
 
     const remap = (value: number) => {
-      let normalized = levelCurveValue(value, {
-        black: settings.levelsBlack,
-        white: settings.levelsWhite,
-        gamma: settings.levelsGamma,
-        outputBlack: settings.outputBlack,
-        outputWhite: settings.outputWhite,
-      });
-      normalized = toneCurveValue(
-        normalized,
-        settings.curveShadows,
-        settings.curveHighlights,
-      );
-      normalized = pointCurveValue(normalized, settings.curves?.rgb);
-      normalized = Math.max(0, normalized * exposure) ** (1 / exposureGamma);
-      return (normalized - 0.5) * contrast + 0.5;
+      let normalized = value;
+      if (masterLevelsActive)
+        normalized = levelCurveValue(normalized, {
+          black: settings.levelsBlack,
+          white: settings.levelsWhite,
+          gamma: settings.levelsGamma,
+          outputBlack: settings.outputBlack,
+          outputWhite: settings.outputWhite,
+        });
+      if (masterToneActive)
+        normalized = toneCurveValue(
+          normalized,
+          settings.curveShadows,
+          settings.curveHighlights,
+        );
+      if (masterPointsActive)
+        normalized = pointCurveValue(normalized, masterPoints);
+      if (exposure !== 1 || exposureGamma !== 1)
+        normalized = Math.max(0, normalized * exposure) ** (1 / exposureGamma);
+      return contrast === 1 ? normalized : (normalized - 0.5) * contrast + 0.5;
     };
     red = remap(red);
     green = remap(green);
     blue = remap(blue);
-    red = toneCurveValue(
-      red,
-      settings.redCurveShadows,
-      settings.redCurveHighlights,
-    );
-    green = toneCurveValue(
-      green,
-      settings.greenCurveShadows,
-      settings.greenCurveHighlights,
-    );
-    blue = toneCurveValue(
-      blue,
-      settings.blueCurveShadows,
-      settings.blueCurveHighlights,
-    );
-    red = pointCurveValue(
-      levelCurveValue(red, settings.channelLevels?.red),
-      settings.curves?.red,
-    );
-    green = pointCurveValue(
-      levelCurveValue(green, settings.channelLevels?.green),
-      settings.curves?.green,
-    );
-    blue = pointCurveValue(
-      levelCurveValue(blue, settings.channelLevels?.blue),
-      settings.curves?.blue,
-    );
+    const remapChannel = (
+      value: number,
+      channel: Exclude<CurveChannel, 'rgb'>,
+    ) => {
+      let result = levelCurveValue(value, settings.channelLevels?.[channel]);
+      result = toneCurveValue(
+        result,
+        settings[`${channel}CurveShadows`],
+        settings[`${channel}CurveHighlights`],
+      );
+      return settings.curves?.[channel]?.length
+        ? pointCurveValue(result, settings.curves[channel])
+        : result;
+    };
+    if (redChannelActive) red = remapChannel(red, 'red');
+    if (greenChannelActive) green = remapChannel(green, 'green');
+    if (blueChannelActive) blue = remapChannel(blue, 'blue');
 
-    if (settings.channelMixer) {
+    if (mixerActive && mixer) {
       const source = [red, green, blue] as const,
         mix = (recipe: ChannelMixer['red']) =>
           source[0] * (recipe.red / 100) +
           source[1] * (recipe.green / 100) +
           source[2] * (recipe.blue / 100) +
           recipe.constant / 100;
-      red = mix(settings.channelMixer.red);
-      green = mix(settings.channelMixer.green);
-      blue = mix(settings.channelMixer.blue);
+      red = mix(mixer.red);
+      green = mix(mixer.green);
+      blue = mix(mixer.blue);
     }
 
     red += ((settings.balanceCyanRed ?? 0) / 100) * 0.25;
@@ -382,13 +510,19 @@ export function adjustHighDepth(
       blue += (mapped[2] - blue) * amount;
     }
 
+    if (selectiveActive)
+      [red, green, blue] = applySelectiveColor(red, green, blue, selective);
+
     let luma = 0.299 * red + 0.587 * green + 0.114 * blue;
-    const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const vibrance = 1 + ((settings.vibrance ?? 0) / 100) * (1 - clamp(chroma));
-    const colorScale = Math.max(0, saturation * vibrance);
-    red = luma + (red - luma) * colorScale;
-    green = luma + (green - luma) * colorScale;
-    blue = luma + (blue - luma) * colorScale;
+    const vibranceAmount = (settings.vibrance ?? 0) / 100;
+    if (saturation !== 1 || vibranceAmount !== 0) {
+      const chroma = Math.max(red, green, blue) - Math.min(red, green, blue),
+        vibrance = 1 + vibranceAmount * (1 - clamp(chroma)),
+        colorScale = Math.max(0, saturation * vibrance);
+      red = luma + (red - luma) * colorScale;
+      green = luma + (green - luma) * colorScale;
+      blue = luma + (blue - luma) * colorScale;
+    }
 
     if (settings.blackWhite) {
       luma =
