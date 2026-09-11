@@ -53,7 +53,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Waveform, RGB parade, and vectorscope displays.
 - [x] Monotonic spline Curves with a direct numeric point editor.
 - [ ] Freehand Curves, smoothing, and clipping controls.
-- [ ] Hue/Saturation color ranges and on-image adjustment.
+- [x] Hue/Saturation controls for six independent color ranges.
+- [ ] Hue/Saturation on-image adjustment and editable range falloff handles.
 - [x] Full RGB Channel Mixer with output-channel recipes and constants.
 - [x] Editable two-color Gradient Map with reverse and live strength.
 - [x] Selective Color with nine color/tonal targets, relative/absolute modes, and CMYK recipes.

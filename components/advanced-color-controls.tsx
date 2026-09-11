@@ -6,6 +6,7 @@ import type {
   ChannelMixer,
   GradientMap,
   HighDepthAdjustments,
+  HueSaturationRangeTarget,
   ReplaceColor,
   SelectiveColor,
   SelectiveColorTarget,
@@ -69,13 +70,20 @@ export function AdvancedColorControls({
   const [output, setOutput] = useState<'red' | 'green' | 'blue'>('red');
   const [selectiveTarget, setSelectiveTarget] =
     useState<SelectiveColorTarget>('reds');
+  const [hueRange, setHueRange] = useState<HueSaturationRangeTarget>('reds');
   const mixer = adjustments.channelMixer ?? identityMixer,
     gradient = adjustments.gradientMap ?? defaultGradient,
     selective = adjustments.selectiveColor ?? emptySelectiveColor,
     selectiveRecipe = selective.colors[selectiveTarget] ?? emptyRecipe,
     shadowsHighlights =
       adjustments.shadowsHighlights ?? defaultShadowsHighlights,
-    replaceColor = adjustments.replaceColor ?? defaultReplaceColor;
+    replaceColor = adjustments.replaceColor ?? defaultReplaceColor,
+    hueRanges = adjustments.hueSaturationRanges ?? {},
+    hueRangeRecipe = hueRanges[hueRange] ?? {
+      hue: 0,
+      saturation: 0,
+      lightness: 0,
+    };
   const updateMixer = (input: keyof ChannelMixer['red'], value: number) =>
     onChange('channelMixer', {
       ...mixer,
@@ -97,6 +105,11 @@ export function AdvancedColorControls({
   ) => onChange('shadowsHighlights', { ...shadowsHighlights, [key]: value });
   const updateReplaceColor = (patch: Partial<ReplaceColor>) =>
     onChange('replaceColor', { ...replaceColor, ...patch });
+  const updateHueRange = (key: keyof typeof hueRangeRecipe, value: number) =>
+    onChange('hueSaturationRanges', {
+      ...hueRanges,
+      [hueRange]: { ...hueRangeRecipe, [key]: value },
+    });
   return (
     <div className="advanced-color-controls">
       <details>
@@ -267,6 +280,56 @@ export function AdvancedColorControls({
               </button>
             ))}
           </div>
+        </div>
+      </details>
+      <details>
+        <summary>Hue / Saturation Ranges</summary>
+        <div className="advanced-color-body">
+          <label className="selective-color-target">
+            Range
+            <select
+              value={hueRange}
+              onChange={(event) =>
+                setHueRange(event.target.value as HueSaturationRangeTarget)
+              }
+            >
+              {selectiveTargets.slice(0, 6).map((target) => (
+                <option key={target} value={target}>
+                  {target[0].toUpperCase() + target.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(
+            [
+              ['Hue', 'hue', -180, 180, '°'],
+              ['Saturation', 'saturation', -100, 100, '%'],
+              ['Lightness', 'lightness', -100, 100, '%'],
+            ] as const
+          ).map(([label, key, min, max, suffix]) => (
+            <div className="advanced-color-slider" key={key}>
+              <label>
+                {label}{' '}
+                <span>
+                  {hueRangeRecipe[key]}
+                  {suffix}
+                </span>
+              </label>
+              <Slider
+                aria-label={`${hueRange} ${label}`}
+                min={min}
+                max={max}
+                step={1}
+                value={hueRangeRecipe[key]}
+                onValueChange={(value) =>
+                  updateHueRange(key, sliderNumber(value))
+                }
+                onValueCommitted={() =>
+                  onCommit(`${hueRange} Hue and Saturation adjustment`)
+                }
+              />
+            </div>
+          ))}
         </div>
       </details>
       <details>

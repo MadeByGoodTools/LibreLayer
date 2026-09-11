@@ -69,6 +69,18 @@ export type ReplaceColor = {
   lightness: number;
   amount: number;
 };
+export type HueSaturationRangeTarget =
+  | 'reds'
+  | 'yellows'
+  | 'greens'
+  | 'cyans'
+  | 'blues'
+  | 'magentas';
+export type HueSaturationRange = {
+  hue: number;
+  saturation: number;
+  lightness: number;
+};
 
 export type PrecisionLayer = PrecisionImage & {
   opacity?: number;
@@ -116,6 +128,9 @@ export type HighDepthAdjustments = {
   selectiveColor?: SelectiveColor;
   shadowsHighlights?: ShadowsHighlights;
   replaceColor?: ReplaceColor;
+  hueSaturationRanges?: Partial<
+    Record<HueSaturationRangeTarget, HueSaturationRange>
+  >;
 };
 
 export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
@@ -178,6 +193,7 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
     lightness: 0,
     amount: 0,
   },
+  hueSaturationRanges: {},
 });
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -456,6 +472,40 @@ export const applyReplaceColor = (
   ] as const;
 };
 
+export const applyHueSaturationRanges = (
+  red: number,
+  green: number,
+  blue: number,
+  ranges?: Partial<Record<HueSaturationRangeTarget, HueSaturationRange>>,
+) => {
+  if (!ranges) return [red, green, blue] as const;
+  const weights = selectiveColorWeights(red, green, blue);
+  let channels = [red, green, blue] as [number, number, number];
+  for (const target of [
+    'reds',
+    'yellows',
+    'greens',
+    'cyans',
+    'blues',
+    'magentas',
+  ] as const) {
+    const recipe = ranges[target],
+      weight = weights[target];
+    if (!recipe || weight <= 0) continue;
+    let shifted = hueRotate(...channels, recipe.hue);
+    const luma = 0.299 * shifted[0] + 0.587 * shifted[1] + 0.114 * shifted[2],
+      saturation = Math.max(0, 1 + recipe.saturation / 100),
+      lightness = recipe.lightness / 100;
+    shifted = shifted.map(
+      (channel) => luma + (channel - luma) * saturation + lightness,
+    ) as [number, number, number];
+    channels = channels.map((channel, index) =>
+      clamp(channel + (shifted[index] - channel) * weight),
+    ) as [number, number, number];
+  }
+  return channels;
+};
+
 /**
  * Apply a complete color correction recipe in one floating-point pass.
  * The input may be 8, 16 or 32-bit RGBA and the result stays Float32 until
@@ -508,7 +558,17 @@ export function adjustHighDepth(
       !!shadowsHighlights &&
       (shadowsHighlights.shadows !== 0 || shadowsHighlights.highlights !== 0),
     replaceColor = settings.replaceColor,
-    replaceColorActive = !!replaceColor && replaceColor.amount > 0;
+    replaceColorActive = !!replaceColor && replaceColor.amount > 0,
+    hueSaturationRanges = settings.hueSaturationRanges,
+    hueSaturationRangesActive =
+      !!hueSaturationRanges &&
+      Object.values(hueSaturationRanges).some(
+        (recipe) =>
+          !!recipe &&
+          (recipe.hue !== 0 ||
+            recipe.saturation !== 0 ||
+            recipe.lightness !== 0),
+      );
   const masterLevelsActive =
     (settings.levelsBlack ?? 0) !== 0 ||
     (settings.levelsWhite ?? 255) !== 255 ||
@@ -592,6 +652,13 @@ export function adjustHighDepth(
     green += ((settings.balanceMagentaGreen ?? 0) / 100) * 0.25;
     blue += ((settings.balanceYellowBlue ?? 0) / 100) * 0.25;
     [red, green, blue] = hueRotate(red, green, blue, settings.hue ?? 0);
+    if (hueSaturationRangesActive)
+      [red, green, blue] = applyHueSaturationRanges(
+        red,
+        green,
+        blue,
+        hueSaturationRanges,
+      );
 
     if (density) {
       red = red * (1 - density) + filter[0] * density;

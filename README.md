@@ -35,6 +35,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Importable 3D `.cube` LUTs with live strength, plus waveform, RGB parade, and vectorscope displays
 - Nondestructive RGB Channel Mixer, Selective Color, Gradient Map, and built-in/imported 3D LUT controls with live previews
 - Tonal Shadows/Highlights recovery and targeted Replace Color with adjustable fuzziness
+- Independent Hue, Saturation, and Lightness controls for six color ranges
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 
 Projects remain on the user's device unless they explicitly export or share a file.

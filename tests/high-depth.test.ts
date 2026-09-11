@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   adjustHighDepth,
+  applyHueSaturationRanges,
   applyReplaceColor,
   applySelectiveColor,
   applyShadowsHighlights,
@@ -323,6 +324,16 @@ void test('Replace Color respects the selected color and fuzziness mask', () => 
   };
   const red = applyReplaceColor(1, 0, 0, settings);
   const blue = applyReplaceColor(0, 0, 1, settings);
+  assert.ok(red[1] > red[0]);
+  assert.deepEqual(blue, [0, 0, 1]);
+});
+
+void test('Hue and Saturation ranges affect only the chosen color family', () => {
+  const ranges = {
+    reds: { hue: 120, saturation: 0, lightness: 0 },
+  };
+  const red = applyHueSaturationRanges(1, 0, 0, ranges);
+  const blue = applyHueSaturationRanges(0, 0, 1, ranges);
   assert.ok(red[1] > red[0]);
   assert.deepEqual(blue, [0, 0, 1]);
 });
