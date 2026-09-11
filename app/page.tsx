@@ -177,6 +177,13 @@ import {
   type BlendIf,
 } from '@/lib/layer-compositing';
 import { BlendIfControls } from '@/components/blend-if-controls';
+import {
+  decodeCameraRaw,
+  defaultRawDevelopSettings,
+  developRawRgba,
+  type RawDevelopSettings,
+  type RawLinearImage,
+} from '@/lib/raw-develop';
 const Mask = Focus;
 
 type Tool =
@@ -359,25 +366,6 @@ type EditorDocument = {
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-};
-
-const embeddedJpeg = (buffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(buffer);
-  let best: Uint8Array | null = null;
-  for (let start = 0; start < bytes.length - 3; start++) {
-    if (bytes[start] !== 0xff || bytes[start + 1] !== 0xd8) continue;
-    for (let end = start + 2; end < bytes.length - 1; end++) {
-      if (bytes[end] === 0xff && bytes[end + 1] === 0xd9) {
-        const candidate = bytes.slice(start, end + 2);
-        if (!best || candidate.length > best.length) best = candidate;
-        start = end + 1;
-        break;
-      }
-    }
-  }
-  if (!best || best.length < 1024)
-    throw Error('This RAW file does not contain a browser-readable preview.');
-  return new Blob([new Uint8Array(best).buffer], { type: 'image/jpeg' });
 };
 
 const shiftedHex = (hex: string, amount: number) => {
@@ -1381,19 +1369,43 @@ export default function Home() {
     [selectionName, setSelectionName] = useState('Selection 1'),
     [rawDevelop, setRawDevelop] = useState<{
       name: string;
-      pixels: HTMLCanvasElement;
-      thumbnail: string;
+      image: RawLinearImage;
     } | null>(null),
-    [rawExposure, setRawExposure] = useState(0),
-    [rawContrast, setRawContrast] = useState(0),
-    [rawTemperature, setRawTemperature] = useState(0),
-    [rawTint, setRawTint] = useState(0),
+    [rawSettings, setRawSettings] = useState<RawDevelopSettings>(
+      defaultRawDevelopSettings,
+    ),
+    [rawPreview, setRawPreview] = useState(''),
     [refineRadius, setRefineRadius] = useState(2),
     [refineSmooth, setRefineSmooth] = useState(2),
     [refineFeather, setRefineFeather] = useState(1),
     [refineShift, setRefineShift] = useState(0),
     [decontaminate, setDecontaminate] = useState(true),
     [decontaminateAmount, setDecontaminateAmount] = useState(50);
+  useEffect(() => {
+    if (!rawDevelop) {
+      setRawPreview('');
+      return;
+    }
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      const preview = developRawRgba(rawDevelop.image, rawSettings, 900);
+      if (cancelled) return;
+      const canvas = makeCanvas(preview.width, preview.height);
+      canvas
+        .getContext('2d')!
+        .putImageData(
+          new ImageData(preview.data, preview.width, preview.height),
+          0,
+          0,
+        );
+      setRawPreview(canvas.toDataURL('image/jpeg', 0.9));
+      canvas.width = canvas.height = 1;
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [rawDevelop, rawSettings]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (
@@ -7227,116 +7239,81 @@ export default function Home() {
     if (psdBusyRef.current) return;
     psdBusyRef.current = true;
     setPsdBusy(true);
-    setStatus('Reading the RAW preview…');
-    let url = '';
+    setStatus('Developing the camera sensor data…');
     try {
       checkFileSize(file.size);
-      const preview = embeddedJpeg(await file.arrayBuffer()),
-        image = new Image();
-      url = URL.createObjectURL(preview);
-      image.src = url;
-      await image.decode();
-      requireRoom(
-        image.naturalWidth,
-        image.naturalHeight,
-        image.naturalWidth * image.naturalHeight,
-      );
-      const pixels = makeCanvas(image.naturalWidth, image.naturalHeight);
-      pixels.getContext('2d')!.drawImage(image, 0, 0);
-      const previewScale = Math.min(
-          1,
-          720 / Math.max(pixels.width, pixels.height),
-        ),
-        previewCanvas = makeCanvas(
-          Math.max(1, Math.round(pixels.width * previewScale)),
-          Math.max(1, Math.round(pixels.height * previewScale)),
-        );
-      previewCanvas
-        .getContext('2d')!
-        .drawImage(pixels, 0, 0, previewCanvas.width, previewCanvas.height);
-      setRawExposure(0);
-      setRawContrast(0);
-      setRawTemperature(0);
-      setRawTint(0);
+      const image = await decodeCameraRaw(file);
+      requireRoom(image.width, image.height, image.width * image.height);
+      setRawSettings({ ...defaultRawDevelopSettings });
       setRawDevelop({
         name: file.name,
-        pixels,
-        thumbnail: previewCanvas.toDataURL('image/jpeg', 0.82),
+        image,
       });
-      previewCanvas.width = previewCanvas.height = 1;
-      setStatus('RAW preview ready for development');
+      setStatus(
+        `RAW sensor data ready — ${image.width} × ${image.height} · ${image.bitDepth}-bit${image.camera ? ` · ${image.camera}` : ''}`,
+      );
     } catch (error) {
       setPsdError(
-        `${error instanceof Error ? error.message : 'RAW preview could not be decoded.'} LibreLayer develops the full-size embedded JPEG preview and never changes the sensor file.`,
+        `${error instanceof Error ? error.message : 'RAW sensor data could not be decoded.'} The original camera file was not changed.`,
       );
     } finally {
-      if (url) URL.revokeObjectURL(url);
       psdBusyRef.current = false;
       setPsdBusy(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
-  const applyRawDevelop = () => {
+  const applyRawDevelop = async () => {
     if (!rawDevelop) return;
-    const pixels = makeCanvas(
-      rawDevelop.pixels.width,
-      rawDevelop.pixels.height,
-    );
-    pixels.getContext('2d')!.drawImage(rawDevelop.pixels, 0, 0);
-    applyAdvancedPixels(pixels, {
-      brightness: rawExposure,
-      contrast: rawContrast,
-      hue: rawTint / 2,
-      saturation: 0,
-      vibrance: 0,
-      blackWhite: false,
-      redMix: 30,
-      greenMix: 59,
-      blueMix: 11,
-      blurMode: 'none',
-      blurRadius: 0,
-      blurAngle: 0,
-    });
-    if (rawTemperature) {
-      const ctx = pixels.getContext('2d')!,
-        image = ctx.getImageData(0, 0, pixels.width, pixels.height),
-        warm = rawTemperature / 100;
-      for (let index = 0; index < image.data.length; index += 4) {
-        image.data[index] = Math.max(
+    psdBusyRef.current = true;
+    setPsdBusy(true);
+    setStatus('Rendering the full-resolution RAW development…');
+    try {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const developed = developRawRgba(rawDevelop.image, rawSettings);
+      const pixels = makeCanvas(developed.width, developed.height);
+      pixels
+        .getContext('2d')!
+        .putImageData(
+          new ImageData(developed.data, developed.width, developed.height),
           0,
-          Math.min(255, image.data[index] + warm * 38),
-        );
-        image.data[index + 2] = Math.max(
           0,
-          Math.min(255, image.data[index + 2] - warm * 38),
         );
-      }
-      ctx.putImageData(image, 0, 0);
+      const id = crypto.randomUUID();
+      loadImportedDocument(
+        `${rawDevelop.name} — developed`,
+        pixels.width,
+        pixels.height,
+        [
+          {
+            id,
+            name: 'RAW developed sensor image',
+            visible: true,
+            opacity: 100,
+            blend: 'source-over',
+            x: 0,
+            y: 0,
+            hasMask: false,
+            maskEnabled: true,
+            kind: 'pixel',
+          },
+        ],
+        new Map([[id, { pixels }]]),
+        'Open Camera Raw',
+      );
+      setRawDevelop(null);
+      setStatus('RAW development opened as an editable pixel layer');
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'The full-resolution RAW could not be rendered.',
+      );
+    } finally {
+      psdBusyRef.current = false;
+      setPsdBusy(false);
     }
-    const id = crypto.randomUUID();
-    loadImportedDocument(
-      `${rawDevelop.name} — developed preview`,
-      pixels.width,
-      pixels.height,
-      [
-        {
-          id,
-          name: 'RAW developed preview',
-          visible: true,
-          opacity: 100,
-          blend: 'source-over',
-          x: 0,
-          y: 0,
-          hasMask: false,
-          maskEnabled: true,
-          kind: 'pixel',
-        },
-      ],
-      new Map([[id, { pixels }]]),
-      'Open Camera Raw preview',
-    );
-    setRawDevelop(null);
-    setStatus('RAW preview opened as an editable pixel layer');
   };
 
   const openImage = (file?: File) => {
@@ -12141,40 +12118,68 @@ export default function Home() {
         <DialogContent className="raw-develop-dialog">
           <DialogTitle>Camera Raw</DialogTitle>
           <DialogDescription>
-            Develop the full-size embedded preview as a new editable document.
-            The original sensor file is never changed.
+            Develop the camera sensor data in a scene-linear, wide-gamut
+            workspace. The original RAW file is never changed.
           </DialogDescription>
-          {rawDevelop && (
-            <img
-              src={rawDevelop.thumbnail}
-              alt="RAW preview"
-              style={{
-                filter: `brightness(${100 + rawExposure}%) contrast(${100 + rawContrast}%) hue-rotate(${rawTint / 2}deg)`,
-              }}
-            />
+          {rawDevelop && rawPreview && (
+            <img src={rawPreview} alt="Live RAW development preview" />
           )}
-          {[
-            ['Exposure', rawExposure, setRawExposure, -100, 100],
-            ['Contrast', rawContrast, setRawContrast, -100, 100],
-            ['Temperature', rawTemperature, setRawTemperature, -100, 100],
-            ['Tint', rawTint, setRawTint, -100, 100],
-          ].map(([label, value, setter, min, max]) => (
-            <label key={label as string}>
-              <span>{label as string}</span>
-              <Slider
-                aria-label={`RAW ${String(label).toLowerCase()}`}
-                min={min as number}
-                max={max as number}
-                value={value as number}
-                onValueChange={(next) =>
-                  (setter as (value: number) => void)(sliderNumber(next))
-                }
-              />
-              <strong>{value as number}</strong>
-            </label>
-          ))}
+          {rawDevelop && (
+            <p className="raw-source-info">
+              {rawDevelop.image.width} × {rawDevelop.image.height} ·{' '}
+              {rawDevelop.image.bitDepth}-bit RAW
+              {rawDevelop.image.camera ? ` · ${rawDevelop.image.camera}` : ''}
+              {rawDevelop.image.lens ? ` · ${rawDevelop.image.lens}` : ''}
+            </p>
+          )}
+          <div className="raw-develop-controls">
+            {(
+              [
+                ['Exposure', 'exposure', -5, 5, 0.1, ' EV'],
+                ['Contrast', 'contrast', -100, 100, 1, ''],
+                ['Highlights', 'highlights', -100, 100, 1, ''],
+                ['Shadows', 'shadows', -100, 100, 1, ''],
+                ['Whites', 'whites', -100, 100, 1, ''],
+                ['Blacks', 'blacks', -100, 100, 1, ''],
+                ['Temperature', 'temperature', -100, 100, 1, ''],
+                ['Tint', 'tint', -100, 100, 1, ''],
+                ['Vibrance', 'vibrance', -100, 100, 1, ''],
+                ['Saturation', 'saturation', -100, 100, 1, ''],
+                ['Highlight recovery', 'highlightRecovery', 0, 100, 1, '%'],
+              ] as const
+            ).map(([label, key, min, max, step, suffix]) => (
+              <label key={key}>
+                <span>{label}</span>
+                <Slider
+                  aria-label={`RAW ${label.toLowerCase()}`}
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={rawSettings[key]}
+                  onValueChange={(next) =>
+                    setRawSettings((current) => ({
+                      ...current,
+                      [key]: sliderNumber(next),
+                    }))
+                  }
+                />
+                <strong>
+                  {rawSettings[key]}
+                  {suffix}
+                </strong>
+              </label>
+            ))}
+          </div>
           <div className="dialog-actions">
-            <Button onClick={applyRawDevelop}>Open image</Button>
+            <Button
+              variant="outline"
+              onClick={() => setRawSettings({ ...defaultRawDevelopSettings })}
+            >
+              Reset
+            </Button>
+            <Button onClick={() => void applyRawDevelop()}>
+              Open full resolution
+            </Button>
             <Button variant="outline" onClick={() => setRawDevelop(null)}>
               Cancel
             </Button>
