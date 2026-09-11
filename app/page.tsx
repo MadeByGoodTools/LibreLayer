@@ -1690,6 +1690,7 @@ export default function Home() {
   const cloneHasOffset = useRef(false);
   const cloneOffset = useRef({ x: 0, y: 0 });
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
+  const historyBrushBuffer = useRef<HTMLCanvasElement | null>(null);
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
@@ -1792,6 +1793,9 @@ export default function Home() {
     [airbrushBuildUp, setAirbrushBuildUp] = useState(false),
     [brushSymmetry, setBrushSymmetry] = useState<BrushSymmetry>('none'),
     [radialSymmetryCount, setRadialSymmetryCount] = useState(6),
+    [brushSourceMode, setBrushSourceMode] = useState<
+      'color' | 'history' | 'art-history'
+    >('color'),
     [mixerWet, setMixerWet] = useState(50),
     [mixerLoad, setMixerLoad] = useState(50),
     [mixerMix, setMixerMix] = useState(50),
@@ -1846,6 +1850,7 @@ export default function Home() {
     [cloneFlipX, setCloneFlipX] = useState(false),
     [cloneFlipY, setCloneFlipY] = useState(false),
     [cloneOverlay, setCloneOverlay] = useState(true),
+    [cloneMode, setCloneMode] = useState<'clone' | 'pattern'>('clone'),
     [activeCloneSourceSlot, setActiveCloneSourceSlot] = useState(0),
     [cloneSourceVersion, setCloneSourceVersion] = useState(0),
     [retouchMode, setRetouchMode] = useState<
@@ -2603,6 +2608,27 @@ export default function Home() {
     if (historyIndex.current < historyRef.current.length - 1)
       restoreSnapshot(historyIndex.current + 1);
   }, [restoreSnapshot]);
+  const activateHistoryBrush = (artistic = false) => {
+    const sourceSnapshot =
+        historyRef.current[Math.max(0, historyIndex.current - 1)],
+      source = sourceSnapshot?.surfaces.find(
+        (surface) => surface.id === selectedRef.current,
+      );
+    if (!source) {
+      setStatus('Create another history state on this layer first');
+      return;
+    }
+    if (historyBrushBuffer.current)
+      historyBrushBuffer.current.width = historyBrushBuffer.current.height = 1;
+    historyBrushBuffer.current = restoreTiles(source.pixels);
+    setBrushSourceMode(artistic ? 'art-history' : 'history');
+    setTool('brush');
+    setStatus(
+      artistic
+        ? 'Art History Brush ready from the previous layer state'
+        : 'History Brush ready from the previous layer state',
+    );
+  };
   const isLocked = (id: string) => locked(layersRef.current, id);
   const permit = (ids: string[]) => {
     if (ids.some(isLocked)) {
@@ -2821,6 +2847,8 @@ export default function Home() {
     setQuickMask(false);
     polygonDraft.current = [];
     cloneSource.current = null;
+    historyBrushBuffer.current = null;
+    setBrushSourceMode('color');
     cloneSources.current = Array.from({ length: 5 }, () => null);
     setActiveCloneSourceSlot(0);
     setCloneSourceVersion((version) => version + 1);
@@ -3568,7 +3596,24 @@ export default function Home() {
       setStatus(`Sampled ${hex}`);
       drawing.current = false;
     }
-    if (tool === 'clone' || (tool === 'retouch' && retouchMode === 'healing')) {
+    if (tool === 'clone' && cloneMode === 'pattern') {
+      const pattern = makeCanvas(doc.w, doc.h),
+        patternContext = pattern.getContext('2d')!,
+        cell = Math.max(8, Math.round(size * 0.75));
+      for (let y = 0; y < doc.h; y += cell)
+        for (let x = 0; x < doc.w; x += cell) {
+          patternContext.fillStyle =
+            (x / cell + y / cell) % 2 ? color : backgroundColor;
+          patternContext.fillRect(x, y, cell, cell);
+        }
+      cloneBuffer.current = pattern;
+      cloneSource.current = { x: 0, y: 0 };
+      cloneOffset.current = { x: 0, y: 0 };
+      cloneHasOffset.current = true;
+    } else if (
+      tool === 'clone' ||
+      (tool === 'retouch' && retouchMode === 'healing')
+    ) {
       if (e.altKey) {
         cloneSource.current = p;
         cloneSources.current[activeCloneSourceSlot] = { ...p };
@@ -3774,6 +3819,21 @@ export default function Home() {
                 textureAlpha *
                 transferredAlpha *
                 (airbrushBuildUp ? 0.2 : 1);
+              if (brushSourceMode !== 'color' && historyBrushBuffer.current) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(x, y, dabSize / 2, 0, Math.PI * 2);
+                ctx.clip();
+                if (brushSourceMode === 'art-history') {
+                  ctx.translate(x, y);
+                  ctx.rotate(Math.sin(x * 0.17 + y * 0.11) * 0.42);
+                  ctx.scale(1.08, 0.92);
+                  ctx.translate(-x, -y);
+                }
+                ctx.drawImage(historyBrushBuffer.current, 0, 0);
+                ctx.restore();
+                continue;
+              }
               if (paintMode === 'pencil') {
                 ctx.fillStyle = dabPaint;
                 ctx.fillRect(
@@ -10147,6 +10207,7 @@ export default function Home() {
       }
       if (feature.command === 'pattern-stamp') {
         setTool('clone');
+        setCloneMode('pattern');
         setCloneAligned(false);
         setStatus('Pattern Stamp ready with unaligned repeating source');
         return;
@@ -10224,8 +10285,7 @@ export default function Home() {
     }
     if (feature.kind === 'production') {
       if (feature.command === 'history-brush') {
-        setTool('brush');
-        setStatus('History Brush ready from the previous snapshot');
+        activateHistoryBrush(options.secondary >= 50);
         return;
       }
       if (feature.command === 'actions') {
@@ -11226,6 +11286,23 @@ export default function Home() {
               name: 'Frequency Separation',
               action: createFrequencySeparation,
             },
+            {
+              name: 'Pattern Stamp',
+              action: () => {
+                setTool('clone');
+                setCloneMode('pattern');
+                setCloneAligned(false);
+                setStatus('Pattern Stamp ready');
+              },
+            },
+            {
+              name: 'History Brush',
+              action: () => activateHistoryBrush(false),
+            },
+            {
+              name: 'Art History Brush',
+              action: () => activateHistoryBrush(true),
+            },
             { separator: true },
             ...(
               [
@@ -11400,6 +11477,25 @@ export default function Home() {
                   >
                     <option value="brush">Brush</option>
                     <option value="pencil">Pencil</option>
+                  </select>
+                </label>
+                <label>
+                  Source
+                  <select
+                    aria-label="Brush source"
+                    value={brushSourceMode}
+                    onChange={(event) => {
+                      const mode = event.target.value as typeof brushSourceMode;
+                      if (mode !== 'color' && !historyBrushBuffer.current) {
+                        setStatus('Choose History Brush from Retouch first');
+                        return;
+                      }
+                      setBrushSourceMode(mode);
+                    }}
+                  >
+                    <option value="color">Foreground color</option>
+                    <option value="history">History</option>
+                    <option value="art-history">Art History</option>
                   </select>
                 </label>
                 <label>
@@ -11829,6 +11925,22 @@ export default function Home() {
             )}
             {tool === 'clone' && (
               <>
+                <label>
+                  Stamp
+                  <select
+                    aria-label="Stamp mode"
+                    value={cloneMode}
+                    onChange={(event) => {
+                      const mode = event.target.value as typeof cloneMode;
+                      setCloneMode(mode);
+                      cloneHasOffset.current = false;
+                      if (mode === 'pattern') setCloneAligned(false);
+                    }}
+                  >
+                    <option value="clone">Clone Stamp</option>
+                    <option value="pattern">Pattern Stamp</option>
+                  </select>
+                </label>
                 <label>
                   Spacing
                   <input
@@ -12856,7 +12968,11 @@ export default function Home() {
               className={tool === id ? 'tool-button active' : 'tool-button'}
               aria-label={label}
               title={`${label} · ${(preferences.shortcuts[id] ?? key).toUpperCase()}`}
-              onClick={() => setTool(id)}
+              onClick={() => {
+                setTool(id);
+                if (id === 'brush') setBrushSourceMode('color');
+                if (id === 'clone') setCloneMode('clone');
+              }}
             >
               <Icon />
             </Button>
