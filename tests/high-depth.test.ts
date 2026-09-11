@@ -128,3 +128,18 @@ void test('invalid high-depth adjustment buffers are rejected', () => {
     /length/,
   );
 });
+
+void test('editable black-and-white channel mixes remain high precision', () => {
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Uint16Array([12000, 30000, 50000, 40000]),
+    },
+    { blackWhite: true, redMix: 20, greenMix: 65, blueMix: 15 },
+  );
+  assert.equal(adjusted[0], adjusted[1]);
+  assert.equal(adjusted[1], adjusted[2]);
+  assert.ok(adjusted[0] > 0 && adjusted[0] < 1);
+  assert.ok(Math.abs(adjusted[3] - 40000 / 65535) < 1e-7);
+});

@@ -208,7 +208,11 @@ import {
   type RawLinearImage,
 } from '@/lib/raw-develop';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
-import { adjustHighDepth, precisionToEncodedRgba } from '@/lib/high-depth';
+import {
+  adjustHighDepth,
+  precisionToEncodedRgba,
+  type HighDepthAdjustments,
+} from '@/lib/high-depth';
 const Mask = Focus;
 
 type Tool =
@@ -337,6 +341,7 @@ type LayerMeta = {
   smartObject?: SmartObjectData;
   textLayer?: TextLayerData;
   colorGrade?: ColorGrade;
+  precisionAdjustment?: HighDepthAdjustments;
 };
 type LayerSurface = { pixels: HTMLCanvasElement; mask?: HTMLCanvasElement };
 type LayerComp = {
@@ -526,13 +531,13 @@ const applyAdvancedPixels = (
   options: AdvancedAdjustmentOptions,
 ) => {
   const filtered = makeCanvas(canvas.width, canvas.height),
-    fc = filtered.getContext('2d')!;
-  fc.drawImage(canvas, 0, 0);
+    fc = filtered.getContext('2d')!,
+    sourceContext = canvas.getContext('2d', { willReadFrequently: true })!;
   for (let y = 0; y < canvas.height; y += 256)
     for (let x = 0; x < canvas.width; x += 256) {
       const width = Math.min(256, canvas.width - x),
         height = Math.min(256, canvas.height - y),
-        tile = fc.getImageData(x, y, width, height),
+        tile = sourceContext.getImageData(x, y, width, height),
         adjusted = adjustHighDepth({ width, height, data: tile.data }, options);
       tile.data.set(precisionToEncodedRgba({ width, height, data: adjusted }));
       fc.putImageData(tile, x, y);
@@ -1074,16 +1079,33 @@ const applyAdjustment = (
 ) => {
   const source = makeCanvas(w, h),
     adjusted = makeCanvas(w, h),
-    ac = adjusted.getContext('2d')!;
+    ac = adjusted.getContext('2d')!,
+    sourceContext = source.getContext('2d', { willReadFrequently: true })!;
   source.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
-  ac.filter =
-    (layer.brightness ?? 100) === 100 &&
-    (layer.contrast ?? 100) === 100 &&
-    (layer.saturation ?? 100) === 100 &&
-    !(layer.blur ?? 0)
-      ? 'none'
-      : `brightness(${layer.brightness ?? 100}%) contrast(${layer.contrast ?? 100}%) saturate(${layer.saturation ?? 100}%) blur(${layer.blur ?? 0}px)`;
-  ac.drawImage(source, 0, 0);
+  const settings: HighDepthAdjustments = {
+    brightness: (layer.brightness ?? 100) - 100,
+    contrast: (layer.contrast ?? 100) - 100,
+    saturation: (layer.saturation ?? 100) - 100,
+    ...layer.precisionAdjustment,
+  };
+  for (let y = 0; y < h; y += 256)
+    for (let x = 0; x < w; x += 256) {
+      const width = Math.min(256, w - x),
+        height = Math.min(256, h - y),
+        tile = sourceContext.getImageData(x, y, width, height),
+        result = adjustHighDepth({ width, height, data: tile.data }, settings);
+      tile.data.set(precisionToEncodedRgba({ width, height, data: result }));
+      ac.putImageData(tile, x, y);
+    }
+  if (layer.blur) {
+    const blurred = makeCanvas(w, h),
+      blurredContext = blurred.getContext('2d')!;
+    blurredContext.filter = `blur(${Math.max(0, layer.blur)}px)`;
+    blurredContext.drawImage(adjusted, 0, 0);
+    ac.clearRect(0, 0, w, h);
+    ac.drawImage(blurred, 0, 0);
+    blurred.width = blurred.height = 1;
+  }
   if (layer.hasMask && layer.maskEnabled && surface?.mask) {
     const alpha = maskToAlpha(
       surface.mask,
@@ -4164,7 +4186,7 @@ export default function Home() {
       pixels = makeCanvas(doc.w, doc.h),
       layer: LayerMeta = {
         id,
-        name: 'Brightness / Contrast',
+        name: 'Color & Tone',
         visible: true,
         opacity: 100,
         blend: 'source-over',
@@ -4177,6 +4199,23 @@ export default function Home() {
         contrast: 105,
         saturation: 100,
         blur: 0,
+        precisionAdjustment: {
+          brightness: 10,
+          contrast: 5,
+          exposure: 0,
+          hue: 0,
+          saturation: 0,
+          vibrance: 0,
+          levelsBlack: 0,
+          levelsWhite: 255,
+          levelsGamma: 1,
+          curveShadows: 0,
+          curveHighlights: 0,
+          balanceCyanRed: 0,
+          balanceMagentaGreen: 0,
+          balanceYellowBlue: 0,
+          blackWhite: false,
+        },
       };
     surfacesRef.current.set(id, { pixels });
     insertLayer(layer);
@@ -4514,7 +4553,14 @@ export default function Home() {
     if (meta)
       patchLayer(
         meta.id,
-        { brightness: 100, contrast: 100, saturation: 100, blur: 0 },
+        {
+          brightness: 100,
+          contrast: 100,
+          saturation: 100,
+          blur: 0,
+          precisionAdjustment:
+            meta.kind === 'adjustment' ? {} : meta.precisionAdjustment,
+        },
         'Reset adjustments',
       );
   };
@@ -9201,6 +9247,18 @@ export default function Home() {
     );
   };
   const active = selected();
+  const updatePrecisionAdjustment = (
+    key: keyof HighDepthAdjustments,
+    value: number | boolean,
+  ) => {
+    if (!active || active.kind !== 'adjustment' || isLocked(active.id)) return;
+    patchLayer(active.id, {
+      precisionAdjustment: {
+        ...active.precisionAdjustment,
+        [key]: value,
+      },
+    });
+  };
   const activeColorGrade = resolveColorGrade(active?.colorGrade);
   const canGradeActive =
     !!active &&
@@ -12102,43 +12160,295 @@ export default function Home() {
                               </strong>
                               <button onClick={resetAdjustments}>Reset</button>
                             </div>
-                            {(
-                              [
-                                ['Brightness', 'brightness', 0, 200],
-                                ['Contrast', 'contrast', 0, 200],
-                                ['Saturation', 'saturation', 0, 200],
-                                ['Blur', 'blur', 0, 20],
-                              ] as const
-                            ).map(([label, key, min, max]) => (
-                              <div className="property-slider" key={key}>
-                                <label>
-                                  {label}
-                                  <span>
-                                    {active?.[key] ??
-                                      (key === 'blur' ? 0 : 100)}
-                                    {key === 'blur' ? 'px' : '%'}
-                                  </span>
+                            {active?.kind === 'adjustment' ? (
+                              <>
+                                <p className="precision-adjustment-note">
+                                  Combined floating-point recipe · editable
+                                </p>
+                                {(
+                                  [
+                                    [
+                                      'Exposure',
+                                      'exposure',
+                                      -5,
+                                      5,
+                                      0.1,
+                                      ' EV',
+                                      0,
+                                    ],
+                                    [
+                                      'Brightness',
+                                      'brightness',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Contrast',
+                                      'contrast',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    ['Hue', 'hue', -180, 180, 1, '°', 0],
+                                    [
+                                      'Saturation',
+                                      'saturation',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Vibrance',
+                                      'vibrance',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Input black',
+                                      'levelsBlack',
+                                      0,
+                                      254,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Input white',
+                                      'levelsWhite',
+                                      1,
+                                      255,
+                                      1,
+                                      '',
+                                      255,
+                                    ],
+                                    [
+                                      'Gamma',
+                                      'levelsGamma',
+                                      0.1,
+                                      3,
+                                      0.05,
+                                      '',
+                                      1,
+                                    ],
+                                    [
+                                      'Shadow curve',
+                                      'curveShadows',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Highlight curve',
+                                      'curveHighlights',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Cyan / Red',
+                                      'balanceCyanRed',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Magenta / Green',
+                                      'balanceMagentaGreen',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                    [
+                                      'Yellow / Blue',
+                                      'balanceYellowBlue',
+                                      -100,
+                                      100,
+                                      1,
+                                      '',
+                                      0,
+                                    ],
+                                  ] as const
+                                ).map(
+                                  ([
+                                    label,
+                                    key,
+                                    min,
+                                    max,
+                                    step,
+                                    suffix,
+                                    fallback,
+                                  ]) => {
+                                    const current = Number(
+                                      active.precisionAdjustment?.[key] ??
+                                        fallback,
+                                    );
+                                    return (
+                                      <div
+                                        className="property-slider"
+                                        key={key}
+                                      >
+                                        <label>
+                                          {label}
+                                          <span>
+                                            {current}
+                                            {suffix}
+                                          </span>
+                                        </label>
+                                        <Slider
+                                          aria-label={`Adjustment layer ${label.toLowerCase()}`}
+                                          min={min}
+                                          max={max}
+                                          step={step}
+                                          value={current}
+                                          onValueChange={(next) =>
+                                            updatePrecisionAdjustment(
+                                              key,
+                                              sliderNumber(next),
+                                            )
+                                          }
+                                          onValueCommitted={() =>
+                                            snapshot(`${label} adjustment`)
+                                          }
+                                        />
+                                      </div>
+                                    );
+                                  },
+                                )}
+                                <label className="inline-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      active.precisionAdjustment?.blackWhite ??
+                                      false
+                                    }
+                                    onChange={(event) => {
+                                      updatePrecisionAdjustment(
+                                        'blackWhite',
+                                        event.target.checked,
+                                      );
+                                      snapshot('Black & White adjustment');
+                                    }}
+                                  />
+                                  Black & White channel mix
                                 </label>
-                                <Slider
-                                  aria-label={`Layer ${label.toLowerCase()}`}
-                                  min={min}
-                                  max={max}
-                                  step={key === 'blur' ? 0.5 : 1}
-                                  value={
-                                    active?.[key] ?? (key === 'blur' ? 0 : 100)
-                                  }
-                                  onValueChange={(v) =>
-                                    active &&
-                                    patchLayer(active.id, {
-                                      [key]: sliderNumber(v),
-                                    })
-                                  }
-                                  onValueCommitted={() =>
-                                    active && snapshot(`${label} adjustment`)
-                                  }
-                                />
-                              </div>
-                            ))}
+                                {active.precisionAdjustment?.blackWhite &&
+                                  (
+                                    [
+                                      ['Red mix', 'redMix', 30],
+                                      ['Green mix', 'greenMix', 59],
+                                      ['Blue mix', 'blueMix', 11],
+                                    ] as const
+                                  ).map(([label, key, fallback]) => {
+                                    const current = Number(
+                                      active.precisionAdjustment?.[key] ??
+                                        fallback,
+                                    );
+                                    return (
+                                      <div
+                                        className="property-slider"
+                                        key={key}
+                                      >
+                                        <label>
+                                          {label}
+                                          <span>{current}%</span>
+                                        </label>
+                                        <Slider
+                                          aria-label={`Adjustment layer ${label.toLowerCase()}`}
+                                          min={-200}
+                                          max={200}
+                                          value={current}
+                                          onValueChange={(next) =>
+                                            updatePrecisionAdjustment(
+                                              key,
+                                              sliderNumber(next),
+                                            )
+                                          }
+                                          onValueCommitted={() =>
+                                            snapshot(`${label} adjustment`)
+                                          }
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                <div className="property-slider">
+                                  <label>
+                                    Blur <span>{active.blur ?? 0}px</span>
+                                  </label>
+                                  <Slider
+                                    aria-label="Adjustment layer blur"
+                                    min={0}
+                                    max={20}
+                                    step={0.5}
+                                    value={active.blur ?? 0}
+                                    onValueChange={(next) =>
+                                      patchLayer(active.id, {
+                                        blur: sliderNumber(next),
+                                      })
+                                    }
+                                    onValueCommitted={() =>
+                                      snapshot('Blur adjustment')
+                                    }
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              (
+                                [
+                                  ['Brightness', 'brightness', 0, 200],
+                                  ['Contrast', 'contrast', 0, 200],
+                                  ['Saturation', 'saturation', 0, 200],
+                                  ['Blur', 'blur', 0, 20],
+                                ] as const
+                              ).map(([label, key, min, max]) => (
+                                <div className="property-slider" key={key}>
+                                  <label>
+                                    {label}
+                                    <span>
+                                      {active?.[key] ??
+                                        (key === 'blur' ? 0 : 100)}
+                                      {key === 'blur' ? 'px' : '%'}
+                                    </span>
+                                  </label>
+                                  <Slider
+                                    aria-label={`Layer ${label.toLowerCase()}`}
+                                    min={min}
+                                    max={max}
+                                    step={key === 'blur' ? 0.5 : 1}
+                                    value={
+                                      active?.[key] ??
+                                      (key === 'blur' ? 0 : 100)
+                                    }
+                                    onValueChange={(next) =>
+                                      active &&
+                                      patchLayer(active.id, {
+                                        [key]: sliderNumber(next),
+                                      })
+                                    }
+                                    onValueCommitted={() =>
+                                      active && snapshot(`${label} adjustment`)
+                                    }
+                                  />
+                                </div>
+                              ))
+                            )}
                           </>
                         )}
                       </fieldset>

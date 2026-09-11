@@ -909,6 +909,15 @@ button {
   flex-direction: column;
   gap: 6px;
 }
+.precision-adjustment-note {
+  margin: 2px 0 4px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: color-mix(in srgb, var(--accent) 72%, white);
+  font-size: 12px;
+}
 .layer-controls [data-slot='slider'] {
   grid-column: 1/-1;
   width: 100%;

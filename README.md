@@ -19,6 +19,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Bayer and X-Trans camera RAW development from sensor data with live wide-gamut controls, re-editable RAW Smart Objects, device-local source recovery, and genuine 16-bit TIFF master export
 - Tiled floating-point adjustment passes combine exposure, levels, curves, color balance, hue, saturation, vibrance, and channel-mixed black-and-white before one final canvas write
 - Responsive active-layer previews update continuously across every combined adjustment and blur control without repeatedly processing the full-resolution document
+- Non-destructive adjustment layers retain editable floating-point exposure, levels, curves, hue, saturation, vibrance, color balance, channel-mixed black-and-white, masks, opacity, and blur
 - Browser-local background removal and assisted tools
 - Familiar keyboard shortcuts, history, rulers, guides, tabs, and configurable workspaces
 - Searchable command palette for every tool and registered menu action with `Cmd/Ctrl+K`
