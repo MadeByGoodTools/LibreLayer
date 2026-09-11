@@ -9,6 +9,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 ## Highlights
 
 - Pixel, text, shape, adjustment, smart-object, and grouped layers
+- Editable Smart Filter stacks with live amount, opacity, blend, order, visibility, and filter masks
 - Layer masks, vector masks, channels, paths, clipping, linking, and lock controls
 - Brushes, selections, crop, transforms, clone, heal, fill, gradients, and filters
 - Per-channel curves, levels, color balance, HSL, color grading, and blend modes

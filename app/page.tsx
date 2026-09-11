@@ -177,6 +177,7 @@ import {
   type BlendIf,
 } from '@/lib/layer-compositing';
 import { BlendIfControls } from '@/components/blend-if-controls';
+import { SmartFilterStack } from '@/components/smart-filter-stack';
 import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
@@ -4796,6 +4797,57 @@ export default function Home() {
     );
     render();
     setStatus('Smart Filter blend settings updated');
+  };
+  const patchSmartFilter = (
+    id: string,
+    patch: Partial<SmartFilter>,
+    record?: string,
+  ) => {
+    const meta = selected();
+    if (!meta?.smartObject || isLocked(meta.id)) return;
+    patchLayer(
+      meta.id,
+      {
+        smartObject: {
+          ...meta.smartObject,
+          filters: meta.smartObject.filters.map((filter) =>
+            filter.id === id ? { ...filter, ...patch } : filter,
+          ),
+        },
+      },
+      record,
+    );
+  };
+  const moveSmartFilter = (id: string, direction: -1 | 1) => {
+    const meta = selected();
+    if (!meta?.smartObject || isLocked(meta.id)) return;
+    const filters = [...meta.smartObject.filters];
+    const from = filters.findIndex((filter) => filter.id === id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= filters.length) return;
+    [filters[from], filters[to]] = [filters[to], filters[from]];
+    patchLayer(
+      meta.id,
+      { smartObject: { ...meta.smartObject, filters } },
+      'Reorder Smart Filters',
+    );
+    setStatus('Smart Filter order updated');
+  };
+  const removeSmartFilter = (id: string) => {
+    const meta = selected();
+    if (!meta?.smartObject || isLocked(meta.id)) return;
+    const filter = meta.smartObject.filters.find((item) => item.id === id);
+    patchLayer(
+      meta.id,
+      {
+        smartObject: {
+          ...meta.smartObject,
+          filters: meta.smartObject.filters.filter((item) => item.id !== id),
+        },
+      },
+      'Delete Smart Filter',
+    );
+    setStatus(`${filter?.name ?? 'Smart Filter'} removed`);
   };
   const rasterizeSmartObject = () => {
     const meta = selected(),
@@ -11180,6 +11232,36 @@ export default function Home() {
                           </div>
                         ))}
                       </div>
+                      {active?.smartObject && (
+                        <SmartFilterStack
+                          filters={active.smartObject.filters}
+                          disabled={isLocked(active.id)}
+                          filterMask={active.smartObject.filterMask}
+                          blendOptions={(
+                            Object.keys(blendLabels) as BlendMode[]
+                          )
+                            .filter((value) => !(value in extraBlends))
+                            .map((value) => ({
+                              value,
+                              label: blendLabels[value],
+                            }))}
+                          onAdd={addSmartFilter}
+                          onChange={(id, patch) =>
+                            patchSmartFilter(id, patch as Partial<SmartFilter>)
+                          }
+                          onCommit={(label) => snapshot(label)}
+                          onMove={moveSmartFilter}
+                          onRemove={removeSmartFilter}
+                          onEditMask={() => {
+                            if (
+                              active.smartObject?.filterMask &&
+                              active.hasMask
+                            )
+                              setEditing('mask');
+                            else addSmartFilterMask();
+                          }}
+                        />
+                      )}
                       <div className="layer-organize">
                         <details className="layer-comps">
                           <summary>Layer Comps · {layerComps.length}</summary>

@@ -1749,6 +1749,102 @@ button {
   min-height: 70px;
   max-height: 260px;
 }
+.smart-filter-stack {
+  display: grid;
+  gap: 8px;
+  padding: 9px 5px;
+  border-top: 1px solid #3d3e44;
+  border-bottom: 1px solid #3d3e44;
+}
+.smart-filter-stack > header,
+.smart-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.smart-filter-stack > header strong,
+.smart-filter-heading strong {
+  font-size: 12px;
+}
+.smart-filter-stack button {
+  min-height: 25px;
+  border: 1px solid #484950;
+  border-radius: 5px;
+  background: #34353a;
+  color: #d2d3d8;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+.smart-filter-stack button:hover:not(:disabled) {
+  background: #45464d;
+  color: white;
+}
+.smart-filter-stack button:disabled {
+  opacity: 0.45;
+}
+.smart-filter-stack > p {
+  margin: 0;
+  color: #92939c;
+  font-size: 11px;
+}
+.smart-filter-add {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+.smart-filter-list {
+  display: grid;
+  gap: 7px;
+}
+.smart-filter-row {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #42434a;
+  border-radius: 6px;
+  background: #292a2f;
+}
+.smart-filter-heading label,
+.smart-filter-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.smart-filter-heading > div button {
+  width: 25px;
+  padding: 0;
+}
+.smart-filter-control {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) 43px;
+  align-items: center;
+  gap: 7px;
+  color: #adaeb6;
+  font-size: 11px;
+}
+.smart-filter-control output {
+  color: #ededf1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.smart-filter-blend {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  align-items: center;
+  gap: 7px;
+  color: #adaeb6;
+  font-size: 11px;
+}
+.smart-filter-blend select {
+  min-width: 0;
+  border: 1px solid #4b4c54;
+  border-radius: 4px;
+  background: #202126;
+  color: #ededf1;
+  padding: 4px 6px;
+  font-size: 11px;
+}
 .advanced-options {
   position: fixed;
   z-index: 40;
