@@ -2400,3 +2400,190 @@ button {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Workspace fit, spacing and quiet scrolling */
+.editor-shell,
+.workspace,
+.canvas-area,
+.viewport-shell,
+.panel-rail,
+.panel.grow,
+.dock-tabs,
+.dock-tab-content {
+  min-width: 0;
+  min-height: 0;
+}
+.app-bar,
+.options-bar,
+.viewport-toolbar,
+.status-bar {
+  min-width: 0;
+}
+.app-bar {
+  gap: clamp(8px, 1.4vw, 22px);
+}
+.workspace {
+  overflow: hidden;
+}
+.panel-rail {
+  overflow: hidden;
+  padding: 6px;
+  gap: 6px;
+}
+.panel.grow {
+  display: flex;
+  flex-direction: column;
+}
+.dock-tabs {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0 !important;
+  overflow: hidden;
+}
+.dock-tab-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dock-tab-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 2px 7px;
+}
+.dock-tab-content > .panel-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.panel-content:has(.layers-list) {
+  max-height: none;
+}
+.layers-list {
+  max-height: min(260px, 32vh);
+}
+.tool-rail,
+.document-tabs,
+.options-bar,
+.viewport-toolbar,
+.dock-tab-content > .panel-content,
+.properties-panel,
+.channel-panel,
+.history-list,
+.paths-list,
+.floating-panel-body,
+.saved-selection-list {
+  scrollbar-width: none;
+}
+.tool-rail::-webkit-scrollbar,
+.document-tabs::-webkit-scrollbar,
+.options-bar::-webkit-scrollbar,
+.viewport-toolbar::-webkit-scrollbar,
+.dock-tab-content > .panel-content::-webkit-scrollbar,
+.properties-panel::-webkit-scrollbar,
+.channel-panel::-webkit-scrollbar,
+.history-list::-webkit-scrollbar,
+.paths-list::-webkit-scrollbar,
+.floating-panel-body::-webkit-scrollbar,
+.saved-selection-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.document-tabs,
+.options-bar,
+.viewport-toolbar {
+  overscroll-behavior-inline: contain;
+}
+.viewport-toolbar {
+  overflow: hidden;
+  padding-inline: 7px;
+}
+.viewport-toolbar button {
+  padding-inline: 8px;
+}
+.document-tabs {
+  padding-inline: 6px;
+}
+.document-tab {
+  max-width: min(250px, 42vw);
+}
+.tab-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-content {
+  padding: 8px;
+  gap: 6px;
+}
+.layer-controls {
+  gap: 8px 10px;
+  padding: 4px 3px 10px;
+}
+.layer-row {
+  min-height: 44px;
+}
+.workspace.panels-hidden {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.workspace.panels-hidden > .tool-rail,
+.workspace.panels-hidden > .panel-rail {
+  display: none;
+}
+.workspace.panels-hidden > .canvas-area {
+  grid-column: 1 !important;
+}
+@media (max-width: 1180px) {
+  .viewport-toolbar > span {
+    display: none;
+  }
+  .smart-note {
+    display: none;
+  }
+  .smart-grid {
+    padding-block: 7px;
+  }
+}
+@media (max-width: 980px) {
+  .workspace:not(.panels-hidden) {
+    grid-template-columns: 48px minmax(0, 1fr) min(270px, 32vw) !important;
+  }
+  .workspace.dock-left:not(.panels-hidden) {
+    grid-template-columns: 48px min(270px, 32vw) minmax(0, 1fr) !important;
+  }
+  .brand-publisher,
+  .viewport-toolbar > span,
+  .status-center {
+    display: none;
+  }
+  .status-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .smart-grid button {
+    min-width: 0;
+    padding-inline: 6px;
+  }
+}
+@media (max-width: 760px) {
+  .workspace:not(.panels-hidden) {
+    grid-template-columns: 44px minmax(0, 1fr) !important;
+  }
+  .workspace:not(.panels-hidden) > .panel-rail {
+    display: none;
+  }
+  .workspace:not(.panels-hidden) > .canvas-area {
+    grid-column: 2 !important;
+  }
+  .tool-rail {
+    padding-inline: 3px;
+  }
+  .viewport-toolbar button:nth-of-type(4),
+  .viewport-toolbar button:nth-of-type(5) {
+    display: none;
+  }
+  .zoom-control {
+    grid-template-columns: 24px 76px 38px 24px;
+  }
+}

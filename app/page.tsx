@@ -1179,7 +1179,8 @@ const applyAdjustment = (
 export default function Home() {
   const [preferences, setPreferences] =
       useState<EditorPreferences>(defaultPreferences),
-    [settingsOpen, setSettingsOpen] = useState(false);
+    [settingsOpen, setSettingsOpen] = useState(false),
+    [panelsHidden, setPanelsHidden] = useState(false);
   const menuCommands = useRef(
     new Map<string, { name: string; shortcut: string; action: () => void }>(),
   );
@@ -1497,6 +1498,12 @@ export default function Home() {
     states: Map<string, { scaleX: number; scaleY: number; rotation: number }>;
   } | null>(null);
   const viewportRef = useRef<ViewportHandle>(null);
+  const togglePanels = () => {
+    setPanelsHidden((hidden) => !hidden);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => viewportRef.current?.fit()),
+    );
+  };
   const [view, setView] = useState<EditorView>(defaultView);
   const updateView = (next: EditorView) => {
     setView(next);
@@ -8276,6 +8283,11 @@ export default function Home() {
       )
         return;
       const k = e.key.toLowerCase();
+      if (k === 'tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        togglePanels();
+        return;
+      }
       if (transformSession && k === 'escape') {
         e.preventDefault();
         cancelFreeTransform();
@@ -9765,6 +9777,11 @@ export default function Home() {
               name: 'Workspace, shortcuts and presets…',
               action: () => setSettingsOpen(true),
             },
+            {
+              name: panelsHidden ? 'Show panels' : 'Hide panels',
+              shortcut: 'Tab',
+              action: togglePanels,
+            },
             { name: 'RGB composite', action: () => setChannelView('rgb') },
             { separator: true },
             {
@@ -11058,7 +11075,7 @@ export default function Home() {
         </section>
       )}
       <div
-        className={`workspace dock-${preferences.layout.side}`}
+        className={`workspace dock-${preferences.layout.side}${panelsHidden ? ' panels-hidden' : ''}`}
         style={{
           gridTemplateColumns:
             preferences.layout.side === 'left'
