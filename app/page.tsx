@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Hand,
   RotateCcw,
@@ -280,6 +280,7 @@ import {
   type RawLinearImage,
 } from '@/lib/raw-develop';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
+import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
   createDefaultHighDepthAdjustments,
@@ -540,25 +541,74 @@ const toolItems: {
   label: string;
   key: string;
   icon: typeof Brush;
+  group: 'view' | 'select' | 'paint' | 'retouch' | 'create';
 }[] = [
-  { id: 'hand', label: 'Hand', key: 'H', icon: Hand },
-  { id: 'rotateView', label: 'Rotate view', key: 'R', icon: RotateCcw },
-  { id: 'move', label: 'Move', key: 'V', icon: MousePointer2 },
-  { id: 'marquee', label: 'Marquee select', key: 'M', icon: ScanSearch },
-  { id: 'lasso', label: 'Polygonal lasso', key: 'L', icon: LassoSelect },
-  { id: 'smart', label: 'Magic Wand', key: 'W', icon: WandSparkles },
-  { id: 'crop', label: 'Crop', key: 'C', icon: Crop },
-  { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: Pipette },
-  { id: 'brush', label: 'Brush', key: 'B', icon: Brush },
-  { id: 'clone', label: 'Clone stamp', key: 'S', icon: Stamp },
-  { id: 'retouch', label: 'Retouch tools', key: 'J', icon: Sparkles },
-  { id: 'eraser', label: 'Eraser', key: 'E', icon: Eraser },
-  { id: 'fill', label: 'Fill', key: 'G', icon: PaintBucket },
-  { id: 'gradient', label: 'Gradient', key: 'D', icon: Droplets },
-  { id: 'text', label: 'Text', key: 'T', icon: Type },
-  { id: 'shape', label: 'Rectangle', key: 'U', icon: Shapes },
-  { id: 'path', label: 'Pen path', key: 'P', icon: PenTool },
-  { id: 'zoom', label: 'Zoom', key: 'Z', icon: ZoomIn },
+  { id: 'hand', label: 'Hand', key: 'H', icon: Hand, group: 'view' },
+  {
+    id: 'rotateView',
+    label: 'Rotate view',
+    key: 'R',
+    icon: RotateCcw,
+    group: 'view',
+  },
+  { id: 'zoom', label: 'Zoom', key: 'Z', icon: ZoomIn, group: 'view' },
+  { id: 'move', label: 'Move', key: 'V', icon: MousePointer2, group: 'select' },
+  {
+    id: 'marquee',
+    label: 'Marquee select',
+    key: 'M',
+    icon: ScanSearch,
+    group: 'select',
+  },
+  {
+    id: 'lasso',
+    label: 'Polygonal lasso',
+    key: 'L',
+    icon: LassoSelect,
+    group: 'select',
+  },
+  {
+    id: 'smart',
+    label: 'Magic Wand',
+    key: 'W',
+    icon: WandSparkles,
+    group: 'select',
+  },
+  { id: 'crop', label: 'Crop', key: 'C', icon: Crop, group: 'select' },
+  {
+    id: 'eyedropper',
+    label: 'Eyedropper',
+    key: 'I',
+    icon: Pipette,
+    group: 'select',
+  },
+  { id: 'brush', label: 'Brush', key: 'B', icon: Brush, group: 'paint' },
+  { id: 'eraser', label: 'Eraser', key: 'E', icon: Eraser, group: 'paint' },
+  { id: 'fill', label: 'Fill', key: 'G', icon: PaintBucket, group: 'paint' },
+  {
+    id: 'gradient',
+    label: 'Gradient',
+    key: 'D',
+    icon: Droplets,
+    group: 'paint',
+  },
+  {
+    id: 'clone',
+    label: 'Clone stamp',
+    key: 'S',
+    icon: Stamp,
+    group: 'retouch',
+  },
+  {
+    id: 'retouch',
+    label: 'Retouch tools',
+    key: 'J',
+    icon: Sparkles,
+    group: 'retouch',
+  },
+  { id: 'text', label: 'Text', key: 'T', icon: Type, group: 'create' },
+  { id: 'shape', label: 'Rectangle', key: 'U', icon: Shapes, group: 'create' },
+  { id: 'path', label: 'Pen path', key: 'P', icon: PenTool, group: 'create' },
 ];
 const blendLabels: Record<BlendMode, string> = {
   'source-over': 'Normal',
@@ -1360,6 +1410,13 @@ export default function Home() {
       y: number;
       id?: string;
     } | null>(null);
+  const toolbarPreferences = normalizeToolbar(
+      toolItems.map((item) => item.id),
+      preferences.toolbar,
+    ),
+    visibleToolItems = visibleToolbarIds(toolbarPreferences)
+      .map((id) => toolItems.find((item) => item.id === id))
+      .filter((item): item is (typeof toolItems)[number] => !!item);
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => setContextMenu(null),
@@ -13221,23 +13278,34 @@ export default function Home() {
         }}
       >
         <aside className="tool-rail" aria-label="Tools">
-          {toolItems.map(({ id, label, key, icon: Icon }) => (
-            <Button
-              key={id}
-              variant="ghost"
-              size="icon-lg"
-              className={tool === id ? 'tool-button active' : 'tool-button'}
-              aria-label={label}
-              title={`${label} · ${(preferences.shortcuts[id] ?? key).toUpperCase()}`}
-              onClick={() => {
-                setTool(id);
-                if (id === 'brush') setBrushSourceMode('color');
-                if (id === 'clone') setCloneMode('clone');
-              }}
-            >
-              <Icon />
-            </Button>
-          ))}
+          {visibleToolItems.map((item, index) => {
+            const { id, label, key, icon: Icon } = item,
+              startsGroup =
+                toolbarPreferences.groupByFamily &&
+                index > 0 &&
+                visibleToolItems[index - 1].group !== item.group;
+            return (
+              <Fragment key={id}>
+                {startsGroup && (
+                  <span className="tool-divider" aria-hidden="true" />
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon-lg"
+                  className={tool === id ? 'tool-button active' : 'tool-button'}
+                  aria-label={label}
+                  title={`${label} · ${(preferences.shortcuts[id] ?? key).toUpperCase()}`}
+                  onClick={() => {
+                    setTool(id);
+                    if (id === 'brush') setBrushSourceMode('color');
+                    if (id === 'clone') setCloneMode('clone');
+                  }}
+                >
+                  <Icon />
+                </Button>
+              </Fragment>
+            );
+          })}
           <div
             className="color-stack"
             aria-label="Foreground and background colors"

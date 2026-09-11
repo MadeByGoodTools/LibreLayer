@@ -11,6 +11,11 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import type { SoftProofMode } from '@/lib/soft-proof';
 import { parseWorkspaces, serializeWorkspaces } from '@/lib/workspace-layout';
+import {
+  moveToolbarItem,
+  normalizeToolbar,
+  type ToolbarPreferences,
+} from '@/lib/toolbar-config';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -47,6 +52,7 @@ export type EditorPreferences = {
   gamutWarning?: boolean;
   historyDepth?: number;
   historyBudgetMb?: number;
+  toolbar?: ToolbarPreferences;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -58,6 +64,7 @@ export const defaultPreferences: EditorPreferences = {
   gamutWarning: false,
   historyDepth: 32,
   historyBudgetMb: 512,
+  toolbar: { order: [], hidden: [], groupByFamily: true },
 };
 export function WorkspaceSettings({
   commands,
@@ -95,6 +102,10 @@ export function WorkspaceSettings({
     [renameIndex, setRenameIndex] = useState<number | null>(null),
     [renameValue, setRenameValue] = useState('');
   const workspaceImportRef = useRef<HTMLInputElement>(null);
+  const toolbar = normalizeToolbar(
+    tools.map((tool) => tool.id),
+    value.toolbar,
+  );
   const updateLayout = (p: Partial<WorkspaceLayout>) =>
     onChange({ ...value, layout: { ...value.layout, ...p } });
   return (
@@ -117,6 +128,7 @@ export function WorkspaceSettings({
           <TabsList>
             <TabsTrigger value="layout">Workspace</TabsTrigger>
             <TabsTrigger value="keys">Shortcuts</TabsTrigger>
+            <TabsTrigger value="toolbar">Toolbar</TabsTrigger>
             <TabsTrigger value="presets">Tool presets</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
@@ -491,6 +503,104 @@ export function WorkspaceSettings({
               }}
             >
               Reset shortcuts
+            </Button>
+          </TabsContent>
+          <TabsContent value="toolbar" className="grid gap-3">
+            <p>
+              Choose which tools appear on the left rail and arrange them in the
+              order that fits your workflow. Hidden tools remain available
+              through shortcuts and command search.
+            </p>
+            <label>
+              <input
+                type="checkbox"
+                checked={toolbar.groupByFamily}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    toolbar: {
+                      ...toolbar,
+                      groupByFamily: event.target.checked,
+                    },
+                  })
+                }
+              />{' '}
+              Separate related tool groups
+            </label>
+            <div className="toolbar-editor-list">
+              {toolbar.order.map((id, index) => {
+                const item = tools.find((tool) => tool.id === id),
+                  visibleCount = toolbar.order.length - toolbar.hidden.length;
+                if (!item) return null;
+                return (
+                  <div className="toolbar-editor-row" key={id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={!toolbar.hidden.includes(id)}
+                        disabled={
+                          visibleCount <= 1 && !toolbar.hidden.includes(id)
+                        }
+                        onChange={(event) =>
+                          onChange({
+                            ...value,
+                            toolbar: {
+                              ...toolbar,
+                              hidden: event.target.checked
+                                ? toolbar.hidden.filter(
+                                    (toolId) => toolId !== id,
+                                  )
+                                : [...toolbar.hidden, id],
+                            },
+                          })
+                        }
+                      />{' '}
+                      {item.label}
+                    </label>
+                    <span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Move ${item.label} up`}
+                        disabled={index === 0}
+                        onClick={() =>
+                          onChange({
+                            ...value,
+                            toolbar: moveToolbarItem(toolbar, id, -1),
+                          })
+                        }
+                      >
+                        ↑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Move ${item.label} down`}
+                        disabled={index === toolbar.order.length - 1}
+                        onClick={() =>
+                          onChange({
+                            ...value,
+                            toolbar: moveToolbarItem(toolbar, id, 1),
+                          })
+                        }
+                      >
+                        ↓
+                      </Button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <Button
+              variant="outline"
+              onClick={() =>
+                onChange({
+                  ...value,
+                  toolbar: normalizeToolbar(tools.map((tool) => tool.id)),
+                })
+              }
+            >
+              Reset toolbar
             </Button>
           </TabsContent>
           <TabsContent value="presets" className="grid gap-3">

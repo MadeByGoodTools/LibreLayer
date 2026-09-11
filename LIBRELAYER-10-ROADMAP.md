@@ -25,7 +25,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Save, rename, import, export, validate, and reset complete workspace layouts.
 - [x] Contextual task bar and complete right-click menus.
 - [x] Scrubby labels, direct numeric entry, per-control reset, and fine/coarse modifiers.
-- [ ] Configurable toolbar and tool groups.
+- [x] Configurable toolbar and tool groups.
 - [ ] Interface scaling, light, dark, and high-contrast themes.
 - [ ] Side-by-side document views with matched zoom, pan, and rotation.
 
