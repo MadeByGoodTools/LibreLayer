@@ -175,7 +175,14 @@ void test('per-channel curves change only their targeted color channel', () => {
 });
 
 void test('multi-point curves interpolate and target one color channel', () => {
-  assert.equal(pointCurveValue(0.25, [{ x: 0.5, y: 0.75 }]), 0.375);
+  const points = [{ x: 0.5, y: 0.75 }];
+  const samples = Array.from({ length: 101 }, (_, index) =>
+    pointCurveValue(index / 100, points),
+  );
+  assert.ok(samples[25] > 0.25 && samples[25] < 0.75);
+  assert.ok(
+    samples.every((value, index) => index === 0 || value >= samples[index - 1]),
+  );
   const adjusted = adjustHighDepth(
     {
       width: 1,

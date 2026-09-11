@@ -317,6 +317,61 @@ export function ToneCurve({
         <span>Click graph to add points · arrows fine tune</span>
         <span>{sanitizeCurvePoints(custom).length - 2}/14</span>
       </div>
+      {selectedPoint !== null && custom[selectedPoint] && (
+        <div
+          className="curve-point-editor"
+          aria-label="Selected curve point values"
+        >
+          <label>
+            Input
+            <input
+              type="number"
+              min={0}
+              max={255}
+              value={Math.round(custom[selectedPoint].x * 255)}
+              onChange={(event) => {
+                const previous = custom[selectedPoint - 1]?.x ?? 0,
+                  next = custom[selectedPoint + 1]?.x ?? 1,
+                  x = Math.max(
+                    previous + 0.002,
+                    Math.min(next - 0.002, Number(event.target.value) / 255),
+                  );
+                setCustom(
+                  custom.map((point, index) =>
+                    index === selectedPoint ? { ...point, x } : point,
+                  ),
+                );
+              }}
+              onBlur={onCommit}
+            />
+          </label>
+          <label>
+            Output
+            <input
+              type="number"
+              min={0}
+              max={255}
+              value={Math.round(custom[selectedPoint].y * 255)}
+              onChange={(event) =>
+                setCustom(
+                  custom.map((point, index) =>
+                    index === selectedPoint
+                      ? {
+                          ...point,
+                          y: Math.max(
+                            0,
+                            Math.min(1, Number(event.target.value) / 255),
+                          ),
+                        }
+                      : point,
+                  ),
+                )
+              }
+              onBlur={onCommit}
+            />
+          </label>
+        </div>
+      )}
     </div>
   );
 }

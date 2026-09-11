@@ -1,0 +1,205 @@
+# LibreLayer 10/10 completion ledger
+
+This is the release ledger for closing the remaining gap with a professional desktop image editor while keeping LibreLayer browser-local. A feature is checked only when its real operation, undo/redo, project persistence, error handling, automated coverage, and browser QA are complete.
+
+## Release gate
+
+- [ ] Every visible control performs a real operation.
+- [ ] Every edit is undoable and redoable.
+- [ ] Nondestructive edits remain editable after reopening.
+- [ ] Unsupported file content is never silently discarded or flattened.
+- [ ] Long operations expose progress and cancellation.
+- [ ] Large files do not block the interface.
+- [ ] Local and deployed browser workflows pass separately.
+- [ ] Chrome, Edge, Safari, and Firefox fallbacks are verified.
+- [ ] Accessibility passes keyboard, focus, contrast, and screen-reader checks.
+- [ ] Documentation states exact limits and privacy behavior.
+
+## 1. Interface and workflow
+
+- [x] Familiar application menu, toolbar, panels, tabs, status bar, and shortcuts.
+- [x] Searchable commands and editable shortcuts.
+- [x] Saved panel side, width, visibility, presets, and local preferences.
+- [x] Multiple document tabs, fit, 100%, rotation, rulers, guides, and grid.
+- [ ] Dock, stack, resize, float, collapse, and solo every panel.
+- [ ] Save, rename, import, export, and reset complete workspace layouts.
+- [ ] Contextual task bar and complete right-click menus.
+- [ ] Scrubby labels, direct numeric entry, per-control reset, and fine/coarse modifiers.
+- [ ] Configurable toolbar and tool groups.
+- [ ] Interface scaling, light, dark, and high-contrast themes.
+- [ ] Side-by-side document views with matched zoom, pan, and rotation.
+
+## 2. Layers, masks, and compositing
+
+- [x] Pixel, text, shape, adjustment, Smart Object, and group workflows.
+- [x] Raster masks, vector masks, clipping, linking, locking, and nested groups.
+- [x] Opacity, fill, common blend modes, Blend If, and layer comps.
+- [ ] Native fill layers for solid color, gradient, and pattern.
+- [ ] Complete layer effects with contours, global light, scaling, and copy/paste.
+- [ ] Reference-quality full blend-mode math in gamma and linear light.
+- [ ] Complete knockout, group isolation, and nested clipping behavior.
+- [ ] Mask density, feather, edge refinement, overlay, and independent transforms.
+- [ ] Cross-document layer copying without rasterization.
+- [ ] Pixel-reference compositing fixture suite.
+
+## 3. Adjustments and color grading
+
+- [x] Editable adjustment layers with masks and high-precision combined processing.
+- [x] RGB/channel Levels with input, output, gamma, and image eyedroppers.
+- [x] RGB/channel multi-point Curves with histogram, overlays, and image targeting.
+- [x] Exposure, brightness, contrast, hue, saturation, vibrance, color balance, black-and-white, and photo filter.
+- [x] Live preview presets with explicit Apply behavior.
+- [x] Importable 3D `.cube` LUTs with live amount and project persistence.
+- [x] Waveform, RGB parade, and vectorscope displays.
+- [x] Monotonic spline Curves with a direct numeric point editor.
+- [ ] Freehand Curves, smoothing, and clipping controls.
+- [ ] Hue/Saturation color ranges and on-image adjustment.
+- [ ] Selective Color, Channel Mixer, Gradient Map, and Color Lookup preset library.
+- [ ] Shadows/Highlights, Replace Color, Match Color, HDR toning, and perceptual vibrance.
+- [ ] Lift/gamma/gain wheels, waveform scale controls, and reference comparison.
+
+## 4. Selections and masking
+
+- [x] Marquee, lasso, polygonal lasso, Magic Wand, Quick Selection, selection math, feather, and saved selections.
+- [x] Browser-local subject/background assistance and editable mask output.
+- [ ] Ellipse, row, column, and magnetic selection variants.
+- [ ] Transform Selection, Grow, Similar, Focus Range, Color Range, and luminosity ranges.
+- [ ] Select Subject, Sky, People, hair, skin, clothing, and detected-object masks.
+- [ ] Dedicated Select and Mask workspace with all preview modes.
+- [ ] Color-aware and object-aware Refine Edge/Refine Hair.
+- [ ] Smart Radius, decontamination, edge controls, and nondestructive output choices.
+- [ ] Subpixel selection-reference tests.
+
+## 5. Painting and retouching
+
+- [x] Brush, pencil, eraser, clone, heal, fill, gradient, smoothing, pressure, tilt, scatter, texture, and mixer controls.
+- [ ] GPU subpixel brush renderer with stable low-latency interpolation.
+- [ ] Complete shape, transfer, dual-brush, color, wet-edge, airbrush, and buildup dynamics.
+- [ ] Custom brush tips, ABR import, folders, tags, favorites, and search.
+- [ ] Symmetry, Pattern Stamp, History Brush, and Art History Brush.
+- [ ] Multi-source Clone Source panel and transformable overlay.
+- [ ] Spot Healing modes, Patch, Content-Aware Move, Red Eye, Dodge, Burn, Sponge, Blur, Sharpen, and Smudge.
+- [ ] Nondestructive retouch-layer and frequency-separation workflows.
+
+## 6. Content-aware and distortion
+
+- [ ] Content-Aware Fill workspace with editable sampling overlay.
+- [ ] Auto, rectangular, custom, and all-layer sampling.
+- [ ] Color, rotation, scale, and mirror adaptation with live preview.
+- [ ] Content-Aware Scale and Move.
+- [ ] Perspective, Puppet, mesh, split, cylindrical, and preset warps.
+- [ ] Vanishing Point and Adaptive Wide Angle workspaces.
+- [ ] Liquify with forward, reconstruct, twirl, pucker, bloat, push, freeze, thaw, face controls, and reusable meshes.
+
+## 7. RAW and high bit depth
+
+- [x] Bayer/X-Trans RAW decode, editable RAW recipes, live development, and 16-bit master export.
+- [x] Floating-point combined adjustment processing before display quantization.
+- [ ] True 16-bit integer, half-float, and 32-bit float working documents.
+- [ ] Float render textures and no forced 8-bit intermediate canvas.
+- [ ] Camera/DNG profiles, dual illuminants, and calibrated white balance.
+- [ ] Multiple high-quality Bayer and X-Trans demosaic modes.
+- [ ] Highlight reconstruction, hot pixels, banding, chroma/luma noise, and local AI denoise.
+- [ ] Lens database, distortion, vignette, aberration, defringe, and RAW sharpening.
+- [ ] Scene-referred HDR and supported HDR-display preview.
+- [ ] Portable sidecars, batch development, and full camera fixture matrix.
+
+## 8. File compatibility
+
+- [x] Common web formats, PSD/PSB import, layered/flattened PSD export, native projects, TIFF, and RAW.
+- [x] Explicit PSD compatibility report and unsupported-content warnings.
+- [ ] Native text, shape, fill, adjustment, effect, Smart Object, and Smart Filter PSD round-trip.
+- [ ] Exact clipping, knockout, Blend If, group, comp, channel, path, guide, metadata, and ICC fidelity.
+- [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
+- [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.
+- [ ] External Photoshop round-trip laboratory and visual-difference thresholds.
+
+## 9. Smart Objects and Smart Filters
+
+- [x] Embedded/linked object metadata, transforms, editable filters, order, visibility, blend, opacity, and masks.
+- [ ] True embedded source documents editable in their own tabs.
+- [ ] Persistent linked-file handles, refresh, missing-link repair, relinking, and packaging.
+- [ ] Shared and independent instances with a dependency graph and cycle protection.
+- [ ] Nondestructive skew, perspective, warp, vector, RAW, and nested object content.
+- [ ] Cached preview/final filter graph with versioned parameters.
+
+## 10. Filters and effects
+
+- [x] Core blur, sharpen, noise, color, stylize, and editable Smart Filter operations.
+- [ ] Reference-quality blur gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and noise reduction.
+- [ ] Lens correction, displacement, polar, wave, ripple, spherize, pixelate, and halftone.
+- [ ] Oil Paint, lighting, clouds, fibers, Filter Gallery, and custom convolution.
+- [ ] Third-party WASM filter API with deterministic CPU fallback.
+- [ ] GPU/CPU reference-pixel tests.
+
+## 11. Performance and large documents
+
+- [x] Bounded dimensions, tiled adjustment passes, worker-based PSD processing, autosave, and storage reporting.
+- [ ] WebGPU renderer with WebGL2/CPU fallback.
+- [ ] OffscreenCanvas workers and WASM SIMD/threaded operations.
+- [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
+- [ ] Memory-pressure adaptation and preview/final quality scheduling.
+- [ ] OPFS scratch storage with selectable locations and quotas.
+- [ ] Incremental saving, pixel deduplication, compressed history, and transaction journal.
+- [ ] Cancelable jobs, watchdogs, and crash recovery.
+- [ ] 12–100+ MP and hundreds-of-layers performance suite.
+
+## 12. Typography, vectors, and layout
+
+- [x] Editable text, basic shapes, Pen paths, fill/stroke, transforms, alignment, and guides.
+- [ ] Full Character/Paragraph controls, OpenType, variable fonts, international shaping, and missing-font handling.
+- [ ] Text on/in paths, Warp Text, dynamic fitting, and text-to-shape/path conversion.
+- [ ] Complete Bézier/Curvature Pen, anchor conversion, direct selection, and Boolean path operations.
+- [ ] Stroke caps, joins, dashes, variable width, SVG import/export, and vector-preserving output.
+- [ ] Artboards, frames, key-object alignment, smart spacing, and multi-scale asset export.
+
+## 13. AI editing
+
+- [x] Optional browser-local background removal with no required account or API key.
+- [ ] Local subject, people-part, sky, clothing, depth, face, denoise, restore, relight, artifact-removal, colorize, and super-resolution models.
+- [ ] Optional provider-neutral Generative Fill, Expand, Remove, Background, Harmonize, Upscale, and prompt editing.
+- [ ] Reference guidance, variations, masks, progress, cancellation, and offline fallback.
+- [ ] Explicit local/cloud labels, upload consent, model storage controls, provenance, and Content Credentials.
+
+## 14. Print and professional color
+
+- [x] Embedded export profiles, resolution metadata, proof simulation, and gamut-warning preview.
+- [ ] ICC v2/v4 engine with Assign/Convert Profile, intents, and black-point compensation.
+- [ ] RGB, CMYK, Lab, grayscale, spot, duotone, tritone, and quadtone working modes.
+- [ ] Exact proof profiles, paper/ink simulation, ink limits, and separations.
+- [ ] Printer/paper profiles, sizing, placement, bleed, trim, marks, contact sheets, and metadata.
+
+## 15. Automation and extensibility
+
+- [x] Recorded/exportable/validated local workflows and searchable registered commands.
+- [ ] Editable actions, sets, conditionals, batch, Image Processor, and saved droplets.
+- [ ] Variables, datasets, layer/artboard export, contact sheets, panorama, HDR merge, and focus stack.
+- [ ] Auto-align, Auto-Blend, image stacks, and statistical modes.
+- [ ] Sandboxed JavaScript/WASM plugin manifest, permissions, panels, filters, exporters, and versioning.
+- [ ] Trusted local script console, headless worker, deterministic replay, and optional local CLI.
+
+## 16. History, saving, and recovery
+
+- [x] Undo/redo, history panel, named snapshots, branching, local autosave, recovery, versions, encryption, and saved locations.
+- [ ] Configurable history depth and memory-aware compaction.
+- [ ] Persistent history thumbnails and per-layer restoration.
+- [ ] Atomic incremental saves, corruption repair, and crash transaction journal.
+- [ ] External-drive disconnect handling, packaging, storage health, and retention controls.
+
+## 17. Accessibility and cross-platform quality
+
+- [x] Keyboard-oriented desktop workflow and accessible names on core controls.
+- [ ] Complete keyboard and screen-reader operation with consistent focus.
+- [ ] High contrast, reduced motion, text scaling, and color-independent states.
+- [ ] Touch, pen buttons, eraser, and tablet layouts.
+- [ ] Windows, macOS, Linux, ChromeOS, Chrome, Edge, Safari, and Firefox matrix.
+- [ ] International keyboards, localization, RTL, 200% text, and WCAG 2.2 AA audit.
+
+## 18. Documentation and release
+
+- [x] Open-source repository, MIT license, local-first privacy statement, compatibility notes, and automated core checks.
+- [ ] Complete manual, shortcut map, format matrix, performance expectations, and privacy model.
+- [ ] Migration and backward-compatibility policy.
+- [ ] Stable fixture pack and reproducible visual-regression suite.
+- [ ] Security review, dependency audit, contributor guide, issue templates, and release notes.
+- [ ] Independent professional-editor beta and release-candidate signoff.

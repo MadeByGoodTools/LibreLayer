@@ -199,9 +199,11 @@ import {
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
 import { Histogram } from '@/components/histogram';
+import { ColorScopes } from '@/components/color-scopes';
 import { AdjustmentPresets } from '@/components/adjustment-presets';
 import { LevelsControl } from '@/components/levels-control';
 import { ToneCurve } from '@/components/tone-curve';
+import { LutControl } from '@/components/lut-control';
 import { SoftProofOverlay } from '@/components/soft-proof-overlay';
 import {
   createPsdCompatibilityReport,
@@ -12298,6 +12300,13 @@ export default function Home() {
                                   sourceCanvas={displayRef.current}
                                   revision={layers}
                                 />
+                                <details className="scope-disclosure">
+                                  <summary>Professional scopes</summary>
+                                  <ColorScopes
+                                    sourceCanvas={displayRef.current}
+                                    revision={layers}
+                                  />
+                                </details>
                                 <AdjustmentPresets
                                   current={active.precisionAdjustment ?? {}}
                                   onPreview={(precisionAdjustment) =>
@@ -12339,6 +12348,11 @@ export default function Home() {
                                       `Click the image to add a ${channel.toUpperCase()} curve point`,
                                     );
                                   }}
+                                />
+                                <LutControl
+                                  adjustments={active.precisionAdjustment ?? {}}
+                                  onChange={updatePrecisionAdjustment}
+                                  onCommit={(label) => snapshot(label)}
                                 />
                                 {(
                                   [

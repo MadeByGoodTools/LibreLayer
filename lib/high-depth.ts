@@ -1,3 +1,5 @@
+import { applyCubeLut, type CubeLut } from './cube-lut.ts';
+
 export type PrecisionPixels =
   | Uint8Array
   | Uint8ClampedArray
@@ -61,6 +63,8 @@ export type HighDepthAdjustments = {
   balanceYellowBlue?: number;
   photoFilter?: string;
   photoFilterDensity?: number;
+  lut3d?: CubeLut;
+  lutAmount?: number;
 };
 
 export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
@@ -95,6 +99,7 @@ export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
   blueMix: 11,
   photoFilter: '#ec8a32',
   photoFilterDensity: 0,
+  lutAmount: 100,
 });
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -122,16 +127,54 @@ export const sanitizeCurvePoints = (points: CurvePoint[] = []) => {
   return [...byInput.values()].sort((a, b) => a.x - b.x).slice(0, 16);
 };
 
-/** Evaluate an editable multi-point curve using stable linear interpolation. */
+/** Evaluate an editable multi-point curve with a monotonic cubic spline. */
 export const pointCurveValue = (input: number, points: CurvePoint[] = []) => {
   const bounded = clamp(input);
   const normalized = sanitizeCurvePoints(points);
+  const widths = normalized
+      .slice(1)
+      .map((point, index) => point.x - normalized[index].x),
+    slopes = normalized
+      .slice(1)
+      .map((point, index) => (point.y - normalized[index].y) / widths[index]),
+    tangents = normalized.map((_, index) => {
+      if (index === 0) return slopes[0];
+      if (index === normalized.length - 1) return slopes.at(-1) ?? 0;
+      return slopes[index - 1] * slopes[index] <= 0
+        ? 0
+        : (slopes[index - 1] + slopes[index]) / 2;
+    });
+  for (let index = 0; index < slopes.length; index++) {
+    if (slopes[index] === 0) tangents[index] = tangents[index + 1] = 0;
+    else {
+      const a = tangents[index] / slopes[index],
+        b = tangents[index + 1] / slopes[index],
+        magnitude = Math.hypot(a, b);
+      if (magnitude > 3) {
+        const scale = 3 / magnitude;
+        tangents[index] = scale * a * slopes[index];
+        tangents[index + 1] = scale * b * slopes[index];
+      }
+    }
+  }
   for (let index = 1; index < normalized.length; index++) {
     const right = normalized[index];
     if (bounded > right.x) continue;
-    const left = normalized[index - 1];
-    const distance = Math.max(0.0001, right.x - left.x);
-    return clamp(left.y + ((bounded - left.x) / distance) * (right.y - left.y));
+    const left = normalized[index - 1],
+      width = widths[index - 1],
+      t = (bounded - left.x) / width,
+      t2 = t * t,
+      t3 = t2 * t,
+      h00 = 2 * t3 - 3 * t2 + 1,
+      h10 = t3 - 2 * t2 + t,
+      h01 = -2 * t3 + 3 * t2,
+      h11 = t3 - t2;
+    return clamp(
+      h00 * left.y +
+        h10 * width * tangents[index - 1] +
+        h01 * right.y +
+        h11 * width * tangents[index],
+    );
   }
   return normalized.at(-1)?.y ?? bounded;
 };
@@ -281,6 +324,14 @@ export function adjustHighDepth(
       green = green * (1 - density) + filter[1] * density;
       blue = blue * (1 - density) + filter[2] * density;
     }
+
+    [red, green, blue] = applyCubeLut(
+      red,
+      green,
+      blue,
+      settings.lut3d,
+      (settings.lutAmount ?? 100) / 100,
+    );
 
     let luma = 0.299 * red + 0.587 * green + 0.114 * blue;
     const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
