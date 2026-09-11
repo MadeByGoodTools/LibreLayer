@@ -27,6 +27,7 @@ import {
   Redo2,
   ScanSearch,
   Scissors,
+  Search,
   Shapes,
   SlidersHorizontal,
   Sparkles,
@@ -40,6 +41,17 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from '@/components/ui/command';
 import { ExportDialog } from '@/components/export-dialog';
 import {
   WorkspaceSettings,
@@ -1180,7 +1192,8 @@ export default function Home() {
   const [preferences, setPreferences] =
       useState<EditorPreferences>(defaultPreferences),
     [settingsOpen, setSettingsOpen] = useState(false),
-    [panelsHidden, setPanelsHidden] = useState(false);
+    [panelsHidden, setPanelsHidden] = useState(false),
+    [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const menuCommands = useRef(
     new Map<string, { name: string; shortcut: string; action: () => void }>(),
   );
@@ -8283,6 +8296,11 @@ export default function Home() {
       )
         return;
       const k = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && k === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
       if (k === 'tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         togglePanels();
@@ -9782,6 +9800,11 @@ export default function Home() {
               shortcut: 'Tab',
               action: togglePanels,
             },
+            {
+              name: 'Search commands…',
+              shortcut: '⌘K',
+              action: () => setCommandPaletteOpen(true),
+            },
             { name: 'RGB composite', action: () => setChannelView('rgb') },
             { separator: true },
             {
@@ -9816,6 +9839,16 @@ export default function Home() {
           ])}
         </nav>
         <div className="header-actions">
+          <Button
+            className="command-search-button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Search commands"
+            title="Search commands · ⌘/Ctrl+K"
+            onClick={() => setCommandPaletteOpen(true)}
+          >
+            <Search />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -13173,6 +13206,58 @@ export default function Home() {
           setFeather(p.feather);
         }}
       />
+      <CommandDialog
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        title="LibreLayer commands"
+        description="Search tools and editing commands"
+        className="command-palette"
+      >
+        <Command>
+          <CommandInput autoFocus placeholder="Search tools and commands…" />
+          <CommandList>
+            <CommandEmpty>No matching command.</CommandEmpty>
+            <CommandGroup heading="Tools">
+              {toolItems.map((item) => (
+                <CommandItem
+                  key={item.id}
+                  value={`tool ${item.label}`}
+                  onSelect={() => {
+                    setTool(item.id);
+                    setCommandPaletteOpen(false);
+                  }}
+                >
+                  <item.icon />
+                  {item.label}
+                  <CommandShortcut>
+                    {(preferences.shortcuts[item.id] ?? item.key).toUpperCase()}
+                  </CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+            <CommandGroup heading="Commands">
+              {[...menuCommands.current.values()].map((command) => (
+                <CommandItem
+                  key={command.name}
+                  value={`command ${command.name}`}
+                  onSelect={() => {
+                    setCommandPaletteOpen(false);
+                    requestAnimationFrame(command.action);
+                  }}
+                >
+                  {command.name}
+                  {command.shortcut && (
+                    <CommandShortcut>
+                      {shortcutLabel(command.shortcut)}
+                    </CommandShortcut>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </CommandDialog>
       <Dialog
         open={recoveries !== null}
         onOpenChange={(open) => {

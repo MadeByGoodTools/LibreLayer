@@ -2535,6 +2535,27 @@ button {
 .workspace.panels-hidden > .canvas-area {
   grid-column: 1 !important;
 }
+.command-palette {
+  width: min(620px, calc(100vw - 24px));
+  max-height: min(560px, calc(100vh - 80px));
+  border-color: #45524d;
+  box-shadow: 0 24px 80px #000a;
+}
+.command-palette [data-slot='command-input-wrapper'] {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.command-palette [data-slot='command-list'] {
+  max-height: min(460px, calc(100vh - 170px));
+  scrollbar-width: none;
+}
+.command-palette [data-slot='command-list']::-webkit-scrollbar {
+  width: 0;
+}
+.command-palette [data-slot='command-item'] {
+  min-height: 36px;
+  padding-inline: 10px;
+}
 @media (max-width: 1180px) {
   .viewport-toolbar > span {
     display: none;
@@ -2585,5 +2606,8 @@ button {
   }
   .zoom-control {
     grid-template-columns: 24px 76px 38px 24px;
+  }
+  .command-search-button {
+    display: none;
   }
 }
