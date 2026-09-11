@@ -92,9 +92,9 @@ This is the release ledger for closing the remaining gap with a professional des
 
 ## 6. Content-aware and distortion
 
-- [ ] Content-Aware Fill workspace with editable sampling overlay.
-- [ ] Auto, rectangular, custom, and all-layer sampling.
-- [ ] Color, rotation, scale, and mirror adaptation with live preview.
+- [x] Content-Aware Fill workspace with editable sampling overlay.
+- [x] Auto, rectangular, custom, and all-layer sampling.
+- [x] Color, rotation, scale, and mirror adaptation with live preview.
 - [ ] Content-Aware Scale and Move.
 - [ ] Perspective, Puppet, mesh, split, cylindrical, and preset warps.
 - [ ] Vanishing Point and Adaptive Wide Angle workspaces.

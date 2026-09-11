@@ -3270,11 +3270,87 @@ button {
 }
 
 .professional-geometry-dialog,
-.selection-repair-dialog,
 .layer-studio-dialog {
   width: min(94vw, 620px);
   max-height: 86vh;
   overflow: auto;
+}
+
+.selection-repair-dialog {
+  width: min(94vw, 980px);
+  max-height: 88vh;
+  overflow: auto;
+}
+
+.content-aware-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(230px, 0.75fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.content-aware-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #111215;
+}
+
+.content-aware-preview img {
+  display: block;
+  width: 100%;
+  max-height: 54vh;
+  object-fit: contain;
+}
+
+.content-aware-preview > span {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 72%);
+  color: #f3f4f6;
+  font-size: 11px;
+}
+
+.content-aware-controls {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.content-aware-controls select {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--foreground);
+}
+
+.content-aware-controls .check-row {
+  display: flex;
+  align-items: center;
+}
+
+.content-aware-controls .check-row input {
+  min-height: auto;
+}
+
+@media (max-width: 760px) {
+  .content-aware-workspace {
+    grid-template-columns: 1fr;
+  }
+  .content-aware-preview {
+    min-height: 220px;
+  }
 }
 
 .pro-suite-dialog {

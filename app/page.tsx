@@ -263,6 +263,10 @@ import {
 } from '@/lib/brush-engine';
 import { correctRedEyePixels, highFrequencyPixels } from '@/lib/retouch-engine';
 import {
+  contentAwareFill,
+  type ContentAwareSamplingMode,
+} from '@/lib/content-aware';
+import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
   developRawRgba,
@@ -1614,6 +1618,20 @@ export default function Home() {
     >(null),
     [repairOffsetX, setRepairOffsetX] = useState(40),
     [repairOffsetY, setRepairOffsetY] = useState(0),
+    [contentAwareSampling, setContentAwareSampling] =
+      useState<ContentAwareSamplingMode>('auto'),
+    [contentAwareColor, setContentAwareColor] = useState(50),
+    [contentAwareRotation, setContentAwareRotation] = useState<
+      0 | 90 | 180 | 270
+    >(0),
+    [contentAwareScale, setContentAwareScale] = useState(100),
+    [contentAwareMirror, setContentAwareMirror] = useState(false),
+    [contentAwareSampleX, setContentAwareSampleX] = useState(0),
+    [contentAwareSampleY, setContentAwareSampleY] = useState(0),
+    [contentAwareSampleW, setContentAwareSampleW] = useState(500),
+    [contentAwareSampleH, setContentAwareSampleH] = useState(500),
+    [contentAwarePreview, setContentAwarePreview] = useState(''),
+    [contentAwarePreviewError, setContentAwarePreviewError] = useState(''),
     [selectionName, setSelectionName] = useState('Selection 1'),
     [rawDevelop, setRawDevelop] = useState<{
       name: string;
@@ -6195,6 +6213,63 @@ export default function Home() {
       top = Math.max(0, Math.floor(bounds.y)),
       right = Math.min(doc.w, Math.ceil(bounds.x + bounds.w)),
       bottom = Math.min(doc.h, Math.ceil(bounds.y + bounds.h));
+    if (mode === 'fill') {
+      let fillSource = source,
+        composite: HTMLCanvasElement | null = null;
+      if (contentAwareSampling === 'all-layers') {
+        composite = makeCanvas(doc.w, doc.h);
+        renderLayers(composite.getContext('2d')!);
+        fillSource = composite
+          .getContext('2d', { willReadFrequently: true })!
+          .getImageData(0, 0, doc.w, doc.h);
+      }
+      try {
+        const result = contentAwareFill(fillSource.data, alpha, doc.w, doc.h, {
+          samplingMode: contentAwareSampling,
+          sampleRect: {
+            x: contentAwareSampleX,
+            y: contentAwareSampleY,
+            w: contentAwareSampleW,
+            h: contentAwareSampleH,
+          },
+          samplePoint: {
+            x: contentAwareSampleX + contentAwareSampleW / 2,
+            y: contentAwareSampleY + contentAwareSampleH / 2,
+          },
+          colorAdaptation: contentAwareColor,
+          rotation: contentAwareRotation,
+          scale: contentAwareScale,
+          mirror: contentAwareMirror,
+        });
+        const filled = ctx.createImageData(doc.w, doc.h);
+        if (contentAwareSampling === 'all-layers') {
+          filled.data.set(source.data);
+          for (let index = 0; index < filled.data.length; index += 4) {
+            if (!alpha[index + 3]) continue;
+            filled.data[index] = result.pixels[index];
+            filled.data[index + 1] = result.pixels[index + 1];
+            filled.data[index + 2] = result.pixels[index + 2];
+            filled.data[index + 3] = result.pixels[index + 3];
+          }
+        } else filled.data.set(result.pixels);
+        ctx.putImageData(filled, 0, 0);
+      } catch (error) {
+        setStatus(
+          error instanceof Error
+            ? error.message
+            : 'Content-Aware Fill could not be completed',
+        );
+        if (composite) composite.width = composite.height = 1;
+        mask.width = mask.height = 1;
+        return;
+      }
+      if (composite) composite.width = composite.height = 1;
+      mask.width = mask.height = 1;
+      snapshot('Content-Aware Fill');
+      render();
+      setStatus('Content-Aware Fill applied from the visible sampling preview');
+      return;
+    }
     let br = 0,
       bg = 0,
       bb = 0,
@@ -6240,8 +6315,7 @@ export default function Home() {
               source.data[i + channel] * (1 - strength) +
               source.data[si + channel] * strength;
         } else {
-          const noise =
-            mode === 'fill' ? (((x * 17 + y * 31) % 13) - 6) * 1.5 : 0;
+          const noise = 0;
           for (let channel = 0; channel < 4; channel++)
             output.data[i + channel] =
               source.data[i + channel] * (1 - strength) +
@@ -6268,9 +6342,7 @@ export default function Home() {
         ? 'Patch selection'
         : mode === 'remove'
           ? 'Remove selection'
-          : mode === 'fill'
-            ? 'Content-Aware Fill'
-            : 'Content-Aware Move',
+          : 'Content-Aware Move',
     );
     render();
     setStatus(
@@ -6278,9 +6350,7 @@ export default function Home() {
         ? 'Selection patched from the chosen offset'
         : mode === 'remove'
           ? 'Selection removed and blended from surrounding pixels'
-          : mode === 'fill'
-            ? 'Selection filled from surrounding color and texture'
-            : 'Selection moved and its original area repaired',
+          : 'Selection moved and its original area repaired',
     );
   };
   const createFrequencySeparation = () => {
@@ -10816,6 +10886,132 @@ export default function Home() {
         (layerState === 'locked' && isLocked(layer.id)) ||
         (layerState === 'linked' && !!layer.linkId)),
   );
+  useEffect(() => {
+    if (selectionRepairOpen !== 'fill' || !selection) {
+      setContentAwarePreview('');
+      setContentAwarePreviewError('');
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const previewScale = Math.min(1, 720 / doc.w, 460 / doc.h),
+        width = Math.max(1, Math.round(doc.w * previewScale)),
+        height = Math.max(1, Math.round(doc.h * previewScale)),
+        sourceCanvas = makeCanvas(width, height),
+        sourceContext = sourceCanvas.getContext('2d')!,
+        sourceFull = makeCanvas(doc.w, doc.h);
+      if (contentAwareSampling === 'all-layers')
+        renderLayers(sourceFull.getContext('2d')!);
+      else {
+        const activeLayer = selected(),
+          activeSurface =
+            activeLayer && surfacesRef.current.get(activeLayer.id);
+        if (activeLayer && activeSurface)
+          drawLayer(
+            sourceFull.getContext('2d')!,
+            {
+              ...activeLayer,
+              opacity: 100,
+              fill: 100,
+              blend: 'source-over',
+            },
+            activeSurface,
+            doc.w,
+            doc.h,
+          );
+      }
+      sourceContext.drawImage(sourceFull, 0, 0, width, height);
+      const maskFull = selectionMask(doc.w, doc.h, 0, 0),
+        maskCanvas = makeCanvas(width, height);
+      maskCanvas.getContext('2d')!.drawImage(maskFull, 0, 0, width, height);
+      try {
+        const sourceData = sourceContext.getImageData(0, 0, width, height),
+          maskData = maskCanvas
+            .getContext('2d', { willReadFrequently: true })!
+            .getImageData(0, 0, width, height),
+          result = contentAwareFill(
+            sourceData.data,
+            maskData.data,
+            width,
+            height,
+            {
+              samplingMode: contentAwareSampling,
+              sampleRect: {
+                x: contentAwareSampleX * previewScale,
+                y: contentAwareSampleY * previewScale,
+                w: contentAwareSampleW * previewScale,
+                h: contentAwareSampleH * previewScale,
+              },
+              samplePoint: {
+                x:
+                  (contentAwareSampleX + contentAwareSampleW / 2) *
+                  previewScale,
+                y:
+                  (contentAwareSampleY + contentAwareSampleH / 2) *
+                  previewScale,
+              },
+              colorAdaptation: contentAwareColor,
+              rotation: contentAwareRotation,
+              scale: contentAwareScale,
+              mirror: contentAwareMirror,
+            },
+          ),
+          previewCanvas = makeCanvas(width, height),
+          previewContext = previewCanvas.getContext('2d')!,
+          overlayCanvas = makeCanvas(width, height),
+          overlayContext = overlayCanvas.getContext('2d')!;
+        const previewImage = previewContext.createImageData(width, height);
+        previewImage.data.set(result.pixels);
+        previewContext.putImageData(previewImage, 0, 0);
+        const overlay = overlayContext.createImageData(width, height);
+        for (let index = 0; index < overlay.data.length; index += 4) {
+          if (result.sampled[index + 3]) {
+            overlay.data[index] = 40;
+            overlay.data[index + 1] = 230;
+            overlay.data[index + 2] = 135;
+            overlay.data[index + 3] = 72;
+          }
+          if (maskData.data[index + 3]) {
+            overlay.data[index] = 255;
+            overlay.data[index + 1] = 70;
+            overlay.data[index + 2] = 105;
+            overlay.data[index + 3] = 92;
+          }
+        }
+        overlayContext.putImageData(overlay, 0, 0);
+        previewContext.drawImage(overlayCanvas, 0, 0);
+        setContentAwarePreview(previewCanvas.toDataURL('image/jpeg', 0.86));
+        setContentAwarePreviewError('');
+        overlayCanvas.width = overlayCanvas.height = 1;
+        previewCanvas.width = previewCanvas.height = 1;
+      } catch (error) {
+        setContentAwarePreview('');
+        setContentAwarePreviewError(
+          error instanceof Error ? error.message : 'Preview is unavailable',
+        );
+      }
+      sourceFull.width = sourceFull.height = 1;
+      sourceCanvas.width = sourceCanvas.height = 1;
+      maskFull.width = maskFull.height = 1;
+      maskCanvas.width = maskCanvas.height = 1;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    selectionRepairOpen,
+    selection,
+    selectedId,
+    contentAwareSampling,
+    contentAwareColor,
+    contentAwareRotation,
+    contentAwareScale,
+    contentAwareMirror,
+    contentAwareSampleX,
+    contentAwareSampleY,
+    contentAwareSampleW,
+    contentAwareSampleH,
+    doc.w,
+    doc.h,
+  ]);
+
   return (
     <main
       className="editor-shell"
@@ -15987,9 +16183,158 @@ export default function Home() {
                   : 'Content-Aware Move'}
           </DialogTitle>
           <DialogDescription>
-            LibreLayer samples the active layer around the selected area. The
-            operation is local, selection-aware, and undoable.
+            {selectionRepairOpen === 'fill'
+              ? 'Preview the local fill and its sampling coverage. Green pixels are sampled; red pixels are replaced. Every option stays on this device and the final edit is undoable.'
+              : 'LibreLayer samples the active layer around the selected area. The operation is local, selection-aware, and undoable.'}
           </DialogDescription>
+          {selectionRepairOpen === 'fill' && (
+            <div className="content-aware-workspace">
+              <div className="content-aware-preview">
+                {contentAwarePreview ? (
+                  <img
+                    src={contentAwarePreview}
+                    alt="Live Content-Aware Fill preview with sampling overlay"
+                  />
+                ) : (
+                  <p>{contentAwarePreviewError || 'Building live preview…'}</p>
+                )}
+                <span>Green sampling · Red fill target</span>
+              </div>
+              <div className="content-aware-controls">
+                <label>
+                  Sampling
+                  <select
+                    aria-label="Content-aware sampling mode"
+                    value={contentAwareSampling}
+                    onChange={(event) =>
+                      setContentAwareSampling(
+                        event.target.value as ContentAwareSamplingMode,
+                      )
+                    }
+                  >
+                    <option value="auto">Auto surroundings</option>
+                    <option value="rectangular">Rectangular region</option>
+                    <option value="custom">Custom focus point</option>
+                    <option value="all-layers">All visible layers</option>
+                  </select>
+                </label>
+                {(contentAwareSampling === 'rectangular' ||
+                  contentAwareSampling === 'custom') && (
+                  <div className="geometry-number-grid compact">
+                    <label>
+                      X
+                      <input
+                        aria-label="Sampling area X"
+                        type="number"
+                        min="0"
+                        max={doc.w - 1}
+                        value={contentAwareSampleX}
+                        onChange={(event) =>
+                          setContentAwareSampleX(+event.target.value || 0)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Y
+                      <input
+                        aria-label="Sampling area Y"
+                        type="number"
+                        min="0"
+                        max={doc.h - 1}
+                        value={contentAwareSampleY}
+                        onChange={(event) =>
+                          setContentAwareSampleY(+event.target.value || 0)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Width
+                      <input
+                        aria-label="Sampling area width"
+                        type="number"
+                        min="1"
+                        max={doc.w}
+                        value={contentAwareSampleW}
+                        onChange={(event) =>
+                          setContentAwareSampleW(+event.target.value || 1)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Height
+                      <input
+                        aria-label="Sampling area height"
+                        type="number"
+                        min="1"
+                        max={doc.h}
+                        value={contentAwareSampleH}
+                        onChange={(event) =>
+                          setContentAwareSampleH(+event.target.value || 1)
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+                <label>
+                  Color adaptation <strong>{contentAwareColor}%</strong>
+                  <Slider
+                    aria-label="Content-aware color adaptation"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={[contentAwareColor]}
+                    onValueChange={(value) =>
+                      setContentAwareColor(
+                        typeof value === 'number' ? value : value[0],
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Rotation adaptation
+                  <select
+                    aria-label="Content-aware rotation adaptation"
+                    value={contentAwareRotation}
+                    onChange={(event) =>
+                      setContentAwareRotation(
+                        +event.target.value as 0 | 90 | 180 | 270,
+                      )
+                    }
+                  >
+                    <option value="0">None</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                  </select>
+                </label>
+                <label>
+                  Scale adaptation <strong>{contentAwareScale}%</strong>
+                  <Slider
+                    aria-label="Content-aware scale adaptation"
+                    min={25}
+                    max={400}
+                    step={1}
+                    value={[contentAwareScale]}
+                    onValueChange={(value) =>
+                      setContentAwareScale(
+                        typeof value === 'number' ? value : value[0],
+                      )
+                    }
+                  />
+                </label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={contentAwareMirror}
+                    onChange={(event) =>
+                      setContentAwareMirror(event.target.checked)
+                    }
+                  />
+                  Mirror source texture
+                </label>
+              </div>
+            </div>
+          )}
           {(selectionRepairOpen === 'patch' ||
             selectionRepairOpen === 'move') && (
             <div className="geometry-number-grid">
