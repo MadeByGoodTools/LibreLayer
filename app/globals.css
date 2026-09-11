@@ -1597,6 +1597,57 @@ button {
   border-color: #6d9cff;
   color: #aec7ff;
 }
+.tone-curve-tools {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 5px;
+}
+.tone-curve-tools > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+}
+.tone-curve-tools button {
+  min-height: 25px;
+  border: 1px solid #3e424a;
+  border-radius: 4px;
+  background: #202228;
+  color: #c5c9d1;
+  padding-inline: 7px;
+  font-size: 10px;
+}
+.tone-curve-tools button.active {
+  border-color: #75d8b2;
+  background: #273c36;
+  color: #e9fff6;
+}
+.tone-curve-tools button:disabled {
+  opacity: 0.45;
+}
+.tone-curve-tools > label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #b6bac3;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.curve-smoothing {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 7px;
+  color: #aeb3bd;
+  font-size: 10px;
+}
+.curve-smoothing input {
+  width: 100%;
+}
+.curve-smoothing span {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .tone-curve-editor svg {
   display: block;
   width: 100%;

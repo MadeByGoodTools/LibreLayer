@@ -17,6 +17,8 @@ import {
   pointCurveValue,
   precisionToEncodedRgba,
   precisionToDisplayRgba,
+  resampleCurvePoints,
+  smoothCurvePoints,
   toneCurveValue,
 } from '../lib/high-depth.ts';
 import { BUILT_IN_LUTS } from '../lib/builtin-luts.ts';
@@ -204,6 +206,39 @@ void test('multi-point curves interpolate and target one color channel', () => {
   assert.equal(adjusted[0], 0.5);
   assert.equal(adjusted[1], 0.5);
   assert.ok(adjusted[2] > 0.79);
+});
+
+void test('freehand curves resample to editable bounded points', () => {
+  const stroke = Array.from({ length: 80 }, (_, index) => ({
+    x: index / 79,
+    y: Math.max(0, Math.min(1, index / 79 + Math.sin(index) * 0.08)),
+  }));
+  const reduced = resampleCurvePoints(stroke, 12);
+  assert.equal(reduced.length, 12);
+  assert.ok(
+    reduced.every(
+      (point, index) =>
+        point.x >= 0 &&
+        point.x <= 1 &&
+        point.y >= 0 &&
+        point.y <= 1 &&
+        (index === 0 || point.x > reduced[index - 1].x),
+    ),
+  );
+});
+
+void test('curve smoothing reduces spikes without moving endpoints', () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 0.25, y: 0.2 },
+    { x: 0.5, y: 1 },
+    { x: 0.75, y: 0.7 },
+    { x: 1, y: 1 },
+  ];
+  const smoothed = smoothCurvePoints(points, 100);
+  assert.deepEqual(smoothed[0], points[0]);
+  assert.deepEqual(smoothed.at(-1), points.at(-1));
+  assert.ok(smoothed[2].y < points[2].y);
 });
 
 void test('input and output levels remain bounded and work per channel', () => {

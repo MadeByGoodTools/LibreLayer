@@ -10,7 +10,9 @@ import {
 import { analyzeHistogram } from '@/lib/histogram';
 import {
   pointCurveValue,
+  resampleCurvePoints,
   sanitizeCurvePoints,
+  smoothCurvePoints,
   toneCurveValue,
   type CurveChannel,
   type CurvePoint,
@@ -40,8 +42,12 @@ export function ToneCurve({
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  const freehandStroke = useRef<CurvePoint[]>([]);
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
   const [channel, setChannel] = useState<CurveChannel>('rgb');
+  const [mode, setMode] = useState<'points' | 'draw'>('points');
+  const [smoothing, setSmoothing] = useState(50);
+  const [clipEndpoints, setClipEndpoints] = useState(true);
   const [histogram, setHistogram] = useState<Uint32Array | null>(null);
   const keys = {
     rgb: ['curveShadows', 'curveHighlights'],
@@ -110,15 +116,58 @@ export function ToneCurve({
   const setCustom = (points: CurvePoint[]) =>
     onChange('curves', {
       ...adjustments.curves,
-      [channel]: points.sort((a, b) => a.x - b.x).slice(0, 14),
+      [channel]: [...points].sort((a, b) => a.x - b.x).slice(0, 14),
     });
   const addPoint = (event: PointerEvent<SVGSVGElement>) => {
+    if (mode === 'draw') return;
     if (custom.length >= 14) return;
     const point = coordinates(event);
     if (!point) return;
     const next = [...custom, point].sort((a, b) => a.x - b.x);
     setCustom(next);
     setSelectedPoint(next.indexOf(point));
+  };
+  const finishFreehand = () => {
+    if (!freehandStroke.current.length) return;
+    let next = resampleCurvePoints(
+      freehandStroke.current,
+      clipEndpoints ? 12 : 14,
+    );
+    next = smoothCurvePoints(next, smoothing);
+    if (clipEndpoints)
+      next = [
+        { x: 0, y: 0 },
+        ...next.filter((point) => point.x > 0.002 && point.x < 0.998),
+        { x: 1, y: 1 },
+      ];
+    setCustom(next);
+    freehandStroke.current = [];
+    setDragging(null);
+    setSelectedPoint(null);
+    onCommit();
+  };
+  const drawFreehand = (event: PointerEvent<SVGSVGElement>) => {
+    const point = coordinates(event);
+    if (!point) return;
+    const previous = freehandStroke.current.at(-1);
+    if (
+      previous &&
+      Math.abs(previous.x - point.x) < 0.004 &&
+      Math.abs(previous.y - point.y) < 0.004
+    )
+      return;
+    freehandStroke.current.push(point);
+    let preview = resampleCurvePoints(
+      freehandStroke.current,
+      clipEndpoints ? 12 : 14,
+    );
+    if (clipEndpoints)
+      preview = [
+        { x: 0, y: 0 },
+        ...preview.filter((item) => item.x > 0.002 && item.x < 0.998),
+        { x: 1, y: 1 },
+      ];
+    setCustom(preview);
   };
   const movePoint = (event: PointerEvent<SVGCircleElement>, index: number) => {
     const point = coordinates(event);
@@ -256,12 +305,92 @@ export function ToneCurve({
           </button>
         ))}
       </div>
+      <div className="tone-curve-tools" aria-label="Curve drawing controls">
+        <div role="group" aria-label="Curve editing mode">
+          <button
+            className={mode === 'points' ? 'active' : ''}
+            aria-pressed={mode === 'points'}
+            onClick={() => setMode('points')}
+          >
+            Points
+          </button>
+          <button
+            className={mode === 'draw' ? 'active' : ''}
+            aria-pressed={mode === 'draw'}
+            onClick={() => setMode('draw')}
+          >
+            Draw
+          </button>
+        </div>
+        <button
+          onClick={() => {
+            setCustom(smoothCurvePoints(custom, smoothing));
+            onCommit();
+          }}
+          disabled={!custom.length}
+        >
+          Smooth
+        </button>
+        <label>
+          <input
+            type="checkbox"
+            checked={clipEndpoints}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setClipEndpoints(checked);
+              if (checked)
+                setCustom([
+                  { x: 0, y: 0 },
+                  ...custom
+                    .filter((point) => point.x > 0.002 && point.x < 0.998)
+                    .slice(0, 12),
+                  { x: 1, y: 1 },
+                ]);
+              onCommit();
+            }}
+          />
+          Clip ends
+        </label>
+      </div>
+      {mode === 'draw' && (
+        <label className="curve-smoothing">
+          Smoothing
+          <input
+            aria-label="Freehand curve smoothing"
+            type="range"
+            min={0}
+            max={100}
+            value={smoothing}
+            onChange={(event) => setSmoothing(+event.target.value)}
+          />
+          <span>{smoothing}%</span>
+        </label>
+      )}
       <svg
         ref={svgRef}
         className={`curve-${channel}`}
         viewBox="0 0 256 160"
         aria-label={`Editable ${channel} curve. Click to add up to 14 points.`}
-        onPointerDown={addPoint}
+        onPointerDown={(event) => {
+          if (mode === 'points') return addPoint(event);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          freehandStroke.current = [];
+          setDragging('freehand');
+          drawFreehand(event);
+        }}
+        onPointerMove={(event) =>
+          dragging === 'freehand' && drawFreehand(event)
+        }
+        onPointerUp={(event) => {
+          if (dragging !== 'freehand') return;
+          if (event.currentTarget.hasPointerCapture(event.pointerId))
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          finishFreehand();
+        }}
+        onPointerCancel={() => {
+          freehandStroke.current = [];
+          setDragging(null);
+        }}
       >
         {histogramPath && (
           <path className="tone-curve-histogram" d={histogramPath} />
@@ -282,42 +411,43 @@ export function ToneCurve({
         <path className="tone-curve-line" d={pathFor(channel)} />
         {zoneHandle('shadows', 0.25)}
         {zoneHandle('highlights', 0.75)}
-        {custom.map((point, index) => (
-          <circle
-            key={`${index}-${point.x}`}
-            className={`custom-point ${selectedPoint === index ? 'selected' : ''}`}
-            cx={point.x * 256}
-            cy={(1 - point.y) * 160}
-            r="5"
-            role="slider"
-            tabIndex={0}
-            aria-label={`${channel} curve point ${index + 1}`}
-            aria-valuemin={0}
-            aria-valuemax={255}
-            aria-valuenow={Math.round(point.y * 255)}
-            onKeyDown={(e) => pointKey(e, index)}
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              e.currentTarget.setPointerCapture(e.pointerId);
-              setDragging(`point-${index}`);
-              setSelectedPoint(index);
-            }}
-            onPointerMove={(e) =>
-              dragging === `point-${index}` && movePoint(e, index)
-            }
-            onPointerUp={(e) => {
-              e.currentTarget.releasePointerCapture(e.pointerId);
-              setDragging(null);
-              onCommit();
-            }}
-          />
-        ))}
+        {mode === 'points' &&
+          custom.map((point, index) => (
+            <circle
+              key={`${index}-${point.x}`}
+              className={`custom-point ${selectedPoint === index ? 'selected' : ''}`}
+              cx={point.x * 256}
+              cy={(1 - point.y) * 160}
+              r="5"
+              role="slider"
+              tabIndex={0}
+              aria-label={`${channel} curve point ${index + 1}`}
+              aria-valuemin={0}
+              aria-valuemax={255}
+              aria-valuenow={Math.round(point.y * 255)}
+              onKeyDown={(e) => pointKey(e, index)}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                setDragging(`point-${index}`);
+                setSelectedPoint(index);
+              }}
+              onPointerMove={(e) =>
+                dragging === `point-${index}` && movePoint(e, index)
+              }
+              onPointerUp={(e) => {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+                setDragging(null);
+                onCommit();
+              }}
+            />
+          ))}
       </svg>
       <div className="tone-curve-values">
         <span>Click graph to add points · arrows fine tune</span>
         <span>{sanitizeCurvePoints(custom).length - 2}/14</span>
       </div>
-      {selectedPoint !== null && custom[selectedPoint] && (
+      {mode === 'points' && selectedPoint !== null && custom[selectedPoint] && (
         <div
           className="curve-point-editor"
           aria-label="Selected curve point values"

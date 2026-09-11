@@ -52,7 +52,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Importable 3D `.cube` LUTs with live amount and project persistence.
 - [x] Waveform, RGB parade, and vectorscope displays.
 - [x] Monotonic spline Curves with a direct numeric point editor.
-- [ ] Freehand Curves, smoothing, and clipping controls.
+- [x] Freehand Curves with editable-point resampling, adjustable smoothing, and endpoint clipping controls.
 - [x] Hue/Saturation controls for six independent color ranges.
 - [ ] Hue/Saturation on-image adjustment and editable range falloff handles.
 - [x] Full RGB Channel Mixer with output-channel recipes and constants.

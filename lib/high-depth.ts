@@ -270,6 +270,47 @@ export const sanitizeCurvePoints = (points: CurvePoint[] = []) => {
   return [...byInput.values()].sort((a, b) => a.x - b.x).slice(0, 16);
 };
 
+/** Reduce a freehand stroke to a stable editable curve without losing its overall shape. */
+export const resampleCurvePoints = (
+  points: CurvePoint[] = [],
+  maximum = 14,
+) => {
+  const byInput = new Map<number, CurvePoint>();
+  for (const point of points) {
+    const x = Math.round(clamp(Number(point.x)) * 10000) / 10000;
+    const y = Math.round(clamp(Number(point.y)) * 10000) / 10000;
+    if (Number.isFinite(x) && Number.isFinite(y)) byInput.set(x, { x, y });
+  }
+  const sorted = [...byInput.values()].sort((a, b) => a.x - b.x);
+  const limit = Math.max(2, Math.min(14, Math.round(maximum)));
+  if (sorted.length <= limit) return sorted;
+  const result: CurvePoint[] = [];
+  for (let index = 0; index < limit; index++) {
+    const target = index / (limit - 1);
+    const sourceIndex = target * (sorted.length - 1);
+    const left = Math.floor(sourceIndex);
+    const right = Math.min(sorted.length - 1, Math.ceil(sourceIndex));
+    const mix = sourceIndex - left;
+    result.push({
+      x: sorted[left].x + (sorted[right].x - sorted[left].x) * mix,
+      y: sorted[left].y + (sorted[right].y - sorted[left].y) * mix,
+    });
+  }
+  return result;
+};
+
+/** Smooth editable curve points while retaining their input positions and endpoints. */
+export const smoothCurvePoints = (points: CurvePoint[] = [], strength = 50) => {
+  const sorted = resampleCurvePoints(points);
+  const amount = clamp(strength / 100);
+  return sorted.map((point, index) => {
+    if (index === 0 || index === sorted.length - 1) return { ...point };
+    const average =
+      (sorted[index - 1].y + point.y * 2 + sorted[index + 1].y) / 4;
+    return { ...point, y: point.y + (average - point.y) * amount };
+  });
+};
+
 /** Evaluate an editable multi-point curve with a monotonic cubic spline. */
 export const pointCurveValue = (input: number, points: CurvePoint[] = []) => {
   const bounded = clamp(input);
