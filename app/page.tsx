@@ -178,6 +178,7 @@ import {
 } from '@/lib/layer-compositing';
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
+import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
 import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
@@ -906,15 +907,18 @@ const drawLayer = (
   }
   for (const smartFilter of layer.smartObject?.filters ?? []) {
     if (!smartFilter.enabled) continue;
-    const filtered = makeCanvas(w, h),
+    const filtered =
+        smartFilter.name === 'Sharpen'
+          ? sharpenCanvasTiled(source, smartFilter.amount)
+          : makeCanvas(w, h),
       fc = filtered.getContext('2d')!;
-    fc.filter =
-      smartFilter.name === 'Blur'
-        ? `blur(${Math.max(0, smartFilter.amount)}px)`
-        : smartFilter.name === 'Sharpen'
-          ? `contrast(${100 + smartFilter.amount}%) saturate(${100 + smartFilter.amount / 2}%)`
+    if (smartFilter.name !== 'Sharpen') {
+      fc.filter =
+        smartFilter.name === 'Blur'
+          ? `blur(${Math.max(0, smartFilter.amount)}px)`
           : `brightness(${100 + smartFilter.amount}%)`;
-    fc.drawImage(source, 0, 0);
+      fc.drawImage(source, 0, 0);
+    }
     if (
       layer.smartObject?.filterMask &&
       layer.hasMask &&
