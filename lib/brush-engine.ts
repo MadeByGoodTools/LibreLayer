@@ -1,4 +1,5 @@
 export type StrokePoint = { x: number; y: number };
+export type BrushSymmetry = 'none' | 'vertical' | 'horizontal' | 'radial';
 
 export function interpolateStrokeDabs(
   start: StrokePoint,
@@ -26,4 +27,32 @@ export function interpolateStrokeDabs(
     points,
     distanceSinceLastDab: (carried + distance) % safeSpacing,
   };
+}
+
+export function symmetryStrokePoints(
+  point: StrokePoint,
+  width: number,
+  height: number,
+  mode: BrushSymmetry,
+  radialCount = 6,
+) {
+  if (mode === 'none') return [{ ...point }];
+  if (mode === 'vertical')
+    return [{ ...point }, { x: width - point.x, y: point.y }];
+  if (mode === 'horizontal')
+    return [{ ...point }, { x: point.x, y: height - point.y }];
+  const count = Math.max(2, Math.min(16, Math.round(radialCount))),
+    centerX = width / 2,
+    centerY = height / 2,
+    dx = point.x - centerX,
+    dy = point.y - centerY;
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2,
+      cosine = Math.cos(angle),
+      sine = Math.sin(angle);
+    return {
+      x: centerX + dx * cosine - dy * sine,
+      y: centerY + dx * sine + dy * cosine,
+    };
+  });
 }

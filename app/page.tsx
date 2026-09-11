@@ -256,7 +256,11 @@ import {
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
-import { interpolateStrokeDabs } from '@/lib/brush-engine';
+import {
+  interpolateStrokeDabs,
+  symmetryStrokePoints,
+  type BrushSymmetry,
+} from '@/lib/brush-engine';
 import { correctRedEyePixels, highFrequencyPixels } from '@/lib/retouch-engine';
 import {
   decodeCameraRaw,
@@ -1786,6 +1790,8 @@ export default function Home() {
     [dualBrushOffset, setDualBrushOffset] = useState(30),
     [wetEdges, setWetEdges] = useState(false),
     [airbrushBuildUp, setAirbrushBuildUp] = useState(false),
+    [brushSymmetry, setBrushSymmetry] = useState<BrushSymmetry>('none'),
+    [radialSymmetryCount, setRadialSymmetryCount] = useState(6),
     [mixerWet, setMixerWet] = useState(50),
     [mixerLoad, setMixerLoad] = useState(50),
     [mixerMix, setMixerMix] = useState(50),
@@ -3700,122 +3706,135 @@ export default function Home() {
           brushDistanceSinceDab.current = stroke.distanceSinceLastDab;
           ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha;
-          for (const point of stroke.points) {
-            const baseX = point.x,
-              baseY = point.y,
-              scatterRadius = (brushScatter / 100) * size,
-              scatterAngle = Math.random() * Math.PI * 2,
-              x =
-                baseX + Math.cos(scatterAngle) * scatterRadius * Math.random(),
-              y =
-                baseY + Math.sin(scatterAngle) * scatterRadius * Math.random(),
-              jitterScale = 1 - (sizeJitter / 100) * Math.random() * 0.75,
-              dabSize = Math.max(1, size * pressureScale * jitterScale),
-              jitteredPaint =
-                editing === 'pixels' && tool === 'brush' && hueJitter
-                  ? shiftedHex(color, (Math.random() * 2 - 1) * hueJitter * 1.8)
-                  : paint,
-              dabPaint = (() => {
-                if (!mixerBrush || editing !== 'pixels' || tool !== 'brush')
-                  return jitteredPaint;
-                const sampled = target.ctx.getImageData(
-                    Math.max(0, Math.min(doc.w - 1, Math.round(x))),
-                    Math.max(0, Math.min(doc.h - 1, Math.round(y))),
-                    1,
-                    1,
-                  ).data,
-                  fresh = [1, 3, 5].map((at) =>
-                    parseInt(jitteredPaint.slice(at, at + 2), 16),
-                  ),
-                  mix = mixerMix / 100,
-                  wet = mixerWet / 100,
-                  load = mixerLoad / 100;
-                return `#${fresh
-                  .map((channel, at) =>
-                    Math.round(
-                      channel * load * (1 - mix) +
-                        sampled[at] * wet * mix +
-                        channel * (1 - load) * (1 - wet),
+          for (const sourcePoint of stroke.points)
+            for (const point of symmetryStrokePoints(
+              sourcePoint,
+              doc.w,
+              doc.h,
+              brushSymmetry,
+              radialSymmetryCount,
+            )) {
+              const baseX = point.x,
+                baseY = point.y,
+                scatterRadius = (brushScatter / 100) * size,
+                scatterAngle = Math.random() * Math.PI * 2,
+                x =
+                  baseX +
+                  Math.cos(scatterAngle) * scatterRadius * Math.random(),
+                y =
+                  baseY +
+                  Math.sin(scatterAngle) * scatterRadius * Math.random(),
+                jitterScale = 1 - (sizeJitter / 100) * Math.random() * 0.75,
+                dabSize = Math.max(1, size * pressureScale * jitterScale),
+                jitteredPaint =
+                  editing === 'pixels' && tool === 'brush' && hueJitter
+                    ? shiftedHex(
+                        color,
+                        (Math.random() * 2 - 1) * hueJitter * 1.8,
+                      )
+                    : paint,
+                dabPaint = (() => {
+                  if (!mixerBrush || editing !== 'pixels' || tool !== 'brush')
+                    return jitteredPaint;
+                  const sampled = target.ctx.getImageData(
+                      Math.max(0, Math.min(doc.w - 1, Math.round(x))),
+                      Math.max(0, Math.min(doc.h - 1, Math.round(y))),
+                      1,
+                      1,
+                    ).data,
+                    fresh = [1, 3, 5].map((at) =>
+                      parseInt(jitteredPaint.slice(at, at + 2), 16),
+                    ),
+                    mix = mixerMix / 100,
+                    wet = mixerWet / 100,
+                    load = mixerLoad / 100;
+                  return `#${fresh
+                    .map((channel, at) =>
+                      Math.round(
+                        channel * load * (1 - mix) +
+                          sampled[at] * wet * mix +
+                          channel * (1 - load) * (1 - wet),
+                      )
+                        .toString(16)
+                        .padStart(2, '0'),
                     )
-                      .toString(16)
-                      .padStart(2, '0'),
-                  )
-                  .join('')}`;
-              })();
-            const baseAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha,
-              transferredAlpha =
-                (1 - (opacityJitter / 100) * Math.random()) *
-                (1 - (flowJitter / 100) * Math.random()),
-              textureAlpha =
-                1 -
-                (brushTexture / 100) *
-                  (0.25 + 0.75 * Math.abs(Math.sin(x * 0.37 + y * 0.19)));
-            ctx.globalAlpha =
-              baseAlpha *
-              textureAlpha *
-              transferredAlpha *
-              (airbrushBuildUp ? 0.2 : 1);
-            if (paintMode === 'pencil') {
-              ctx.fillStyle = dabPaint;
-              ctx.fillRect(
-                Math.round(x - dabSize / 2),
-                Math.round(y - dabSize / 2),
-                Math.max(1, Math.round(dabSize)),
-                Math.max(1, Math.round(dabSize)),
-              );
-              continue;
-            }
-            const radius = dabSize / 2,
-              inner = radius * Math.max(0, Math.min(1, hardness / 100)),
-              g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius),
-              transparentPaint = dabPaint.startsWith('#')
-                ? `${dabPaint}00`
-                : dabPaint.startsWith('rgb(')
-                  ? dabPaint.replace(/^rgb\((.*)\)$/, 'rgba($1,0)')
-                  : dabPaint === 'white'
-                    ? 'rgba(255,255,255,0)'
-                    : 'rgba(0,0,0,0)';
-            g.addColorStop(0, dabPaint);
-            g.addColorStop(Math.min(0.999, inner / radius), dabPaint);
-            g.addColorStop(1, transparentPaint);
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate((brushAngle * Math.PI) / 180);
-            ctx.scale(1, Math.max(0.05, brushRoundness / 100));
-            if (tilt) {
-              ctx.rotate(tiltAngle);
-              ctx.scale(1, Math.max(0.18, 1 - tiltMagnitude));
-            }
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.arc(0, 0, radius, 0, Math.PI * 2);
-            ctx.fill();
-            if (wetEdges) {
-              ctx.globalAlpha *= 0.75;
-              ctx.strokeStyle = dabPaint;
-              ctx.lineWidth = Math.max(1, radius * 0.16);
-              ctx.stroke();
-            }
-            ctx.restore();
-            if (dualBrush) {
-              const offset = (dualBrushOffset / 100) * radius,
-                dualRadius = radius * (dualBrushScale / 100),
-                angle = (brushAngle * Math.PI) / 180;
+                    .join('')}`;
+                })();
+              const baseAlpha =
+                  (((opacity / 100) * flow) / 100) * pressureAlpha,
+                transferredAlpha =
+                  (1 - (opacityJitter / 100) * Math.random()) *
+                  (1 - (flowJitter / 100) * Math.random()),
+                textureAlpha =
+                  1 -
+                  (brushTexture / 100) *
+                    (0.25 + 0.75 * Math.abs(Math.sin(x * 0.37 + y * 0.19)));
+              ctx.globalAlpha =
+                baseAlpha *
+                textureAlpha *
+                transferredAlpha *
+                (airbrushBuildUp ? 0.2 : 1);
+              if (paintMode === 'pencil') {
+                ctx.fillStyle = dabPaint;
+                ctx.fillRect(
+                  Math.round(x - dabSize / 2),
+                  Math.round(y - dabSize / 2),
+                  Math.max(1, Math.round(dabSize)),
+                  Math.max(1, Math.round(dabSize)),
+                );
+                continue;
+              }
+              const radius = dabSize / 2,
+                inner = radius * Math.max(0, Math.min(1, hardness / 100)),
+                g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius),
+                transparentPaint = dabPaint.startsWith('#')
+                  ? `${dabPaint}00`
+                  : dabPaint.startsWith('rgb(')
+                    ? dabPaint.replace(/^rgb\((.*)\)$/, 'rgba($1,0)')
+                    : dabPaint === 'white'
+                      ? 'rgba(255,255,255,0)'
+                      : 'rgba(0,0,0,0)';
+              g.addColorStop(0, dabPaint);
+              g.addColorStop(Math.min(0.999, inner / radius), dabPaint);
+              g.addColorStop(1, transparentPaint);
               ctx.save();
-              ctx.globalAlpha *= 0.72;
-              ctx.translate(
-                x + Math.cos(angle) * offset,
-                y + Math.sin(angle) * offset,
-              );
-              ctx.rotate(angle + Math.PI / 4);
+              ctx.translate(x, y);
+              ctx.rotate((brushAngle * Math.PI) / 180);
               ctx.scale(1, Math.max(0.05, brushRoundness / 100));
+              if (tilt) {
+                ctx.rotate(tiltAngle);
+                ctx.scale(1, Math.max(0.18, 1 - tiltMagnitude));
+              }
               ctx.fillStyle = g;
               ctx.beginPath();
-              ctx.arc(0, 0, dualRadius, 0, Math.PI * 2);
+              ctx.arc(0, 0, radius, 0, Math.PI * 2);
               ctx.fill();
+              if (wetEdges) {
+                ctx.globalAlpha *= 0.75;
+                ctx.strokeStyle = dabPaint;
+                ctx.lineWidth = Math.max(1, radius * 0.16);
+                ctx.stroke();
+              }
               ctx.restore();
+              if (dualBrush) {
+                const offset = (dualBrushOffset / 100) * radius,
+                  dualRadius = radius * (dualBrushScale / 100),
+                  angle = (brushAngle * Math.PI) / 180;
+                ctx.save();
+                ctx.globalAlpha *= 0.72;
+                ctx.translate(
+                  x + Math.cos(angle) * offset,
+                  y + Math.sin(angle) * offset,
+                );
+                ctx.rotate(angle + Math.PI / 4);
+                ctx.scale(1, Math.max(0.05, brushRoundness / 100));
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(0, 0, dualRadius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+              }
             }
-          }
         };
       if (!quickMaskRef.current && (selectionChannelRef.current || feather)) {
         const stroke = makeCanvas(doc.w, doc.h),
@@ -5999,6 +6018,8 @@ export default function Home() {
       texture: brushTexture,
       wetEdges,
       airbrushBuildUp,
+      symmetry: brushSymmetry,
+      radialSymmetryCount,
       dualBrush: {
         enabled: dualBrush,
         scale: dualBrushScale,
@@ -6055,6 +6076,15 @@ export default function Home() {
       setBrushTexture(number('texture', brushTexture, 0, 100));
       setWetEdges(Boolean(preset.wetEdges));
       setAirbrushBuildUp(Boolean(preset.airbrushBuildUp));
+      if (
+        ['none', 'vertical', 'horizontal', 'radial'].includes(
+          String(preset.symmetry),
+        )
+      )
+        setBrushSymmetry(preset.symmetry as BrushSymmetry);
+      setRadialSymmetryCount(
+        number('radialSymmetryCount', radialSymmetryCount, 2, 16),
+      );
       const dual = preset.dualBrush as Record<string, unknown> | undefined;
       if (dual) {
         setDualBrush(Boolean(dual.enabled));
@@ -10145,6 +10175,11 @@ export default function Home() {
       }
       if (feature.command === 'symmetry') {
         setTool('brush');
+        setBrushSymmetry(options.secondary >= 50 ? 'radial' : 'vertical');
+        if (options.secondary >= 50)
+          setRadialSymmetryCount(
+            Math.max(2, Math.min(16, Math.round(options.amount / 8))),
+          );
         setStatus(
           options.secondary >= 50
             ? 'Radial symmetry painting ready'
@@ -11635,6 +11670,42 @@ export default function Home() {
                       />
                       Airbrush buildup
                     </label>
+                    <label>
+                      Symmetry
+                      <select
+                        aria-label="Brush symmetry"
+                        value={brushSymmetry}
+                        onChange={(event) =>
+                          setBrushSymmetry(event.target.value as BrushSymmetry)
+                        }
+                      >
+                        <option value="none">Off</option>
+                        <option value="vertical">Vertical</option>
+                        <option value="horizontal">Horizontal</option>
+                        <option value="radial">Radial</option>
+                      </select>
+                    </label>
+                    {brushSymmetry === 'radial' && (
+                      <label>
+                        Radial count
+                        <input
+                          aria-label="Radial symmetry count"
+                          className="number-option compact-number"
+                          type="number"
+                          min="2"
+                          max="16"
+                          value={radialSymmetryCount}
+                          onChange={(event) =>
+                            setRadialSymmetryCount(
+                              Math.max(
+                                2,
+                                Math.min(16, +event.target.value || 2),
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                    )}
                     <label className="inline-check">
                       <input
                         type="checkbox"
