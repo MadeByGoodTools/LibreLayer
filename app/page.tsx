@@ -1680,6 +1680,9 @@ export default function Home() {
   const historyRef = useRef<Snapshot[]>([]);
   const historyIndex = useRef(-1);
   const cloneSource = useRef<{ x: number; y: number } | null>(null);
+  const cloneSources = useRef<Array<{ x: number; y: number } | null>>(
+    Array.from({ length: 5 }, () => null),
+  );
   const cloneHasOffset = useRef(false);
   const cloneOffset = useRef({ x: 0, y: 0 });
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
@@ -1837,6 +1840,8 @@ export default function Home() {
     [cloneFlipX, setCloneFlipX] = useState(false),
     [cloneFlipY, setCloneFlipY] = useState(false),
     [cloneOverlay, setCloneOverlay] = useState(true),
+    [activeCloneSourceSlot, setActiveCloneSourceSlot] = useState(0),
+    [cloneSourceVersion, setCloneSourceVersion] = useState(0),
     [retouchMode, setRetouchMode] = useState<
       | 'healing'
       | 'spot'
@@ -2810,6 +2815,9 @@ export default function Home() {
     setQuickMask(false);
     polygonDraft.current = [];
     cloneSource.current = null;
+    cloneSources.current = Array.from({ length: 5 }, () => null);
+    setActiveCloneSourceSlot(0);
+    setCloneSourceVersion((version) => version + 1);
     cloneHasOffset.current = false;
     drawing.current = false;
     transformDrag.current = null;
@@ -3557,6 +3565,8 @@ export default function Home() {
     if (tool === 'clone' || (tool === 'retouch' && retouchMode === 'healing')) {
       if (e.altKey) {
         cloneSource.current = p;
+        cloneSources.current[activeCloneSourceSlot] = { ...p };
+        setCloneSourceVersion((version) => version + 1);
         cloneHasOffset.current = false;
         setStatus(
           tool === 'clone'
@@ -11781,6 +11791,8 @@ export default function Home() {
                   variant="ghost"
                   onClick={() => {
                     cloneSource.current = null;
+                    cloneSources.current[activeCloneSourceSlot] = null;
+                    setCloneSourceVersion((version) => version + 1);
                     cloneHasOffset.current = false;
                     setStatus('Clone source cleared');
                   }}
@@ -11790,6 +11802,35 @@ export default function Home() {
                 <details className="brush-dynamics">
                   <summary>Clone Source</summary>
                   <div>
+                    <div
+                      className="clone-source-slots"
+                      aria-label="Clone source slots"
+                    >
+                      {cloneSources.current.map((source, index) => (
+                        <button
+                          type="button"
+                          key={`${index}-${cloneSourceVersion}`}
+                          className={
+                            activeCloneSourceSlot === index ? 'active' : ''
+                          }
+                          aria-pressed={activeCloneSourceSlot === index}
+                          aria-label={`Clone source ${index + 1}${source ? ' set' : ' empty'}`}
+                          onClick={() => {
+                            setActiveCloneSourceSlot(index);
+                            cloneSource.current = source ? { ...source } : null;
+                            cloneHasOffset.current = false;
+                            setStatus(
+                              source
+                                ? `Clone source ${index + 1} selected`
+                                : `Clone source ${index + 1} is empty · Option/Alt-click the image`,
+                            );
+                          }}
+                        >
+                          {index + 1}
+                          <span>{source ? '●' : '○'}</span>
+                        </button>
+                      ))}
+                    </div>
                     {[
                       ['Offset X', cloneOffsetX, setCloneOffsetX, -2000, 2000],
                       ['Offset Y', cloneOffsetY, setCloneOffsetY, -2000, 2000],
@@ -11904,6 +11945,8 @@ export default function Home() {
                     variant="ghost"
                     onClick={() => {
                       cloneSource.current = null;
+                      cloneSources.current[activeCloneSourceSlot] = null;
+                      setCloneSourceVersion((version) => version + 1);
                       cloneHasOffset.current = false;
                       setStatus('Healing source cleared');
                     }}

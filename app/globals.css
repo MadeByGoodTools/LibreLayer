@@ -3146,6 +3146,30 @@ button {
 .brush-dynamics label {
   justify-content: space-between;
 }
+.clone-source-slots {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+}
+.clone-source-slots button {
+  display: grid;
+  grid-template-columns: auto auto;
+  place-content: center;
+  gap: 4px;
+  min-height: 28px;
+  border: 1px solid #4a4b52;
+  border-radius: 5px;
+  background: #202126;
+  color: #d7d8de;
+}
+.clone-source-slots button.active {
+  border-color: #6ed8af;
+  box-shadow: inset 0 0 0 1px #6ed8af;
+  color: #f5fff9;
+}
+.clone-source-slots span {
+  color: #6ed8af;
+}
 .raw-develop-dialog,
 .select-mask-dialog,
 .selection-manager-dialog {
