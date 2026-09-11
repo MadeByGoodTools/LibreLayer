@@ -199,6 +199,7 @@ import {
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
 import { Histogram } from '@/components/histogram';
+import { AdjustmentPresets } from '@/components/adjustment-presets';
 import { LevelsControl } from '@/components/levels-control';
 import { ToneCurve } from '@/components/tone-curve';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
@@ -213,6 +214,7 @@ import {
 import type { HighPrecisionRawSource } from '@/lib/image-export';
 import {
   adjustHighDepth,
+  createDefaultHighDepthAdjustments,
   precisionToEncodedRgba,
   type HighDepthAdjustments,
 } from '@/lib/high-depth';
@@ -4202,29 +4204,7 @@ export default function Home() {
         contrast: 105,
         saturation: 100,
         blur: 0,
-        precisionAdjustment: {
-          brightness: 10,
-          contrast: 5,
-          exposure: 0,
-          hue: 0,
-          saturation: 0,
-          vibrance: 0,
-          levelsBlack: 0,
-          levelsWhite: 255,
-          levelsGamma: 1,
-          curveShadows: 0,
-          curveHighlights: 0,
-          redCurveShadows: 0,
-          redCurveHighlights: 0,
-          greenCurveShadows: 0,
-          greenCurveHighlights: 0,
-          blueCurveShadows: 0,
-          blueCurveHighlights: 0,
-          balanceCyanRed: 0,
-          balanceMagentaGreen: 0,
-          balanceYellowBlue: 0,
-          blackWhite: false,
-        },
+        precisionAdjustment: createDefaultHighDepthAdjustments(),
       };
     surfacesRef.current.set(id, { pixels });
     insertLayer(layer);
@@ -9258,7 +9238,7 @@ export default function Home() {
   const active = selected();
   const updatePrecisionAdjustment = (
     key: keyof HighDepthAdjustments,
-    value: number | boolean,
+    value: HighDepthAdjustments[keyof HighDepthAdjustments],
   ) => {
     if (!active || active.kind !== 'adjustment' || isLocked(active.id)) return;
     patchLayer(active.id, {
@@ -12175,6 +12155,17 @@ export default function Home() {
                                   sourceCanvas={displayRef.current}
                                   revision={layers}
                                 />
+                                <AdjustmentPresets
+                                  current={active.precisionAdjustment ?? {}}
+                                  onPreview={(precisionAdjustment) =>
+                                    patchLayer(active.id, {
+                                      precisionAdjustment,
+                                    })
+                                  }
+                                  onCommit={(name) =>
+                                    snapshot(`${name} adjustment preset`)
+                                  }
+                                />
                                 <LevelsControl
                                   black={Number(
                                     active.precisionAdjustment?.levelsBlack ??
@@ -12213,6 +12204,15 @@ export default function Home() {
                                       0.1,
                                       ' EV',
                                       0,
+                                    ],
+                                    [
+                                      'Exposure gamma',
+                                      'exposureGamma',
+                                      0.1,
+                                      3,
+                                      0.05,
+                                      '',
+                                      1,
                                     ],
                                     [
                                       'Brightness',
@@ -12387,6 +12387,58 @@ export default function Home() {
                                   />
                                   Black & White channel mix
                                 </label>
+                                <div className="photo-filter-properties">
+                                  <label>
+                                    Photo filter
+                                    <input
+                                      aria-label="Adjustment layer photo filter color"
+                                      type="color"
+                                      value={
+                                        active.precisionAdjustment
+                                          ?.photoFilter ?? '#ec8a32'
+                                      }
+                                      onChange={(event) =>
+                                        updatePrecisionAdjustment(
+                                          'photoFilter',
+                                          event.target.value,
+                                        )
+                                      }
+                                      onBlur={() =>
+                                        snapshot('Photo filter color')
+                                      }
+                                    />
+                                  </label>
+                                  <div className="property-slider">
+                                    <label>
+                                      Filter density
+                                      <span>
+                                        {Number(
+                                          active.precisionAdjustment
+                                            ?.photoFilterDensity ?? 0,
+                                        )}
+                                        %
+                                      </span>
+                                    </label>
+                                    <Slider
+                                      aria-label="Adjustment layer photo filter density"
+                                      min={0}
+                                      max={100}
+                                      value={Number(
+                                        active.precisionAdjustment
+                                          ?.photoFilterDensity ?? 0,
+                                      )}
+                                      onValueChange={(next) =>
+                                        updatePrecisionAdjustment(
+                                          'photoFilterDensity',
+                                          sliderNumber(next),
+                                        )
+                                      }
+                                      onValueCommitted={() =>
+                                        snapshot('Photo filter density')
+                                      }
+                                    />
+                                  </div>
+                                </div>
                                 {active.precisionAdjustment?.blackWhite &&
                                   (
                                     [

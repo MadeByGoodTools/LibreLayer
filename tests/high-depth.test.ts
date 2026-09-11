@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   adjustHighDepth,
   compositeHighDepth,
+  createDefaultHighDepthAdjustments,
   precisionToEncodedRgba,
   precisionToDisplayRgba,
   toneCurveValue,
@@ -169,4 +170,16 @@ void test('per-channel curves change only their targeted color channel', () => {
   assert.ok(adjusted[0] > 0.25);
   assert.equal(adjusted[1], 0.25);
   assert.equal(adjusted[2], 0.25);
+});
+
+void test('new adjustment defaults are a neutral full recipe', () => {
+  const defaults = createDefaultHighDepthAdjustments();
+  const source = new Float32Array([0.2, 0.4, 0.7, 0.5]);
+  const adjusted = adjustHighDepth(
+    { width: 1, height: 1, data: source },
+    defaults,
+  );
+  assert.deepEqual(Array.from(adjusted), Array.from(source));
+  assert.equal(defaults.photoFilterDensity, 0);
+  assert.equal(defaults.exposureGamma, 1);
 });

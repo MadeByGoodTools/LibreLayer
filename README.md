@@ -23,6 +23,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Live RGB and luminance histograms expose shadow and highlight clipping while adjustment-layer controls change
 - Direct input-level handles beneath the histogram provide constrained black point, midtone gamma, and white point editing
 - Interactive RGB, red, green, and blue tone curves provide draggable shadow and highlight points with keyboard control and live high-precision previews
+- Live Portrait, Landscape, Matte, Warm, B&W, and Neutral adjustment presets preview before an explicit Apply and remain fully editable
 - Browser-local background removal and assisted tools
 - Familiar keyboard shortcuts, history, rulers, guides, tabs, and configurable workspaces
 - Searchable command palette for every tool and registered menu action with `Cmd/Ctrl+K`

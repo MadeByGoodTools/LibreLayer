@@ -49,6 +49,36 @@ export type HighDepthAdjustments = {
   photoFilterDensity?: number;
 };
 
+export const createDefaultHighDepthAdjustments = (): HighDepthAdjustments => ({
+  brightness: 0,
+  contrast: 0,
+  exposure: 0,
+  exposureGamma: 1,
+  hue: 0,
+  saturation: 0,
+  vibrance: 0,
+  levelsBlack: 0,
+  levelsWhite: 255,
+  levelsGamma: 1,
+  curveShadows: 0,
+  curveHighlights: 0,
+  redCurveShadows: 0,
+  redCurveHighlights: 0,
+  greenCurveShadows: 0,
+  greenCurveHighlights: 0,
+  blueCurveShadows: 0,
+  blueCurveHighlights: 0,
+  balanceCyanRed: 0,
+  balanceMagentaGreen: 0,
+  balanceYellowBlue: 0,
+  blackWhite: false,
+  redMix: 30,
+  greenMix: 59,
+  blueMix: 11,
+  photoFilter: '#ec8a32',
+  photoFilterDensity: 0,
+});
+
 const clamp = (value: number, low = 0, high = 1) =>
   Math.max(low, Math.min(high, value));
 
