@@ -3,6 +3,8 @@ export type PortablePanelLayout = {
   x: number;
   y: number;
   width: number;
+  collapsed?: boolean;
+  solo?: boolean;
 };
 
 export type PortableWorkspaceLayout = {
@@ -45,6 +47,8 @@ export const normalizeWorkspaceLayout = (
       x: finite(panel.x, 24, 0, 4000),
       y: finite(panel.y, 80, 0, 2400),
       width: finite(panel.width, 320, 240, 700),
+      ...(panel.collapsed ? { collapsed: true } : {}),
+      ...(panel.solo ? { solo: true } : {}),
     };
   }
   return {

@@ -15,7 +15,14 @@ void test('workspace collections round-trip floating panel geometry', () => {
           width: 360,
           smart: false,
           panels: {
-            Properties: { floating: true, x: 80, y: 120, width: 400 },
+            Properties: {
+              floating: true,
+              x: 80,
+              y: 120,
+              width: 400,
+              collapsed: true,
+              solo: true,
+            },
           },
         },
       },

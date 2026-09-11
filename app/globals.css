@@ -3731,6 +3731,19 @@ button {
   justify-content: flex-end;
   padding: 2px 7px;
 }
+.dock-panel-controls {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.dock-panel-controls button {
+  min-height: 26px;
+  padding-inline: 7px;
+  font-size: 11px;
+}
 .dock-tab-content > .panel-content {
   min-height: 0;
   flex: 1;

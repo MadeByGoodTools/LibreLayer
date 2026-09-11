@@ -26,7 +26,14 @@ export type WorkspaceLayout = {
   smart: boolean;
   panels?: Record<
     string,
-    { floating: boolean; x: number; y: number; width: number }
+    {
+      floating: boolean;
+      x: number;
+      y: number;
+      width: number;
+      collapsed?: boolean;
+      solo?: boolean;
+    }
   >;
 };
 export type EditorPreferences = {
