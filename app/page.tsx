@@ -54,6 +54,10 @@ import {
 } from '@/components/ui/command';
 import { ExportDialog } from '@/components/export-dialog';
 import {
+  SelectMaskPreview,
+  type SelectMaskPreviewMode,
+} from '@/components/select-mask-preview';
+import {
   WorkspaceSettings,
   defaultPreferences,
   type EditorPreferences,
@@ -1569,6 +1573,13 @@ export default function Home() {
     [selectMaskTarget, setSelectMaskTarget] = useState<
       'selection' | 'layer-mask'
     >('selection'),
+    [selectMaskPreviewMode, setSelectMaskPreviewMode] =
+      useState<SelectMaskPreviewMode>('overlay'),
+    [selectMaskPreviewOpacity, setSelectMaskPreviewOpacity] = useState(55),
+    [selectMaskSmartRadius, setSelectMaskSmartRadius] = useState(true),
+    [selectMaskOutput, setSelectMaskOutput] = useState<
+      'selection' | 'layer-mask' | 'new-layer-mask'
+    >('selection'),
     [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
     [selectionTransformOpen, setSelectionTransformOpen] = useState(false),
     [selectionTransformX, setSelectionTransformX] = useState(0),
@@ -1648,6 +1659,7 @@ export default function Home() {
     return () => window.removeEventListener('beforeunload', warn);
   });
   const displayRef = useRef<HTMLCanvasElement>(null);
+  const selectMaskPreviewSourceRef = useRef<HTMLCanvasElement | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const surfacesRef = useRef(new Map<string, LayerSurface>());
   const layersRef = useRef<LayerMeta[]>([]);
@@ -5233,7 +5245,11 @@ export default function Home() {
       setStatus('Select a layer with a raster mask first');
       return;
     }
+    const source = makeCanvas(doc.w, doc.h);
+    renderLayers(source.getContext('2d')!);
+    selectMaskPreviewSourceRef.current = source;
     setSelectMaskTarget('layer-mask');
+    setSelectMaskOutput('layer-mask');
     setSelectMaskOpen(true);
   };
   const filter = (kind: 'grayscale' | 'invert' | 'brightness' | 'sharpen') => {
@@ -6514,7 +6530,7 @@ export default function Home() {
       const grown = expandMask(out, Math.round(refineRadius)),
         activeLayer = selected(),
         surface = activeLayer && surfacesRef.current.get(activeLayer.id);
-      if (activeLayer && surface) {
+      if (selectMaskSmartRadius && activeLayer && surface) {
         const visible = makeCanvas(doc.w, doc.h);
         drawLayer(
           visible.getContext('2d')!,
@@ -6569,16 +6585,42 @@ export default function Home() {
       if (out !== base) out.width = out.height = 1;
       out = softened;
     }
-    if (decontaminate) {
-      const meta = selected(),
-        surface = meta && surfacesRef.current.get(meta.id);
-      if (meta && surface && !isLocked(meta.id)) {
+    if (out !== base) base.width = base.height = 1;
+    if (selectMaskTarget === 'layer-mask' && maskLayer && maskSurface) {
+      maskSurface.mask = out;
+      patchLayer(maskLayer.id, { hasMask: true, maskEnabled: true });
+      snapshot('Refine layer mask');
+      render();
+      setStatus('Layer mask edge refined nondestructively');
+      setSelectMaskOpen(false);
+      return;
+    }
+    if (selectMaskOutput === 'new-layer-mask') {
+      const sourceLayer = selected(),
+        sourceSurface = sourceLayer && surfacesRef.current.get(sourceLayer.id);
+      if (
+        !sourceLayer ||
+        !sourceSurface ||
+        sourceLayer.kind === 'group' ||
+        sourceLayer.kind === 'adjustment' ||
+        isLocked(sourceLayer.id) ||
+        !roomForLayers() ||
+        !hasRoom(doc.w * doc.h * 2)
+      ) {
+        setStatus(
+          'Choose an unlocked image or fill layer for new-layer output.',
+        );
+        return;
+      }
+      const id = crypto.randomUUID(),
+        pixelsCanvas = makeCanvas(doc.w, doc.h),
+        pixelsContext = pixelsCanvas.getContext('2d')!;
+      pixelsContext.drawImage(sourceSurface.pixels, 0, 0);
+      if (decontaminate) {
         const maskData = out
             .getContext('2d', { willReadFrequently: true })!
             .getImageData(0, 0, doc.w, doc.h),
-          pixels = surface.pixels
-            .getContext('2d', { willReadFrequently: true })!
-            .getImageData(0, 0, doc.w, doc.h),
+          pixels = pixelsContext.getImageData(0, 0, doc.w, doc.h),
           amount = decontaminateAmount / 100;
         for (let y = 1; y < doc.h - 1; y++)
           for (let x = 1; x < doc.w - 1; x++) {
@@ -6601,16 +6643,57 @@ export default function Home() {
                 pixels.data[i + channel] * (1 - amount) +
                 pixels.data[best + channel] * amount;
           }
-        surface.pixels.getContext('2d')!.putImageData(pixels, 0, 0);
+        pixelsContext.putImageData(pixels, 0, 0);
       }
-    }
-    if (out !== base) base.width = base.height = 1;
-    if (selectMaskTarget === 'layer-mask' && maskLayer && maskSurface) {
-      maskSurface.mask = out;
-      patchLayer(maskLayer.id, { hasMask: true, maskEnabled: true });
-      snapshot('Refine layer mask');
+      const copiedLayer: LayerMeta = {
+        ...structuredClone(sourceLayer),
+        id,
+        name: `${sourceLayer.name} refined`,
+        hasMask: true,
+        maskEnabled: true,
+        maskLinked: true,
+        linkId: undefined,
+      };
+      surfacesRef.current.set(id, { pixels: pixelsCanvas, mask: out });
+      const next = [...layersRef.current],
+        sourceIndex = next.findIndex((layer) => layer.id === sourceLayer.id);
+      next.splice(Math.max(0, sourceIndex), 0, copiedLayer);
+      syncLayers(next);
+      select(id);
+      setEditing('mask');
+      snapshot('Select and Mask to new layer');
       render();
-      setStatus('Layer mask edge refined nondestructively');
+      setStatus(
+        decontaminate
+          ? 'Refined copy created with a layer mask and cleaned edge colors'
+          : 'Refined copy created with a nondestructive layer mask',
+      );
+      setSelectMaskOpen(false);
+      return;
+    }
+    if (selectMaskOutput === 'layer-mask') {
+      const outputLayer = selected(),
+        outputSurface = outputLayer && surfacesRef.current.get(outputLayer.id);
+      if (
+        !outputLayer ||
+        !outputSurface ||
+        outputLayer.kind === 'group' ||
+        outputLayer.kind === 'adjustment' ||
+        isLocked(outputLayer.id)
+      ) {
+        setStatus('Choose an unlocked image or fill layer for mask output.');
+        return;
+      }
+      outputSurface.mask = out;
+      patchLayer(outputLayer.id, {
+        hasMask: true,
+        maskEnabled: true,
+        maskLinked: true,
+      });
+      setEditing('mask');
+      snapshot('Select and Mask to layer mask');
+      render();
+      setStatus('Refinement applied as a nondestructive layer mask');
       setSelectMaskOpen(false);
       return;
     }
@@ -10706,7 +10789,11 @@ export default function Home() {
                   setStatus('Make a selection first');
                   return;
                 }
+                const source = makeCanvas(doc.w, doc.h);
+                renderLayers(source.getContext('2d')!);
+                selectMaskPreviewSourceRef.current = source;
                 setSelectMaskTarget('selection');
+                setSelectMaskOutput('selection');
                 setSelectMaskOpen(true);
               },
             },
@@ -14913,61 +15000,161 @@ export default function Home() {
       </Dialog>
       <Dialog open={selectMaskOpen} onOpenChange={setSelectMaskOpen}>
         <DialogContent className="select-mask-dialog">
-          <DialogTitle>Select and Mask</DialogTitle>
-          <DialogDescription>
-            Refine the active{' '}
-            {selectMaskTarget === 'layer-mask' ? 'layer mask' : 'selection'}
-            edge, including fine hair-like detail, then optionally remove color
-            fringe from edge pixels.
-          </DialogDescription>
-          {[
-            ['Edge detection radius', refineRadius, setRefineRadius, 0, 20],
-            ['Smooth', refineSmooth, setRefineSmooth, 0, 20],
-            ['Feather', refineFeather, setRefineFeather, 0, 50],
-            ['Shift edge', refineShift, setRefineShift, -100, 100],
-          ].map(([label, value, setter, min, max]) => (
-            <label key={label as string}>
-              <span>{label as string}</span>
-              <Slider
-                aria-label={label as string}
-                min={min as number}
-                max={max as number}
-                value={value as number}
-                onValueChange={(next) =>
-                  (setter as (value: number) => void)(sliderNumber(next))
-                }
-              />
-              <strong>{value as number}</strong>
-            </label>
-          ))}
-          <label className="inline-check">
-            <input
-              type="checkbox"
-              checked={decontaminate}
-              onChange={(event) => setDecontaminate(event.target.checked)}
-            />
-            Decontaminate edge colors
-          </label>
-          {decontaminate && (
+          <div className="select-mask-heading">
+            <div>
+              <DialogTitle>Select and Mask</DialogTitle>
+              <DialogDescription>
+                Refine the active{' '}
+                {selectMaskTarget === 'layer-mask' ? 'layer mask' : 'selection'}{' '}
+                with a live, Photoshop-familiar edge preview.
+              </DialogDescription>
+            </div>
             <label>
-              <span>Decontamination amount</span>
-              <Slider
-                aria-label="Decontamination amount"
-                min={0}
-                max={100}
-                value={decontaminateAmount}
-                onValueChange={(next) =>
-                  setDecontaminateAmount(sliderNumber(next))
+              View
+              <select
+                aria-label="Select and Mask view mode"
+                value={selectMaskPreviewMode}
+                onChange={(event) =>
+                  setSelectMaskPreviewMode(
+                    event.target.value as SelectMaskPreviewMode,
+                  )
                 }
-              />
-              <strong>{decontaminateAmount}%</strong>
+              >
+                <option value="overlay">Overlay</option>
+                <option value="on-black">On Black</option>
+                <option value="on-white">On White</option>
+                <option value="black-white">Black &amp; White</option>
+                <option value="on-layers">On Layers</option>
+                <option value="onion-skin">Onion Skin</option>
+              </select>
             </label>
-          )}
+          </div>
+          <div className="select-mask-workspace">
+            <div className="select-mask-preview-frame">
+              <SelectMaskPreview
+                source={selectMaskPreviewSourceRef.current}
+                mask={
+                  selectMaskTarget === 'layer-mask'
+                    ? ((selected() &&
+                        surfacesRef.current.get(selected()!.id)?.mask) ??
+                      null)
+                    : selectionChannelRef.current
+                }
+                selection={selectionRef.current}
+                mode={selectMaskPreviewMode}
+                opacity={selectMaskPreviewOpacity}
+                radius={refineRadius}
+                smooth={refineSmooth}
+                feather={refineFeather}
+                shift={refineShift}
+              />
+              <label className="select-mask-opacity">
+                Preview opacity
+                <Slider
+                  aria-label="Select and Mask preview opacity"
+                  min={0}
+                  max={100}
+                  value={selectMaskPreviewOpacity}
+                  onValueChange={(value) =>
+                    setSelectMaskPreviewOpacity(sliderNumber(value))
+                  }
+                />
+                <strong>{selectMaskPreviewOpacity}%</strong>
+              </label>
+            </div>
+            <div className="select-mask-controls">
+              <section>
+                <h4>Edge detection</h4>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={selectMaskSmartRadius}
+                    onChange={(event) =>
+                      setSelectMaskSmartRadius(event.target.checked)
+                    }
+                  />
+                  Smart Radius
+                </label>
+                {[
+                  ['Radius', refineRadius, setRefineRadius, 0, 20],
+                  ['Smooth', refineSmooth, setRefineSmooth, 0, 20],
+                  ['Feather', refineFeather, setRefineFeather, 0, 50],
+                  ['Shift Edge', refineShift, setRefineShift, -100, 100],
+                ].map(([label, value, setter, min, max]) => (
+                  <label key={label as string}>
+                    <span>{label as string}</span>
+                    <Slider
+                      aria-label={label as string}
+                      min={min as number}
+                      max={max as number}
+                      value={value as number}
+                      onValueChange={(next) =>
+                        (setter as (value: number) => void)(sliderNumber(next))
+                      }
+                    />
+                    <strong>{value as number}</strong>
+                  </label>
+                ))}
+              </section>
+              <section>
+                <h4>Output settings</h4>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={decontaminate}
+                    onChange={(event) => setDecontaminate(event.target.checked)}
+                  />
+                  Decontaminate edge colors
+                </label>
+                {decontaminate && (
+                  <label>
+                    <span>Amount</span>
+                    <Slider
+                      aria-label="Decontamination amount"
+                      min={0}
+                      max={100}
+                      value={decontaminateAmount}
+                      onValueChange={(next) =>
+                        setDecontaminateAmount(sliderNumber(next))
+                      }
+                    />
+                    <strong>{decontaminateAmount}%</strong>
+                  </label>
+                )}
+                <label className="select-mask-output">
+                  Output to
+                  <select
+                    aria-label="Select and Mask output"
+                    value={selectMaskOutput}
+                    disabled={selectMaskTarget === 'layer-mask'}
+                    onChange={(event) =>
+                      setSelectMaskOutput(
+                        event.target.value as
+                          | 'selection'
+                          | 'layer-mask'
+                          | 'new-layer-mask',
+                      )
+                    }
+                  >
+                    <option value="selection">Selection</option>
+                    <option value="layer-mask">Layer Mask</option>
+                    <option value="new-layer-mask">
+                      New Layer with Layer Mask
+                    </option>
+                  </select>
+                </label>
+              </section>
+            </div>
+          </div>
           <div className="dialog-actions">
             <Button onClick={applySelectAndMask}>
               {selectMaskTarget === 'layer-mask'
                 ? 'Apply to layer mask'
-                : 'Apply refinement'}
+                : selectMaskOutput === 'layer-mask'
+                  ? 'Create layer mask'
+                  : selectMaskOutput === 'new-layer-mask'
+                    ? 'Create refined layer'
+                    : 'Apply refinement'}
             </Button>
             <Button variant="outline" onClick={() => setSelectMaskOpen(false)}>
               Cancel

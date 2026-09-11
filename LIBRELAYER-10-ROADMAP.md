@@ -74,9 +74,9 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Ellipse, single-row, single-column, and optimized magnetic-edge selection variants.
 - [x] Numeric Transform Selection, Grow, soft Similar and Color Range, Focus Range, and shadows/midtones/highlights luminosity ranges.
 - [ ] Select Subject, Sky, People, hair, skin, clothing, and detected-object masks.
-- [ ] Dedicated Select and Mask workspace with all preview modes.
+- [x] Dedicated Select and Mask workspace with Overlay, On Black, On White, Black & White, On Layers, and Onion Skin previews.
 - [ ] Color-aware and object-aware Refine Edge/Refine Hair.
-- [ ] Smart Radius, decontamination, edge controls, and nondestructive output choices.
+- [x] Smart Radius, decontamination, live edge controls, and selection, layer-mask, or new-layer-with-mask output choices.
 - [ ] Subpixel selection-reference tests.
 
 ## 5. Painting and retouching
