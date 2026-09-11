@@ -37,6 +37,8 @@ export type EditorPreferences = {
   autosave: boolean;
   proofMode?: SoftProofMode;
   gamutWarning?: boolean;
+  historyDepth?: number;
+  historyBudgetMb?: number;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -46,6 +48,8 @@ export const defaultPreferences: EditorPreferences = {
   autosave: true,
   proofMode: 'none',
   gamutWarning: false,
+  historyDepth: 32,
+  historyBudgetMb: 512,
 };
 export function WorkspaceSettings({
   commands,
@@ -421,6 +425,50 @@ export function WorkspaceSettings({
               <span>{documentStatus}</span>
               <span>{storageStatus}</span>
             </div>
+            <label>
+              Undo history states
+              <input
+                className="block border rounded p-2 w-full"
+                type="number"
+                min={5}
+                max={100}
+                value={value.historyDepth ?? 32}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    historyDepth: Math.max(
+                      5,
+                      Math.min(100, +event.target.value || 32),
+                    ),
+                  })
+                }
+              />
+            </label>
+            <label>
+              History memory budget (MB)
+              <input
+                className="block border rounded p-2 w-full"
+                type="number"
+                min={128}
+                max={2048}
+                step={128}
+                value={value.historyBudgetMb ?? 512}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    historyBudgetMb: Math.max(
+                      128,
+                      Math.min(2048, +event.target.value || 512),
+                    ),
+                  })
+                }
+              />
+            </label>
+            <p>
+              LibreLayer keeps named snapshots when possible and releases the
+              oldest undo states first when either limit is reached. These
+              limits are saved on this browser profile.
+            </p>
             <label>
               Soft-proof preview
               <select

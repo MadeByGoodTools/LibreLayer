@@ -76,7 +76,6 @@ import {
   checkFileSize,
   MAX_DOCUMENT_PIXELS,
   MAX_WORKING_PIXELS,
-  HISTORY_BYTES,
 } from '@/lib/document-limits';
 import { preflightImage } from '@/lib/image-preflight';
 import {
@@ -266,6 +265,10 @@ import {
   contentAwareFill,
   type ContentAwareSamplingMode,
 } from '@/lib/content-aware';
+import {
+  historyExceedsPolicy,
+  normalizeHistoryPolicy,
+} from '@/lib/history-policy';
 import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
@@ -1420,6 +1423,14 @@ export default function Home() {
       )
         setPreferences({
           ...p,
+          historyDepth: normalizeHistoryPolicy(
+            p.historyDepth,
+            p.historyBudgetMb,
+          ).depth,
+          historyBudgetMb: normalizeHistoryPolicy(
+            p.historyDepth,
+            p.historyBudgetMb,
+          ).budgetMb,
           workspaces: p.workspaces
             .filter(
               (w: any) =>
@@ -1986,9 +1997,16 @@ export default function Home() {
         ...historyRef.current,
         ...inactive.flatMap((d) => d.history),
       ]);
+    const policy = normalizeHistoryPolicy(
+      preferences.historyDepth,
+      preferences.historyBudgetMb,
+    );
     let trimmed = false;
     for (const d of inactive)
-      while (d.history.length > 1 && total() > HISTORY_BYTES) {
+      while (
+        d.history.length > 1 &&
+        historyExceedsPolicy(d.history.length, total(), policy)
+      ) {
         if (d.historyIndex > 0) {
           d.history = d.history.slice(1);
           d.historyIndex--;
@@ -1997,7 +2015,7 @@ export default function Home() {
       }
     while (
       historyRef.current.length > 1 &&
-      (historyRef.current.length > 32 || total() > HISTORY_BYTES)
+      historyExceedsPolicy(historyRef.current.length, total(), policy)
     ) {
       if (historyIndex.current > 0) {
         historyRef.current = historyRef.current.slice(1);
@@ -2007,7 +2025,7 @@ export default function Home() {
     }
     if (trimmed)
       setStatus(
-        'Older undo steps were released to stay within the 512 MiB history budget.',
+        `Older undo steps were released to stay within ${policy.depth} states and ${policy.budgetMb.toLocaleString()} MB.`,
       );
   };
   const renderLayers = (
@@ -16449,7 +16467,7 @@ export default function Home() {
         onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
         onProtectStorage={() => void protectLocalStorage()}
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
-        documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/32 history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels`}
+        documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/${preferences.historyDepth ?? 32} history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels`}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}
         onApply={(p) => {
