@@ -1,6 +1,8 @@
-import { readPsd, writePsd, initializeCanvas, getLayerImageData, getLayerMaskImageData, getCompositeImageData, type Layer, type Psd } from 'ag-psd';
+import { readPsd, writePsd, initializeCanvas, getLayerImageData, getLayerMaskImageData, getCompositeImageData, type Layer, type PixelData, type Psd } from 'ag-psd';
 import {MAX_DOCUMENT_PIXELS,MAX_SIDE,MAX_WORKING_PIXELS,checkFileSize} from './document-limits';
 import {pixelTransfers} from './pixel-transfers';
+import {precisionToDisplayRgba} from './high-depth';
+import {readSupportedPsdHeader} from './psd-header';
 
 initializeCanvas((w,h)=>new OffscreenCanvas(w,h) as unknown as HTMLCanvasElement,(w,h)=>new ImageData(w,h));
 
@@ -10,11 +12,9 @@ function bounds(w:number,h:number) {
   if (!Number.isInteger(w)||!Number.isInteger(h)||w<0||h<0||w>MAX_SIDE||h>MAX_SIDE||w*h>MAX_PIXELS) throw Error('PSD/PSB dimensions exceed 16,384 pixels per side or 64 megapixels. No resizing was applied.');
 }
 function decode(buffer:ArrayBuffer) {
-  if(buffer.byteLength<26)throw Error('Incomplete PSD/PSB header.');checkFileSize(buffer.byteLength);
-  const header=new DataView(buffer);
-  if(header.getUint32(0)!==0x38425053||![1,2].includes(header.getUint16(4))) throw Error('Choose a valid PSD or PSB file.');
-  bounds(header.getUint32(18),header.getUint32(14));
-  if(header.getUint16(22)!==8||header.getUint16(24)!==3) throw Error('Only 8-bit RGB PSD files are supported. Convert a copy in Photoshop first.');
+  checkFileSize(buffer.byteLength);
+  const header=readSupportedPsdHeader(buffer),bitDepth=header.bitDepth;
+  bounds(header.width,header.height);
   const psd=readPsd(buffer,{useRawData:true,useRawThumbnail:true,skipThumbnail:true,skipLinkedFilesData:true,totalMemoryLimit:256*1024*1024});
   let count=0,expandedPixels=0;
   const warnings=new Set<string>();
@@ -34,15 +34,16 @@ function decode(buffer:ArrayBuffer) {
     layer.children?.forEach(child=>inspect(child,depth+1));
   };
   psd.children?.forEach(layer=>inspect(layer));
+  const displayData=(data:PixelData|undefined)=>data?new ImageData(precisionToDisplayRgba(data),data.width,data.height):undefined;
   if(warnings.size||!psd.children?.length) {
-    const imageData=getCompositeImageData(psd);
+    const imageData=displayData(getCompositeImageData(psd));
     if(!imageData) throw Error('This PSD needs a saved composite preview. Resave a copy with Maximize Compatibility enabled.');
-    return {width:psd.width,height:psd.height,warnings:[...warnings],children:[{name:'PSD composite',imageData}]};
+    return {width:psd.width,height:psd.height,bitDepth,warnings:[...warnings],children:[{name:'PSD composite',imageData}]};
   }
   const convert=(layer:Layer):Layer=>({name:layer.name,hidden:layer.hidden,opacity:layer.opacity,blendMode:layer.blendMode,left:layer.left,top:layer.top,opened:layer.opened,transparencyProtected:layer.transparencyProtected,
-    children:layer.children?.map(convert),imageData:layer.children?undefined:getLayerImageData(layer),
-    mask:layer.mask?{left:layer.mask.left,top:layer.mask.top,defaultColor:layer.mask.defaultColor,disabled:layer.mask.disabled,positionRelativeToLayer:layer.mask.positionRelativeToLayer,imageData:getLayerMaskImageData(layer)}:undefined});
-  return {width:psd.width,height:psd.height,warnings:[],children:psd.children.map(convert)};
+    children:layer.children?.map(convert),imageData:layer.children?undefined:displayData(getLayerImageData(layer)),
+    mask:layer.mask?{left:layer.mask.left,top:layer.mask.top,defaultColor:layer.mask.defaultColor,disabled:layer.mask.disabled,positionRelativeToLayer:layer.mask.positionRelativeToLayer,imageData:displayData(getLayerMaskImageData(layer))}:undefined});
+  return {width:psd.width,height:psd.height,bitDepth,warnings:[],children:psd.children.map(convert)};
 }
 self.onmessage=(event:MessageEvent<{action:'read';buffer:ArrayBuffer}|{action:'write';psd:Psd;psb?:boolean}>)=>{
   try {

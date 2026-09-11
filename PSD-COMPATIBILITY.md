@@ -2,7 +2,7 @@
 
 ## Supported scope
 
-- Standard PSD, 8-bit RGB. Pixels are interpreted in the browser RGB space; Photoshop ICC conversion is not implemented.
+- PSD and PSB in 8-, 16- or 32-bit RGB. Supported high-depth layers are preserved structurally and tone-mapped into the current 8-bit browser working canvas; Photoshop ICC conversion is not implemented.
 - Raster layer names, order, visibility, whole-percent opacity, supported Canvas blend modes, masks and pass-through groups.
 - Mask offsets, default outside color and disabled state.
 - Layered PSD export preserves supported raster structure and masks; transforms and pixel adjustments are baked into pixels. Native .pixelstudio saving remains the editable master.
@@ -12,7 +12,7 @@
 
 ## Limits
 
-128 MB input; 8192 pixels per side; 24 megapixels per document; 100 layers; 20 nested groups; 32 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a 45-second timeout. PSB, 16-bit/32-bit, CMYK and full Photoshop metadata fidelity are not supported.
+256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK, Lab, indexed color and full Photoshop metadata fidelity are not supported.
 
 ## Verified locally in the browser
 

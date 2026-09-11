@@ -4,6 +4,7 @@ import { pixelTransfers } from './pixel-transfers';
 export type PsdImport = {
   width: number;
   height: number;
+  bitDepth: number;
   warnings: string[];
   children: Layer[];
 };

@@ -6391,8 +6391,10 @@ export default function Home() {
     );
     setStatus(
       data.warnings.length
-        ? 'Opened saved PSD composite as one pixel layer'
-        : 'PSD opened — raster layers, opacity, blend modes and masks preserved',
+        ? `Opened saved ${data.bitDepth}-bit PSD composite as one 8-bit working layer`
+        : data.bitDepth > 8
+          ? `${data.bitDepth}-bit PSD opened — supported layers preserved as editable 8-bit working layers`
+          : 'PSD opened — raster layers, opacity, blend modes and masks preserved',
     );
   };
   const openPsd = async (file: File) => {
