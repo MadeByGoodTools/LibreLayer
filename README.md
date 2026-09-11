@@ -52,6 +52,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Browser-local Subject/People, Sky, Hair, Skin, Clothing, and object selections with adjustable detail sensitivity and color-aware Refine Hair
 - Cross-browser deterministic subpixel marquee masks with reference-tested rectangle and supersampled ellipse coverage
 - Fractional brush-stroke interpolation plus angle, roundness, pressure/tilt, transfer jitter, dual-tip, wet-edge, airbrush, scatter, texture, and Mixer Brush controls saved in brush presets
+- Sample-all-layers healing on blank retouch layers, targeted red-eye correction, and one-click frequency separation with editable Low, High, and Retouching layers while preserving the original
 - Browser-local Match Color, HDR toning, perceptual vibrance, and lift/gamma/gain grading wheels
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 

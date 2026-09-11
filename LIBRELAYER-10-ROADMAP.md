@@ -87,8 +87,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Custom brush tips, ABR import, folders, tags, favorites, and search.
 - [ ] Symmetry, Pattern Stamp, History Brush, and Art History Brush.
 - [ ] Multi-source Clone Source panel and transformable overlay.
-- [ ] Spot Healing modes, Patch, Content-Aware Move, Red Eye, Dodge, Burn, Sponge, Blur, Sharpen, and Smudge.
-- [ ] Nondestructive retouch-layer and frequency-separation workflows.
+- [x] Healing, Spot Healing, Patch, Content-Aware Move, Red Eye, Dodge, Burn, Sponge, Blur, Sharpen, and Smudge.
+- [x] Sample-all-layers retouching on blank layers and nondestructive frequency-separation stacks that preserve the hidden original.
 
 ## 6. Content-aware and distortion
 

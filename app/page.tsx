@@ -257,6 +257,7 @@ import {
 } from '@/lib/psd-compatibility';
 import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
 import { interpolateStrokeDabs } from '@/lib/brush-engine';
+import { correctRedEyePixels, highFrequencyPixels } from '@/lib/retouch-engine';
 import {
   decodeCameraRaw,
   defaultRawDevelopSettings,
@@ -1845,7 +1846,9 @@ export default function Home() {
       | 'blur'
       | 'sharpen'
       | 'smudge'
+      | 'red-eye'
     >('healing'),
+    [retouchSampleAll, setRetouchSampleAll] = useState(true),
     [pathCurved, setPathCurved] = useState(false),
     [pathMode, setPathMode] = useState<'straight' | 'curvature' | 'freeform'>(
       'straight',
@@ -3577,7 +3580,12 @@ export default function Home() {
         const surface = meta && surfacesRef.current.get(meta.id);
         if (surface) {
           cloneBuffer.current = makeCanvas(doc.w, doc.h);
-          cloneBuffer.current.getContext('2d')!.drawImage(surface.pixels, 0, 0);
+          if (retouchSampleAll)
+            renderLayers(cloneBuffer.current.getContext('2d')!);
+          else
+            cloneBuffer.current
+              .getContext('2d')!
+              .drawImage(surface.pixels, 0, 0);
         }
       }
     }
@@ -3585,7 +3593,10 @@ export default function Home() {
       const surface = meta && surfacesRef.current.get(meta.id);
       if (surface) {
         cloneBuffer.current = makeCanvas(doc.w, doc.h);
-        cloneBuffer.current.getContext('2d')!.drawImage(surface.pixels, 0, 0);
+        if (retouchSampleAll)
+          renderLayers(cloneBuffer.current.getContext('2d')!);
+        else
+          cloneBuffer.current.getContext('2d')!.drawImage(surface.pixels, 0, 0);
       }
     }
     if (tool === 'zoom') {
@@ -3966,7 +3977,12 @@ export default function Home() {
                 w,
                 h,
               );
-            else {
+            else if (retouchMode === 'red-eye') {
+              pc.drawImage(buffer, x, y, w, h, 0, 0, w, h);
+              const redEye = pc.getImageData(0, 0, w, h);
+              redEye.data.set(correctRedEyePixels(redEye.data));
+              pc.putImageData(redEye, 0, 0);
+            } else {
               pc.filter =
                 retouchMode === 'dodge'
                   ? 'brightness(1.18)'
@@ -6165,6 +6181,110 @@ export default function Home() {
           : mode === 'fill'
             ? 'Selection filled from surrounding color and texture'
             : 'Selection moved and its original area repaired',
+    );
+  };
+  const createFrequencySeparation = () => {
+    const sourceLayer = selected(),
+      sourceSurface = sourceLayer && surfacesRef.current.get(sourceLayer.id);
+    if (
+      !sourceLayer ||
+      !sourceSurface ||
+      sourceLayer.kind === 'group' ||
+      sourceLayer.kind === 'adjustment' ||
+      sourceLayer.kind === 'fill' ||
+      isLocked(sourceLayer.id) ||
+      !roomForLayers(4) ||
+      !hasRoom(doc.w * doc.h * 4)
+    ) {
+      setStatus('Select an unlocked pixel or text layer first');
+      return;
+    }
+    const groupId = crypto.randomUUID(),
+      retouchId = crypto.randomUUID(),
+      highId = crypto.randomUUID(),
+      lowId = crypto.randomUUID(),
+      low = makeCanvas(doc.w, doc.h),
+      lowContext = low.getContext('2d')!;
+    lowContext.filter = 'blur(8px)';
+    lowContext.drawImage(sourceSurface.pixels, 0, 0);
+    lowContext.filter = 'none';
+    const originalPixels = sourceSurface.pixels
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, doc.w, doc.h),
+      lowPixels = lowContext.getImageData(0, 0, doc.w, doc.h),
+      high = makeCanvas(doc.w, doc.h),
+      highContext = high.getContext('2d')!,
+      highPixels = highContext.createImageData(doc.w, doc.h);
+    highPixels.data.set(
+      highFrequencyPixels(originalPixels.data, lowPixels.data),
+    );
+    highContext.putImageData(highPixels, 0, 0);
+    const base = {
+        visible: true,
+        opacity: 100,
+        x: sourceLayer.x,
+        y: sourceLayer.y,
+        hasMask: false,
+        maskEnabled: true,
+        parentId: groupId,
+      },
+      group: LayerMeta = {
+        id: groupId,
+        name: `${sourceLayer.name} · Frequency Separation`,
+        visible: true,
+        opacity: 100,
+        blend: 'source-over',
+        x: 0,
+        y: 0,
+        hasMask: false,
+        maskEnabled: true,
+        kind: 'group',
+        parentId: sourceLayer.parentId,
+        groupIsolation: 'pass-through',
+      },
+      retouch: LayerMeta = {
+        ...base,
+        id: retouchId,
+        name: 'Retouching',
+        blend: 'source-over',
+      },
+      highLayer: LayerMeta = {
+        ...base,
+        id: highId,
+        name: 'High Frequency',
+        blend: 'linear-light',
+      },
+      lowLayer: LayerMeta = {
+        ...base,
+        id: lowId,
+        name: 'Low Frequency',
+        blend: 'source-over',
+      };
+    surfacesRef.current.set(groupId, { pixels: makeCanvas(doc.w, doc.h) });
+    surfacesRef.current.set(retouchId, { pixels: makeCanvas(doc.w, doc.h) });
+    surfacesRef.current.set(highId, { pixels: high });
+    surfacesRef.current.set(lowId, { pixels: low });
+    const next = layersRef.current.map((layer) =>
+        layer.id === sourceLayer.id ? { ...layer, visible: false } : layer,
+      ),
+      sourceIndex = next.findIndex((layer) => layer.id === sourceLayer.id);
+    next.splice(
+      Math.max(0, sourceIndex),
+      0,
+      group,
+      retouch,
+      highLayer,
+      lowLayer,
+    );
+    syncLayers(next);
+    select(retouchId);
+    setTool('retouch');
+    setRetouchMode('healing');
+    setRetouchSampleAll(true);
+    snapshot('Create frequency separation');
+    render();
+    setStatus(
+      'Frequency separation created; paint on the blank Retouching layer',
     );
   };
   const applyGeometry = (operation: GeometryOperation) => {
@@ -11057,11 +11177,23 @@ export default function Home() {
               name: 'Content-Aware Move…',
               action: () => setSelectionRepairOpen('move'),
             },
+            {
+              name: 'Frequency Separation',
+              action: createFrequencySeparation,
+            },
             { separator: true },
             ...(
-              ['dodge', 'burn', 'sponge', 'blur', 'sharpen', 'smudge'] as const
+              [
+                'dodge',
+                'burn',
+                'sponge',
+                'blur',
+                'sharpen',
+                'smudge',
+                'red-eye',
+              ] as const
             ).map((mode) => ({
-              name: `${mode[0].toUpperCase()}${mode.slice(1)} tool`,
+              name: `${mode === 'red-eye' ? 'Red Eye' : `${mode[0].toUpperCase()}${mode.slice(1)}`} tool`,
               action: () => {
                 setTool('retouch');
                 setRetouchMode(mode);
@@ -11736,8 +11868,36 @@ export default function Home() {
                     <option value="blur">Blur</option>
                     <option value="sharpen">Sharpen</option>
                     <option value="smudge">Smudge</option>
+                    <option value="red-eye">Red Eye</option>
                   </select>
                 </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={retouchSampleAll}
+                    onChange={(event) =>
+                      setRetouchSampleAll(event.target.checked)
+                    }
+                  />
+                  Sample all layers
+                </label>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const id = createLayer('Retouching');
+                    if (id) setStatus('Blank retouch layer created');
+                  }}
+                >
+                  New retouch layer
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={createFrequencySeparation}
+                >
+                  Frequency separation
+                </Button>
                 {retouchMode === 'healing' && (
                   <Button
                     size="sm"
