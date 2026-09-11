@@ -72,7 +72,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Marquee, lasso, polygonal lasso, Magic Wand, Quick Selection, selection math, feather, and saved selections.
 - [x] Browser-local subject/background assistance and editable mask output.
 - [x] Ellipse, single-row, single-column, and optimized magnetic-edge selection variants.
-- [ ] Transform Selection, Grow, Similar, Focus Range, Color Range, and luminosity ranges.
+- [x] Numeric Transform Selection, Grow, soft Similar and Color Range, Focus Range, and shadows/midtones/highlights luminosity ranges.
 - [ ] Select Subject, Sky, People, hair, skin, clothing, and detected-object masks.
 - [ ] Dedicated Select and Mask workspace with all preview modes.
 - [ ] Color-aware and object-aware Refine Edge/Refine Hair.

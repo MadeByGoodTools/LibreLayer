@@ -222,6 +222,13 @@ import {
   type MarqueeShape,
 } from '@/lib/selection-geometry';
 import {
+  colorSimilarityWeight,
+  focusWeight,
+  luminosityRangeWeight,
+  pixelLuminance,
+  type LuminosityRange,
+} from '@/lib/selection-ranges';
+import {
   createPsdCompatibilityReport,
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
@@ -1482,6 +1489,10 @@ export default function Home() {
       'selection' | 'layer-mask'
     >('selection'),
     [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
+    [selectionTransformOpen, setSelectionTransformOpen] = useState(false),
+    [selectionTransformX, setSelectionTransformX] = useState(0),
+    [selectionTransformY, setSelectionTransformY] = useState(0),
+    [selectionTransformScale, setSelectionTransformScale] = useState(100),
     [geometryOpen, setGeometryOpen] = useState(false),
     [layerStudioOpen, setLayerStudioOpen] = useState(false),
     [proSuiteOpen, setProSuiteOpen] = useState(false),
@@ -6110,6 +6121,7 @@ export default function Home() {
       `${kind[0].toUpperCase() + kind.slice(1)} selection`,
       'replace',
     );
+    snapshot(`${kind[0].toUpperCase() + kind.slice(1)} selection`);
   };
   const saveCurrentSelection = () => {
     if (!selectionRef.current) {
@@ -6317,45 +6329,187 @@ export default function Home() {
     const meta = selected(),
       surface = meta && surfacesRef.current.get(meta.id);
     if (!meta || !surface) return;
-    const source = surface.pixels
+    const rendered = makeCanvas(doc.w, doc.h);
+    drawLayer(
+      rendered.getContext('2d')!,
+      { ...meta, opacity: 100, fill: 100, blend: 'source-over' },
+      surface,
+      doc.w,
+      doc.h,
+    );
+    const source = rendered
         .getContext('2d', { willReadFrequently: true })!
         .getImageData(0, 0, doc.w, doc.h),
       target = [
         parseInt(color.slice(1, 3), 16),
         parseInt(color.slice(3, 5), 16),
         parseInt(color.slice(5, 7), 16),
-      ],
+      ] as const,
       local = makeCanvas(doc.w, doc.h),
       image = local.getContext('2d')!.createImageData(doc.w, doc.h);
     let count = 0;
     for (let i = 0; i < source.data.length; i += 4) {
-      if (
-        Math.abs(source.data[i] - target[0]) +
-          Math.abs(source.data[i + 1] - target[1]) +
-          Math.abs(source.data[i + 2] - target[2]) <=
-          magicTolerance * 3 &&
-        source.data[i + 3]
-      ) {
-        image.data[i] =
-          image.data[i + 1] =
-          image.data[i + 2] =
-          image.data[i + 3] =
-            255;
+      const weight = colorSimilarityWeight(
+        source.data[i],
+        source.data[i + 1],
+        source.data[i + 2],
+        target,
+        magicTolerance,
+      );
+      if (weight > 0 && source.data[i + 3]) {
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
+        image.data[i + 3] = Math.round(weight * source.data[i + 3]);
         count++;
       }
     }
     local.getContext('2d')!.putImageData(image, 0, 0);
-    const placed = makeCanvas(doc.w, doc.h),
-      ctx = placed.getContext('2d')!;
-    ctx.translate(meta.x + doc.w / 2, meta.y + doc.h / 2);
-    ctx.rotate(((meta.rotation ?? 0) * Math.PI) / 180);
-    ctx.scale(meta.scaleX ?? 1, meta.scaleY ?? 1);
-    ctx.drawImage(local, -doc.w / 2, -doc.h / 2);
-    local.width = local.height = 1;
+    rendered.width = rendered.height = 1;
     commitSelectionMask(
-      placed,
-      `Color Range selected ${count.toLocaleString()} pixels`,
+      local,
+      `Color Range selected ${count.toLocaleString()} softly matched pixels`,
     );
+    snapshot('Color Range');
+  };
+  const renderedActivePixels = () => {
+    const meta = selected(),
+      surface = meta && surfacesRef.current.get(meta.id);
+    if (!meta || !surface || meta.kind === 'group') return null;
+    const canvas = makeCanvas(doc.w, doc.h);
+    drawLayer(
+      canvas.getContext('2d')!,
+      { ...meta, opacity: 100, fill: 100, blend: 'source-over' },
+      surface,
+      doc.w,
+      doc.h,
+    );
+    const pixels = canvas
+      .getContext('2d', { willReadFrequently: true })!
+      .getImageData(0, 0, doc.w, doc.h);
+    canvas.width = canvas.height = 1;
+    return pixels;
+  };
+  const commitWeightedRange = (
+    source: ImageData,
+    weightAt: (index: number, x: number, y: number) => number,
+    label: string,
+  ) => {
+    const mask = makeCanvas(doc.w, doc.h),
+      context = mask.getContext('2d')!,
+      image = context.createImageData(doc.w, doc.h);
+    let count = 0;
+    for (let y = 0; y < doc.h; y++)
+      for (let x = 0; x < doc.w; x++) {
+        const index = (y * doc.w + x) * 4,
+          weight = Math.max(0, Math.min(1, weightAt(index, x, y))),
+          alpha = Math.round(weight * source.data[index + 3]);
+        if (!alpha) continue;
+        image.data[index] = image.data[index + 1] = image.data[index + 2] = 255;
+        image.data[index + 3] = alpha;
+        count++;
+      }
+    context.putImageData(image, 0, 0);
+    commitSelectionMask(mask, `${label} · ${count.toLocaleString()} pixels`);
+    snapshot(label);
+  };
+  const selectSimilar = () => {
+    if (!selectionRef.current) {
+      setStatus('Make a source selection first');
+      return;
+    }
+    const source = renderedActivePixels();
+    if (!source) return;
+    const mask = selectionMask(doc.w, doc.h, 0, 0),
+      selectedPixels = mask
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, doc.w, doc.h).data;
+    let red = 0,
+      green = 0,
+      blue = 0,
+      weight = 0;
+    for (let i = 0; i < source.data.length; i += 4) {
+      const amount = (selectedPixels[i + 3] / 255) * (source.data[i + 3] / 255);
+      if (!amount) continue;
+      red += source.data[i] * amount;
+      green += source.data[i + 1] * amount;
+      blue += source.data[i + 2] * amount;
+      weight += amount;
+    }
+    mask.width = mask.height = 1;
+    if (!weight) {
+      setStatus('The source selection contains no visible pixels');
+      return;
+    }
+    const target = [red / weight, green / weight, blue / weight] as const;
+    commitWeightedRange(
+      source,
+      (index) =>
+        colorSimilarityWeight(
+          source.data[index],
+          source.data[index + 1],
+          source.data[index + 2],
+          target,
+          magicTolerance,
+        ),
+      'Similar colors selected',
+    );
+  };
+  const selectLuminosityRange = (range: LuminosityRange) => {
+    const source = renderedActivePixels();
+    if (!source) return;
+    commitWeightedRange(
+      source,
+      (index) =>
+        luminosityRangeWeight(
+          pixelLuminance(
+            source.data[index],
+            source.data[index + 1],
+            source.data[index + 2],
+          ),
+          range,
+          Math.max(8, magicTolerance),
+        ),
+      `${range[0].toUpperCase()}${range.slice(1)} luminosity range`,
+    );
+  };
+  const selectFocusRange = () => {
+    const source = renderedActivePixels();
+    if (!source) return;
+    commitWeightedRange(
+      source,
+      (_index, x, y) =>
+        focusWeight(
+          source.data,
+          doc.w,
+          doc.h,
+          x,
+          y,
+          Math.max(8, magicTolerance / 2),
+        ),
+      'Focus Range selected sharp detail',
+    );
+  };
+  const transformSelection = () => {
+    if (!selectionRef.current) {
+      setStatus('Make a selection first');
+      return;
+    }
+    const source = selectionMask(doc.w, doc.h, 0, 0),
+      output = makeCanvas(doc.w, doc.h),
+      context = output.getContext('2d')!,
+      bounds = selectionRef.current,
+      centerX = bounds.x + bounds.w / 2,
+      centerY = bounds.y + bounds.h / 2,
+      scale = Math.max(0.01, Math.min(10, selectionTransformScale / 100));
+    context.translate(
+      centerX + selectionTransformX,
+      centerY + selectionTransformY,
+    );
+    context.scale(scale, scale);
+    context.drawImage(source, -centerX, -centerY);
+    source.width = source.height = 1;
+    commitSelectionMask(output, 'Selection transformed', 'replace');
+    snapshot('Transform Selection');
+    setSelectionTransformOpen(false);
   };
   const runSmartSelection = (p: Point, quick = false) => {
     const had = !!selectionRef.current,
@@ -10147,7 +10301,38 @@ export default function Home() {
               },
             },
             { name: 'Color Range', action: selectColorRange },
+            { name: 'Similar', action: selectSimilar },
+            { name: 'Focus Range', action: selectFocusRange },
+            {
+              name: 'Luminosity Range: Shadows',
+              action: () => selectLuminosityRange('shadows'),
+            },
+            {
+              name: 'Luminosity Range: Midtones',
+              action: () => selectLuminosityRange('midtones'),
+            },
+            {
+              name: 'Luminosity Range: Highlights',
+              action: () => selectLuminosityRange('highlights'),
+            },
             { separator: true },
+            {
+              name: 'Transform Selection…',
+              action: () => {
+                if (!selectionRef.current) {
+                  setStatus('Make a selection first');
+                  return;
+                }
+                setSelectionTransformX(0);
+                setSelectionTransformY(0);
+                setSelectionTransformScale(100);
+                setSelectionTransformOpen(true);
+              },
+            },
+            {
+              name: 'Grow',
+              action: () => refineSelection('expand'),
+            },
             {
               name: 'Select and Mask…',
               action: () => {
@@ -14165,6 +14350,62 @@ export default function Home() {
             <Button variant="outline" onClick={() => setRawDevelop(null)}>
               Cancel
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={selectionTransformOpen}
+        onOpenChange={setSelectionTransformOpen}
+      >
+        <DialogContent className="selection-transform-dialog">
+          <DialogTitle>Transform Selection</DialogTitle>
+          <DialogDescription>
+            Move or scale the selection boundary without changing image pixels.
+          </DialogDescription>
+          <div className="transform-grid">
+            <label>
+              X
+              <input
+                aria-label="Selection horizontal offset"
+                type="number"
+                value={selectionTransformX}
+                onChange={(event) =>
+                  setSelectionTransformX(Number(event.target.value))
+                }
+              />
+            </label>
+            <label>
+              Y
+              <input
+                aria-label="Selection vertical offset"
+                type="number"
+                value={selectionTransformY}
+                onChange={(event) =>
+                  setSelectionTransformY(Number(event.target.value))
+                }
+              />
+            </label>
+          </div>
+          <label>
+            Scale <strong>{selectionTransformScale}%</strong>
+            <Slider
+              aria-label="Selection scale"
+              min={1}
+              max={400}
+              value={selectionTransformScale}
+              onValueChange={(value) =>
+                setSelectionTransformScale(sliderNumber(value))
+              }
+            />
+          </label>
+          <div className="dialog-actions">
+            <Button
+              variant="outline"
+              onClick={() => setSelectionTransformOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={transformSelection}>Apply transform</Button>
           </div>
         </DialogContent>
       </Dialog>
