@@ -263,7 +263,59 @@ button {
   min-width: 38px;
 }
 .option-slider {
-  width: 96px !important;
+  width: 148px !important;
+}
+.precision-slider {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.precision-slider-control {
+  min-width: 34px;
+  flex: 1 1 auto;
+}
+.precision-slider-value {
+  width: 48px;
+  min-width: 48px;
+  height: 24px;
+  padding: 2px 4px;
+  border: 1px solid #4d4f58;
+  border-radius: 4px;
+  background: #202126;
+  color: #e7e8ed;
+  cursor: ew-resize;
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: right;
+}
+.precision-slider-value:focus {
+  border-color: #6f8df4;
+  cursor: text;
+  outline: 2px solid rgb(111 141 244 / 0.22);
+}
+.precision-slider-reset {
+  display: grid;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8e9099;
+  cursor: pointer;
+  font-size: 14px;
+}
+.precision-slider-reset:hover,
+.precision-slider-reset:focus-visible {
+  background: #3b3d45;
+  color: white;
+  outline: none;
+}
+.precision-slider[data-disabled] .precision-slider-value {
+  color: #73757e;
+  cursor: default;
 }
 .color-label input {
   width: 28px;
@@ -1895,12 +1947,12 @@ button {
   outline: none;
   filter: drop-shadow(0 0 4px rgb(118 165 255 / 0.75));
 }
-.layer-controls [data-slot='slider'] {
+.layer-controls .precision-slider {
   grid-column: 1/-1;
   width: 100%;
   height: 18px;
 }
-.properties-panel [data-slot='slider'] {
+.properties-panel .precision-slider {
   width: 100%;
   height: 18px;
 }
@@ -3094,7 +3146,7 @@ button {
   accent-color: #32bd88;
 }
 .advanced-options .option-slider {
-  width: 110px !important;
+  width: 154px !important;
 }
 .quick-mask-exit,
 .vector-mask-add {
