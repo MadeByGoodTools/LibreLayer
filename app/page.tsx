@@ -93,7 +93,13 @@ import {
 } from '@/lib/recovery';
 import type { Layer as PsdLayer } from 'ag-psd';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
-import { packProject, unpackProject } from '@/lib/project-format';
+import {
+  EncryptedProjectPasswordInvalid,
+  EncryptedProjectPasswordRequired,
+  packEncryptedProject,
+  packProject,
+  unpackProject,
+} from '@/lib/project-format';
 import {
   applyColorGradeToPixels,
   colorGradeIsNeutral,
@@ -1382,6 +1388,15 @@ export default function Home() {
     [geometryOpen, setGeometryOpen] = useState(false),
     [layerStudioOpen, setLayerStudioOpen] = useState(false),
     [proSuiteOpen, setProSuiteOpen] = useState(false),
+    [secureSaveOpen, setSecureSaveOpen] = useState(false),
+    [secureSavePassword, setSecureSavePassword] = useState(''),
+    [secureSaveConfirmation, setSecureSaveConfirmation] = useState(''),
+    [secureSaveError, setSecureSaveError] = useState(''),
+    [encryptedProjectFile, setEncryptedProjectFile] = useState<File | null>(
+      null,
+    ),
+    [encryptedProjectPassword, setEncryptedProjectPassword] = useState(''),
+    [encryptedProjectError, setEncryptedProjectError] = useState(''),
     [selectionRepairOpen, setSelectionRepairOpen] = useState<
       'patch' | 'remove' | 'fill' | 'move' | null
     >(null),
@@ -1719,31 +1734,33 @@ export default function Home() {
   const renderLayers = (
     ctx: CanvasRenderingContext2D,
     stack = layersRef.current,
+    surfaceMap = surfacesRef.current,
+    size = doc,
   ) => {
     const visible = (layer: LayerMeta) =>
       layer.visible && !ancestors(stack, layer.id).some((p) => !p.visible);
-    ctx.clearRect(0, 0, doc.w, doc.h);
+    ctx.clearRect(0, 0, size.w, size.h);
     for (const layer of [...treeOrder(stack)].reverse()) {
       if (!visible(layer) || layer.kind === 'group') continue;
       if (layer.kind === 'adjustment') {
-        applyAdjustment(
-          ctx,
-          layer,
-          doc.w,
-          doc.h,
-          surfacesRef.current.get(layer.id),
-        );
+        applyAdjustment(ctx, layer, size.w, size.h, surfaceMap.get(layer.id));
         continue;
       }
-      const surface = surfacesRef.current.get(layer.id);
+      const surface = surfaceMap.get(layer.id);
       if (!surface) continue;
       if (!layer.clipping && !layer.blendIf && !(layer.blend in extraBlends)) {
-        drawLayer(ctx, layer, surface, doc.w, doc.h);
+        drawLayer(ctx, layer, surface, size.w, size.h);
         continue;
       }
-      const source = makeCanvas(doc.w, doc.h),
+      const source = makeCanvas(size.w, size.h),
         sc = source.getContext('2d')!;
-      drawLayer(sc, { ...layer, blend: 'source-over' }, surface, doc.w, doc.h);
+      drawLayer(
+        sc,
+        { ...layer, blend: 'source-over' },
+        surface,
+        size.w,
+        size.h,
+      );
       if (layer.clipping) {
         const siblings = stack.filter((l) => l.parentId === layer.parentId),
           index = siblings.findIndex((l) => l.id === layer.id),
@@ -1757,18 +1774,18 @@ export default function Home() {
           source.width = source.height = 1;
           continue;
         }
-        const baseSurface = surfacesRef.current.get(base.id);
+        const baseSurface = surfaceMap.get(base.id);
         if (!baseSurface) {
           source.width = source.height = 1;
           continue;
         }
-        const alpha = makeCanvas(doc.w, doc.h);
+        const alpha = makeCanvas(size.w, size.h);
         drawLayer(
           alpha.getContext('2d')!,
           { ...base, opacity: 100, fill: 100, blend: 'source-over' },
           baseSurface,
-          doc.w,
-          doc.h,
+          size.w,
+          size.h,
         );
         sc.globalCompositeOperation = 'destination-in';
         sc.drawImage(alpha, 0, 0);
@@ -2002,6 +2019,198 @@ export default function Home() {
       `Snapshot ${historyRef.current.filter((x) => x.named).length + 1}`,
     );
     setSnapshotOpen(true);
+  };
+  const snapshotSurfaceMap = (snap: Snapshot) => {
+    const map = new Map<string, LayerSurface>();
+    for (const item of snap.surfaces)
+      map.set(item.id, {
+        pixels: restoreTiles(item.pixels),
+        mask: item.mask ? restoreTiles(item.mask) : undefined,
+      });
+    return map;
+  };
+  const releaseSurfaceMap = (map: Map<string, LayerSurface>) => {
+    for (const surface of map.values()) {
+      surface.pixels.width = surface.pixels.height = 1;
+      if (surface.mask) surface.mask.width = surface.mask.height = 1;
+    }
+  };
+  const openHistoryBranch = (index: number) => {
+    const snap = historyRef.current[index];
+    if (!snap) return;
+    const needed = snap.surfaces.reduce(
+      (total, surface) =>
+        total +
+        surface.pixels.width * surface.pixels.height +
+        (surface.mask ? surface.mask.width * surface.mask.height : 0),
+      0,
+    );
+    try {
+      requireRoom(snap.w, snap.h, needed);
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'Close another document before opening this branch.',
+      );
+      return;
+    }
+    persistActiveDocument();
+    const id = crypto.randomUUID(),
+      name = `${fileName.replace(/\s—\s.+$/, '')} — ${snap.label}`,
+      surfaces = snapshotSurfaceMap(snap),
+      branchSnapshot: Snapshot = {
+        ...snap,
+        label: `Branch from ${snap.label}`,
+        layers: snap.layers.map((layer) => ({ ...layer })),
+        selectedIds: [...(snap.selectedIds ?? [snap.selectedId])],
+        surfaces: snap.surfaces.map((surface) => ({ ...surface })),
+      },
+      next: EditorDocument = {
+        id,
+        name,
+        saved: false,
+        doc: { w: snap.w, h: snap.h },
+        layers: branchSnapshot.layers,
+        surfaces,
+        selectedId: snap.selectedId,
+        selectedIds: branchSnapshot.selectedIds,
+        history: [branchSnapshot],
+        historyIndex: 0,
+        zoom,
+        selection: snap.selectionBounds ? { ...snap.selectionBounds } : null,
+        selectionPath: snap.selectionPath?.map((point) => ({ ...point })),
+        paths: snap.paths?.map((path) => ({
+          ...path,
+          points: path.points.map((point) => ({ ...point })),
+        })),
+        layerComps: snap.layerComps?.map((comp) => ({
+          ...comp,
+          states: comp.states.map((state) => ({ ...state })),
+        })),
+        view: snap.view ? readView(snap.view) : readView(view),
+      };
+    documentStoreRef.current.set(id, next);
+    setDocuments((items) => [...items, { id, name, saved: false }]);
+    loadDocument(next);
+    setStatus(`Opened an independent branch from ${snap.label}`);
+  };
+  const compareHistoryState = (index: number) => {
+    const snap = historyRef.current[index];
+    if (!snap) return;
+    const width = Math.max(doc.w, snap.w),
+      height = Math.max(doc.h, snap.h);
+    try {
+      requireRoom(width, height, width * height);
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'Close another document before creating a comparison.',
+      );
+      return;
+    }
+    const currentCanvas = makeCanvas(width, height),
+      previousCanvas = makeCanvas(width, height),
+      snapshotMap = snapshotSurfaceMap(snap);
+    renderLayers(
+      currentCanvas.getContext('2d', { willReadFrequently: true })!,
+      layersRef.current,
+      surfacesRef.current,
+      doc,
+    );
+    renderLayers(
+      previousCanvas.getContext('2d', { willReadFrequently: true })!,
+      snap.layers,
+      snapshotMap,
+      { w: snap.w, h: snap.h },
+    );
+    const currentPixels = currentCanvas
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, width, height),
+      previousPixels = previousCanvas
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, width, height),
+      output = makeCanvas(width, height),
+      result = new ImageData(width, height);
+    for (let offset = 0; offset < result.data.length; offset += 4) {
+      const difference = Math.max(
+          Math.abs(currentPixels.data[offset] - previousPixels.data[offset]),
+          Math.abs(
+            currentPixels.data[offset + 1] - previousPixels.data[offset + 1],
+          ),
+          Math.abs(
+            currentPixels.data[offset + 2] - previousPixels.data[offset + 2],
+          ),
+          Math.abs(
+            currentPixels.data[offset + 3] - previousPixels.data[offset + 3],
+          ),
+        ),
+        luminance = Math.round(
+          (currentPixels.data[offset] +
+            currentPixels.data[offset + 1] +
+            currentPixels.data[offset + 2]) /
+            3,
+        );
+      if (difference < 2) {
+        const quiet = Math.round(luminance * 0.18);
+        result.data[offset] = quiet;
+        result.data[offset + 1] = quiet;
+        result.data[offset + 2] = quiet;
+      } else {
+        result.data[offset] = Math.min(255, 72 + difference * 2);
+        result.data[offset + 1] = Math.min(190, difference * 0.45);
+        result.data[offset + 2] = Math.min(255, 128 + difference);
+      }
+      result.data[offset + 3] = 255;
+    }
+    output.getContext('2d')!.putImageData(result, 0, 0);
+    releaseSurfaceMap(snapshotMap);
+    currentCanvas.width = currentCanvas.height = 1;
+    previousCanvas.width = previousCanvas.height = 1;
+    persistActiveDocument();
+    const id = crypto.randomUUID(),
+      layerId = crypto.randomUUID(),
+      name = `Changes — ${snap.label} to current`,
+      layer: LayerMeta = {
+        id: layerId,
+        name: 'Changed pixels',
+        visible: true,
+        opacity: 100,
+        blend: 'source-over',
+        x: 0,
+        y: 0,
+        hasMask: false,
+        maskEnabled: true,
+      },
+      comparisonSnapshot: Snapshot = {
+        label: name,
+        w: width,
+        h: height,
+        layers: [{ ...layer }],
+        selectedId: layerId,
+        selectedIds: [layerId],
+        surfaces: [{ id: layerId, pixels: captureTiles(output) }],
+      },
+      next: EditorDocument = {
+        id,
+        name,
+        saved: false,
+        doc: { w: width, h: height },
+        layers: [layer],
+        surfaces: new Map([[layerId, { pixels: output }]]),
+        selectedId: layerId,
+        selectedIds: [layerId],
+        history: [comparisonSnapshot],
+        historyIndex: 0,
+        zoom: Math.max(10, Math.min(100, Math.floor((760 / width) * 100))),
+        selection: null,
+        view: readView(view),
+      };
+    documentStoreRef.current.set(id, next);
+    setDocuments((items) => [...items, { id, name, saved: false }]);
+    loadDocument(next);
+    setStatus('Comparison opened — bright magenta marks changed pixels');
   };
   const undo = useCallback(() => {
     if (historyIndex.current > 0) restoreSnapshot(historyIndex.current - 1);
@@ -6379,7 +6588,7 @@ export default function Home() {
       setRecoveryStatus('The default save location could not be reset');
     }
   };
-  const saveProject = async () => {
+  const saveProject = async (password?: string) => {
     try {
       if (
         doc.w * doc.h > MAX_DOCUMENT_PIXELS ||
@@ -6388,7 +6597,7 @@ export default function Home() {
         setStatus(
           'Layered projects support up to 64 megapixels and 100 layers. Reduce the document before saving.',
         );
-        return;
+        return false;
       }
       let directory: LocalDirectoryHandle | null = null;
       let folderPermission: PermissionState = 'denied';
@@ -6434,9 +6643,12 @@ export default function Home() {
         selectionPath: selectionPathRef.current,
         feather,
       };
-      const blob = await packProject(project);
+      const encrypted = typeof password === 'string';
+      const blob = encrypted
+        ? await packEncryptedProject(project, password)
+        : await packProject(project);
       checkFileSize(blob.size);
-      const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}.librelayer`;
+      const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}${encrypted ? '-encrypted' : ''}.librelayer`;
       let savedToFolder = false;
       if (directory && folderPermission === 'granted') {
         let writable:
@@ -6478,27 +6690,30 @@ export default function Home() {
       setTimeout(() => recoveryTick.current(true), 0);
       setStatus(
         savedToFolder
-          ? `Integrity-protected project saved to ${directory?.name}`
-          : 'Integrity-protected project saved to Downloads — reopen with File > Open',
+          ? `${encrypted ? 'Encrypted' : 'Integrity-protected'} project saved to ${directory?.name}`
+          : `${encrypted ? 'Encrypted' : 'Integrity-protected'} project saved to Downloads — reopen with File > Open`,
       );
+      return true;
     } catch (e) {
       setPsdError(
         e instanceof Error
           ? e.message
           : 'Project could not be saved. Try a smaller document.',
       );
+      return false;
     }
   };
   const openProject = async (
     file: File,
     restore?: { id: string; saved: boolean; skipPersist: boolean },
+    password?: string,
   ) => {
     if (psdBusyRef.current) return false;
     psdBusyRef.current = true;
     setPsdBusy(true);
     try {
       checkFileSize(file.size);
-      const unpacked = await unpackProject<any>(await file.text()),
+      const unpacked = await unpackProject<any>(await file.text(), password),
         data = unpacked.project;
       if (
         !['librelayer', 'pixel-studio'].includes(data.format) ||
@@ -6756,12 +6971,24 @@ export default function Home() {
       setStatus(
         restore
           ? 'Workspace restored from this browser profile'
-          : unpacked.verified
-            ? 'Layered project reopened — integrity verified; layers, masks, paths and comps restored'
-            : 'Legacy layered project reopened — save it again to add integrity protection',
+          : unpacked.encrypted
+            ? 'Encrypted project unlocked locally — layers and masks restored'
+            : unpacked.verified
+              ? 'Layered project reopened — integrity verified; layers, masks, paths and comps restored'
+              : 'Legacy layered project reopened — save it again to add integrity protection',
       );
       return true;
     } catch (e) {
+      if (
+        e instanceof EncryptedProjectPasswordRequired ||
+        e instanceof EncryptedProjectPasswordInvalid
+      ) {
+        setEncryptedProjectFile(file);
+        setEncryptedProjectError(
+          e instanceof EncryptedProjectPasswordInvalid ? e.message : '',
+        );
+        return false;
+      }
       setPsdError(
         e instanceof Error
           ? e.message
@@ -9160,6 +9387,15 @@ export default function Home() {
               name: 'Save layered project',
               action: () => void saveProject(),
               shortcut: '⌘S',
+            },
+            {
+              name: 'Save encrypted project…',
+              action: () => {
+                setSecureSavePassword('');
+                setSecureSaveConfirmation('');
+                setSecureSaveError('');
+                setSecureSaveOpen(true);
+              },
             },
             {
               name: `Choose default save folder… (${saveLocationName})`,
@@ -12230,15 +12466,33 @@ export default function Home() {
                   content: (
                     <div className="panel-content history-list">
                       {historyRef.current.map((x, i) => (
-                        <button
-                          key={`${x.label}-${i}`}
-                          className={
-                            i === historyIndex.current ? 'current' : ''
-                          }
-                          onClick={() => restoreSnapshot(i)}
-                        >
-                          {x.label}
-                        </button>
+                        <div className="history-entry" key={`${x.label}-${i}`}>
+                          <button
+                            className={
+                              i === historyIndex.current ? 'current' : ''
+                            }
+                            onClick={() => restoreSnapshot(i)}
+                          >
+                            {x.label}
+                          </button>
+                          <button
+                            className="history-utility"
+                            aria-label={`Open ${x.label} as a branch`}
+                            title="Open as an independent document branch"
+                            onClick={() => openHistoryBranch(i)}
+                          >
+                            Branch
+                          </button>
+                          <button
+                            className="history-utility"
+                            aria-label={`Compare ${x.label} with the current state`}
+                            title="Open a pixel-accurate change map"
+                            disabled={i === historyIndex.current}
+                            onClick={() => compareHistoryState(i)}
+                          >
+                            Compare
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ),
@@ -12343,6 +12597,150 @@ export default function Home() {
               }}
             >
               Save snapshot
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={secureSaveOpen}
+        onOpenChange={(open) => {
+          setSecureSaveOpen(open);
+          if (!open) {
+            setSecureSavePassword('');
+            setSecureSaveConfirmation('');
+            setSecureSaveError('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>Save encrypted project</DialogTitle>
+          <DialogDescription>
+            LibreLayer encrypts the complete layered project on this device. The
+            password is never stored or uploaded and cannot be recovered.
+          </DialogDescription>
+          <label className="snapshot-name-field">
+            Password
+            <input
+              autoComplete="new-password"
+              type="password"
+              minLength={10}
+              value={secureSavePassword}
+              onChange={(event) => {
+                setSecureSavePassword(event.target.value);
+                setSecureSaveError('');
+              }}
+            />
+          </label>
+          <label className="snapshot-name-field">
+            Confirm password
+            <input
+              autoComplete="new-password"
+              type="password"
+              minLength={10}
+              value={secureSaveConfirmation}
+              onChange={(event) => {
+                setSecureSaveConfirmation(event.target.value);
+                setSecureSaveError('');
+              }}
+            />
+          </label>
+          {secureSaveError ? <p role="alert">{secureSaveError}</p> : null}
+          <div className="dialog-actions">
+            <Button variant="outline" onClick={() => setSecureSaveOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                secureSavePassword.length < 10 ||
+                secureSavePassword !== secureSaveConfirmation
+              }
+              onClick={async () => {
+                if (secureSavePassword !== secureSaveConfirmation) {
+                  setSecureSaveError('The passwords do not match.');
+                  return;
+                }
+                if (await saveProject(secureSavePassword))
+                  setSecureSaveOpen(false);
+              }}
+            >
+              Encrypt and save
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!encryptedProjectFile}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEncryptedProjectFile(null);
+            setEncryptedProjectPassword('');
+            setEncryptedProjectError('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>Unlock encrypted project</DialogTitle>
+          <DialogDescription>
+            Enter this project&apos;s password. Decryption happens only in this
+            browser.
+          </DialogDescription>
+          <label className="snapshot-name-field">
+            Password
+            <input
+              autoFocus
+              autoComplete="current-password"
+              type="password"
+              value={encryptedProjectPassword}
+              onChange={(event) => {
+                setEncryptedProjectPassword(event.target.value);
+                setEncryptedProjectError('');
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  encryptedProjectFile &&
+                  encryptedProjectPassword
+                )
+                  void openProject(
+                    encryptedProjectFile,
+                    undefined,
+                    encryptedProjectPassword,
+                  ).then((opened) => {
+                    if (opened) {
+                      setEncryptedProjectFile(null);
+                      setEncryptedProjectPassword('');
+                    }
+                  });
+              }}
+            />
+          </label>
+          {encryptedProjectError ? (
+            <p role="alert">{encryptedProjectError}</p>
+          ) : null}
+          <div className="dialog-actions">
+            <Button
+              variant="outline"
+              onClick={() => setEncryptedProjectFile(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!encryptedProjectPassword}
+              onClick={() => {
+                if (!encryptedProjectFile) return;
+                void openProject(
+                  encryptedProjectFile,
+                  undefined,
+                  encryptedProjectPassword,
+                ).then((opened) => {
+                  if (opened) {
+                    setEncryptedProjectFile(null);
+                    setEncryptedProjectPassword('');
+                  }
+                });
+              }}
+            >
+              Unlock locally
             </Button>
           </div>
         </DialogContent>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,6 +16,13 @@ import {
   type SuiteFeature,
   type SuiteOptions,
 } from '@/lib/pro-suite';
+import {
+  createEditRecipe,
+  parseEditRecipe,
+  planLocalEdit,
+  resolveRecipeFeature,
+  type EditRecipeStep,
+} from '@/lib/edit-recipe';
 
 export function ProSuiteDialog({
   open,
@@ -31,7 +38,10 @@ export function ProSuiteDialog({
     [secondary, setSecondary] = useState(40),
     [color, setColor] = useState('#6d8cff'),
     [text, setText] = useState('LibreLayer'),
-    [report, setReport] = useState('');
+    [report, setReport] = useState(''),
+    [plannedSteps, setPlannedSteps] = useState<EditRecipeStep[]>([]),
+    [recordedSteps, setRecordedSteps] = useState<EditRecipeStep[]>([]);
+  const importRef = useRef<HTMLInputElement>(null);
   const options = { amount, secondary, color, text };
   const sliderNumber = (value: number | readonly number[]) =>
     Number(Array.isArray(value) ? value[0] : value);
@@ -89,6 +99,48 @@ export function ProSuiteDialog({
             />
           </label>
         </div>
+        <div className="local-edit-plan">
+          <div>
+            <strong>Local edit planner</strong>
+            <span>Your prompt stays on this device.</span>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const plan = planLocalEdit(text, options);
+              setPlannedSteps(plan);
+              setReport(
+                `Planned ${plan.length} reversible ${plan.length === 1 ? 'step' : 'steps'} locally`,
+              );
+            }}
+          >
+            Plan prompt
+          </Button>
+          <Button
+            disabled={!plannedSteps.length}
+            onClick={() => {
+              plannedSteps.forEach((step) =>
+                onRun(resolveRecipeFeature(step.command), step.options),
+              );
+              setRecordedSteps((steps) =>
+                [...steps, ...plannedSteps].slice(-100),
+              );
+              setReport(`${plannedSteps.length} planned steps applied`);
+              setPlannedSteps([]);
+            }}
+          >
+            Apply plan
+          </Button>
+          {plannedSteps.length ? (
+            <ol>
+              {plannedSteps.map((step) => (
+                <li key={step.command}>
+                  {resolveRecipeFeature(step.command).label}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
         <Tabs defaultValue={groups[0]}>
           <TabsList className="pro-suite-tabs">
             {groups.map((g, i) => (
@@ -105,7 +157,13 @@ export function ProSuiteDialog({
                   <Button
                     key={feature.id}
                     variant="outline"
-                    onClick={() => onRun(feature, options)}
+                    onClick={() => {
+                      onRun(feature, options);
+                      setRecordedSteps((steps) => [
+                        ...steps.slice(-99),
+                        { command: feature.command, options: { ...options } },
+                      ]);
+                    }}
                   >
                     <span>{feature.id}</span>
                     {feature.label}
@@ -121,6 +179,80 @@ export function ProSuiteDialog({
           ))}
         </Tabs>
         <div className="pro-suite-footer">
+          <input
+            ref={importRef}
+            hidden
+            type="file"
+            accept=".libreflow,application/json"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (!file) return;
+              try {
+                if (file.size > 1_000_000)
+                  throw Error('Workflow files must be smaller than 1 MB.');
+                const recipe = parseEditRecipe(await file.text());
+                recipe.steps.forEach((step) =>
+                  onRun(resolveRecipeFeature(step.command), step.options),
+                );
+                setRecordedSteps(recipe.steps);
+                setReport(
+                  `${recipe.steps.length} local workflow steps applied from ${recipe.name}`,
+                );
+              } catch (error) {
+                setReport(
+                  error instanceof Error
+                    ? error.message
+                    : 'The workflow could not be opened.',
+                );
+              }
+            }}
+          />
+          <Button
+            variant="secondary"
+            onClick={() => importRef.current?.click()}
+          >
+            Open workflow
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!recordedSteps.length}
+            onClick={() => {
+              try {
+                const recipe = createEditRecipe(text, recordedSteps),
+                  blob = new Blob([JSON.stringify(recipe, null, 2)], {
+                    type: 'application/json',
+                  }),
+                  url = URL.createObjectURL(blob),
+                  link = document.createElement('a');
+                link.href = url;
+                link.download = `${recipe.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'workflow'}.libreflow`;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                setReport(
+                  `${recordedSteps.length} steps exported as an open local workflow`,
+                );
+              } catch (error) {
+                setReport(
+                  error instanceof Error
+                    ? error.message
+                    : 'The workflow could not be exported.',
+                );
+              }
+            }}
+          >
+            Export workflow ({recordedSteps.length})
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!recordedSteps.length}
+            onClick={() => {
+              setRecordedSteps([]);
+              setReport('Recorded workflow cleared');
+            }}
+          >
+            Clear
+          </Button>
           <Button
             variant="secondary"
             onClick={() => {

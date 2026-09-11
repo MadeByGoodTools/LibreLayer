@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { packProject, unpackProject } from '../lib/project-format.ts';
+import {
+  EncryptedProjectPasswordInvalid,
+  EncryptedProjectPasswordRequired,
+  packEncryptedProject,
+  packProject,
+  unpackProject,
+} from '../lib/project-format.ts';
 
 const fixture = {
   format: 'librelayer',
@@ -40,4 +46,27 @@ void test('legacy projects remain readable without claiming verification', async
   const result = await unpackProject<typeof fixture>(JSON.stringify(fixture));
   assert.deepEqual(result.project, fixture);
   assert.equal(result.verified, false);
+});
+
+void test('encrypted projects round-trip locally without exposing plaintext', async () => {
+  const project = {
+      name: 'Private portrait',
+      layers: [{ id: 'secret-layer' }],
+    },
+    blob = await packEncryptedProject(project, 'a strong local password'),
+    text = await blob.text();
+  assert.equal(text.includes('Private portrait'), false);
+  assert.equal(text.includes('secret-layer'), false);
+  await assert.rejects(unpackProject(text), EncryptedProjectPasswordRequired);
+  await assert.rejects(
+    unpackProject(text, 'the wrong password'),
+    EncryptedProjectPasswordInvalid,
+  );
+  const opened = await unpackProject<typeof project>(
+    text,
+    'a strong local password',
+  );
+  assert.deepEqual(opened.project, project);
+  assert.equal(opened.verified, true);
+  assert.equal(opened.encrypted, true);
 });

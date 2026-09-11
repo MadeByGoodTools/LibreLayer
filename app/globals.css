@@ -692,6 +692,26 @@ button {
 .history-list {
   overflow: auto;
 }
+.history-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 3px;
+}
+.history-entry > button:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-list .history-utility {
+  padding: 5px 6px;
+  color: #9fa1aa;
+  font-size: 10px;
+}
+.history-list .history-utility:disabled {
+  opacity: 0.35;
+}
 .history-list button.current {
   background: #555660;
   color: white;
@@ -2153,6 +2173,7 @@ button {
 
 .pro-suite-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding-top: 12px;
@@ -2161,6 +2182,33 @@ button {
 .pro-suite-footer output {
   flex: 1;
   color: var(--muted-foreground);
+}
+.local-edit-plan {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+.local-edit-plan > div {
+  display: grid;
+}
+.local-edit-plan span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.local-edit-plan ol {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+  padding-left: 22px;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 
 @media (max-width: 780px) {
@@ -2178,6 +2226,12 @@ button {
   .pro-suite-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+  .local-edit-plan {
+    grid-template-columns: 1fr;
+  }
+  .local-edit-plan ol {
+    grid-column: 1;
   }
 }
 
