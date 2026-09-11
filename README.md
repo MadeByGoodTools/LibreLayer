@@ -85,6 +85,8 @@ pnpm lint
 
 See [PSD-COMPATIBILITY.md](PSD-COMPATIBILITY.md) for the current PSD and PSB compatibility notes. Third-party decoder and renderer notices are included in [public/editor-import-licenses.txt](public/editor-import-licenses.txt).
 
+The [user manual](docs/USER-MANUAL.md), [format matrix](docs/FORMAT-MATRIX.md), [privacy and storage model](docs/PRIVACY-AND-STORAGE.md), and [migration policy](docs/MIGRATION-POLICY.md) document the current verified scope and limits.
+
 ## Contributing
 
 Issues and pull requests are welcome. Please preserve non-destructive editing behavior, familiar shortcuts, keyboard access, and device-local privacy. Add or update tests when changing an editing workflow.
