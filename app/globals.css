@@ -2663,6 +2663,36 @@ button {
   color: #c7c8cd;
   font-size: 11px;
 }
+.mask-transform-controls {
+  display: grid;
+  gap: 5px;
+  padding-top: 2px;
+  border-top: 1px solid #414249;
+}
+.mask-transform-controls summary {
+  cursor: pointer;
+  padding: 3px 0;
+  color: #e5e6ea;
+  font-size: 11px;
+  font-weight: 700;
+}
+.mask-transform-controls[open] summary {
+  margin-bottom: 4px;
+}
+.mask-transform-controls > label {
+  display: flex;
+  justify-content: space-between;
+  color: #c7c8cd;
+  font-size: 11px;
+}
+.mask-transform-controls > button {
+  min-height: 25px;
+  border: 1px solid #4a4b52;
+  border-radius: 4px;
+  background: #24252b;
+  color: #d8d9de;
+  font-size: 10px;
+}
 .layer-comps summary {
   cursor: pointer;
   color: #e5e6ea;

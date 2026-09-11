@@ -38,7 +38,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Complete layer effects with contours, global light, scaling, and copy/paste.
 - [ ] Reference-quality full blend-mode math in gamma and linear light.
 - [ ] Complete knockout, group isolation, and nested clipping behavior.
-- [ ] Mask density, feather, edge refinement, overlay, and independent transforms.
+- [x] Mask density, feather, live overlay, direct edge refinement, and independent position, rotation, and two-axis transforms.
 - [ ] Cross-document layer copying without rasterization.
 - [ ] Pixel-reference compositing fixture suite.
 

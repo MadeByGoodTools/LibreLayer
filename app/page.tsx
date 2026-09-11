@@ -212,6 +212,11 @@ import {
   type FillLayerRecipe,
 } from '@/lib/fill-layer';
 import {
+  defaultMaskTransform,
+  normalizeMaskTransform,
+  type MaskTransform,
+} from '@/lib/mask-transform';
+import {
   createPsdCompatibilityReport,
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
@@ -336,6 +341,8 @@ type LayerMeta = {
   maskDensity?: number;
   maskFeather?: number;
   maskLinked?: boolean;
+  maskOverlay?: boolean;
+  maskTransform?: MaskTransform;
   vectorMask?: Point[];
   colorLabel?: string;
   id: string;
@@ -821,6 +828,33 @@ const maskToAlpha = (mask: HTMLCanvasElement, density = 100, feather = 0) => {
   }
   return out;
 };
+const positionedMaskAlpha = (
+  mask: HTMLCanvasElement,
+  density: number | undefined,
+  feather: number | undefined,
+  transform: Partial<MaskTransform> | undefined,
+  width: number,
+  height: number,
+) => {
+  const alpha = maskToAlpha(mask, density, feather),
+    recipe = normalizeMaskTransform(transform);
+  if (
+    recipe.x === 0 &&
+    recipe.y === 0 &&
+    recipe.rotation === 0 &&
+    recipe.scaleX === 1 &&
+    recipe.scaleY === 1
+  )
+    return alpha;
+  const placed = makeCanvas(width, height),
+    context = placed.getContext('2d')!;
+  context.translate(recipe.x + width / 2, recipe.y + height / 2);
+  context.rotate((recipe.rotation * Math.PI) / 180);
+  context.scale(recipe.scaleX, recipe.scaleY);
+  context.drawImage(alpha, -width / 2, -height / 2);
+  alpha.width = alpha.height = 1;
+  return placed;
+};
 const sliderNumber = (value: number | readonly number[]) =>
   Number(Array.isArray(value) ? value[0] : value);
 const nativeFillCanvas = (input: FillLayerRecipe, w: number, h: number) => {
@@ -1014,10 +1048,13 @@ const drawLayer = (
     pc.rotate(((layer.rotation ?? 0) * Math.PI) / 180);
     pc.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
     pc.drawImage(source, -w / 2, -h / 2);
-    const alpha = maskToAlpha(
+    const alpha = positionedMaskAlpha(
       surface.mask,
       layer.maskDensity,
       layer.maskFeather,
+      layer.maskTransform,
+      w,
+      h,
     );
     pc.globalCompositeOperation = 'destination-in';
     pc.filter = 'none';
@@ -1198,11 +1235,17 @@ const applyAdjustment = (
     blurred.width = blurred.height = 1;
   }
   if (layer.hasMask && layer.maskEnabled && surface?.mask) {
-    const alpha = maskToAlpha(
-      surface.mask,
-      layer.maskDensity,
-      layer.maskFeather,
-    );
+    const alpha =
+      layer.maskLinked === false
+        ? positionedMaskAlpha(
+            surface.mask,
+            layer.maskDensity,
+            layer.maskFeather,
+            layer.maskTransform,
+            w,
+            h,
+          )
+        : maskToAlpha(surface.mask, layer.maskDensity, layer.maskFeather);
     ac.globalCompositeOperation = 'destination-in';
     ac.filter = 'none';
     ac.drawImage(alpha, 0, 0);
@@ -1430,6 +1473,9 @@ export default function Home() {
     [snapshotOpen, setSnapshotOpen] = useState(false),
     [snapshotName, setSnapshotName] = useState(''),
     [selectMaskOpen, setSelectMaskOpen] = useState(false),
+    [selectMaskTarget, setSelectMaskTarget] = useState<
+      'selection' | 'layer-mask'
+    >('selection'),
     [selectionManagerOpen, setSelectionManagerOpen] = useState(false),
     [geometryOpen, setGeometryOpen] = useState(false),
     [layerStudioOpen, setLayerStudioOpen] = useState(false),
@@ -1872,6 +1918,42 @@ export default function Home() {
     if (out.height !== doc.h) out.height = doc.h;
     const ctx = out.getContext('2d', { willReadFrequently: true })!;
     renderLayers(ctx);
+    const activeLayer = layersRef.current.find(
+        (layer) => layer.id === selectedRef.current,
+      ),
+      activeSurface = activeLayer && surfacesRef.current.get(activeLayer.id);
+    if (
+      activeLayer?.maskOverlay &&
+      activeLayer.hasMask &&
+      activeSurface?.mask
+    ) {
+      const transform =
+          activeLayer.maskLinked === false
+            ? activeLayer.maskTransform
+            : {
+                x: activeLayer.x,
+                y: activeLayer.y,
+                rotation: activeLayer.rotation,
+                scaleX: activeLayer.scaleX,
+                scaleY: activeLayer.scaleY,
+              },
+        alpha = positionedMaskAlpha(
+          activeSurface.mask,
+          activeLayer.maskDensity,
+          activeLayer.maskFeather,
+          transform,
+          doc.w,
+          doc.h,
+        ),
+        overlay = makeCanvas(doc.w, doc.h),
+        overlayContext = overlay.getContext('2d')!;
+      overlayContext.fillStyle = 'rgba(255,35,85,.48)';
+      overlayContext.fillRect(0, 0, doc.w, doc.h);
+      overlayContext.globalCompositeOperation = 'destination-out';
+      overlayContext.drawImage(alpha, 0, 0);
+      ctx.drawImage(overlay, 0, 0);
+      alpha.width = alpha.height = overlay.width = overlay.height = 1;
+    }
     if (soloChannel && channelView !== 'rgb') {
       const image = ctx.getImageData(0, 0, doc.w, doc.h);
       for (let i = 0; i < image.data.length; i += 4) {
@@ -1933,6 +2015,7 @@ export default function Home() {
     retouchMode,
     zoom,
     size,
+    selectedId,
   ]);
   useEffect(() => {
     render();
@@ -2694,8 +2777,23 @@ export default function Home() {
         editing !== 'mask')
     )
       return null;
-    if (editing === 'mask' && surface.mask)
+    if (editing === 'mask' && surface.mask) {
+      if (meta.maskLinked === false) {
+        const transform = normalizeMaskTransform(meta.maskTransform);
+        return {
+          ctx: surface.mask.getContext('2d')!,
+          meta: {
+            ...meta,
+            x: transform.x,
+            y: transform.y,
+            rotation: transform.rotation,
+            scaleX: transform.scaleX,
+            scaleY: transform.scaleY,
+          },
+        };
+      }
       return { ctx: surface.mask.getContext('2d')!, meta };
+    }
     return { ctx: surface.pixels.getContext('2d')!, meta };
   };
   const toLayerPoint = (meta: LayerMeta, p: Point) => {
@@ -4234,6 +4332,8 @@ export default function Home() {
         maskDensity: 100,
         maskFeather: 0,
         maskLinked: true,
+        maskOverlay: false,
+        maskTransform: defaultMaskTransform(),
       });
     }
     setEditing('mask');
@@ -4811,9 +4911,45 @@ export default function Home() {
       surface = meta && surfacesRef.current.get(meta.id);
     if (!meta || isLocked(meta.id) || !surface?.mask) return;
     delete surface.mask;
-    patchLayer(meta.id, { hasMask: false }, 'Remove layer mask');
+    patchLayer(
+      meta.id,
+      {
+        hasMask: false,
+        maskOverlay: false,
+        maskTransform: defaultMaskTransform(),
+      },
+      'Remove layer mask',
+    );
     setEditing('pixels');
     render();
+  };
+  const updateMaskTransform = (
+    patch: Partial<MaskTransform>,
+    record?: string,
+  ) => {
+    const meta = selected();
+    if (!meta?.hasMask) return;
+    patchLayer(
+      meta.id,
+      {
+        maskLinked: false,
+        maskTransform: normalizeMaskTransform({
+          ...normalizeMaskTransform(meta.maskTransform),
+          ...patch,
+        }),
+      },
+      record,
+    );
+  };
+  const openActiveMaskRefinement = () => {
+    const meta = selected(),
+      surface = meta && surfacesRef.current.get(meta.id);
+    if (!meta?.hasMask || !surface?.mask) {
+      setStatus('Select a layer with a raster mask first');
+      return;
+    }
+    setSelectMaskTarget('layer-mask');
+    setSelectMaskOpen(true);
   };
   const filter = (kind: 'grayscale' | 'invert' | 'brightness' | 'sharpen') => {
     const target = targetContext();
@@ -4953,6 +5089,8 @@ export default function Home() {
           maskDensity: 100,
           maskFeather: 0,
           maskLinked: true,
+          maskOverlay: false,
+          maskTransform: defaultMaskTransform(),
           kind: 'fill',
           parentId: parent,
           fillLayer,
@@ -6017,11 +6155,25 @@ export default function Home() {
     image.src = item.mask;
   };
   const applySelectAndMask = () => {
-    if (!selectionRef.current) {
+    const maskLayer = selectMaskTarget === 'layer-mask' ? selected() : null,
+      maskSurface = maskLayer && surfacesRef.current.get(maskLayer.id);
+    if (selectMaskTarget === 'selection' && !selectionRef.current) {
       setStatus('Make a selection before opening Select and Mask.');
       return;
     }
-    const base = selectionMask(doc.w, doc.h, 0, 0);
+    if (selectMaskTarget === 'layer-mask' && !maskSurface?.mask) {
+      setStatus('The selected layer no longer has a raster mask.');
+      setSelectMaskOpen(false);
+      return;
+    }
+    const base = makeCanvas(doc.w, doc.h);
+    if (maskSurface?.mask)
+      base.getContext('2d')!.drawImage(maskSurface.mask, 0, 0);
+    else {
+      const selectionSource = selectionMask(doc.w, doc.h, 0, 0);
+      base.getContext('2d')!.drawImage(selectionSource, 0, 0);
+      selectionSource.width = selectionSource.height = 1;
+    }
     let out = base;
     if (refineRadius > 0) {
       const grown = expandMask(out, Math.round(refineRadius)),
@@ -6031,7 +6183,14 @@ export default function Home() {
         const visible = makeCanvas(doc.w, doc.h);
         drawLayer(
           visible.getContext('2d')!,
-          { ...activeLayer, opacity: 100, fill: 100, blend: 'source-over' },
+          {
+            ...activeLayer,
+            opacity: 100,
+            fill: 100,
+            blend: 'source-over',
+            hasMask:
+              selectMaskTarget === 'layer-mask' ? false : activeLayer.hasMask,
+          },
           surface,
           doc.w,
           doc.h,
@@ -6111,6 +6270,15 @@ export default function Home() {
       }
     }
     if (out !== base) base.width = base.height = 1;
+    if (selectMaskTarget === 'layer-mask' && maskLayer && maskSurface) {
+      maskSurface.mask = out;
+      patchLayer(maskLayer.id, { hasMask: true, maskEnabled: true });
+      snapshot('Refine layer mask');
+      render();
+      setStatus('Layer mask edge refined nondestructively');
+      setSelectMaskOpen(false);
+      return;
+    }
     commitSelectionMask(out, 'Select and Mask refined', 'replace');
     snapshot('Select and Mask');
     render();
@@ -7062,6 +7230,31 @@ export default function Home() {
         )
           throw Error('Invalid mask link');
         if (
+          item.maskOverlay !== undefined &&
+          typeof item.maskOverlay !== 'boolean'
+        )
+          throw Error('Invalid mask overlay');
+        if (item.maskTransform !== undefined) {
+          const transform = item.maskTransform;
+          if (
+            !transform ||
+            typeof transform !== 'object' ||
+            !Number.isFinite(transform.x) ||
+            Math.abs(transform.x) > 1_000_000 ||
+            !Number.isFinite(transform.y) ||
+            Math.abs(transform.y) > 1_000_000 ||
+            !Number.isFinite(transform.rotation) ||
+            Math.abs(transform.rotation) > 360 ||
+            !Number.isFinite(transform.scaleX) ||
+            transform.scaleX < 0.01 ||
+            transform.scaleX > 100 ||
+            !Number.isFinite(transform.scaleY) ||
+            transform.scaleY < 0.01 ||
+            transform.scaleY > 100
+          )
+            throw Error('Invalid mask transform');
+        }
+        if (
           item.vectorMask !== undefined &&
           (!Array.isArray(item.vectorMask) ||
             item.vectorMask.length > 10000 ||
@@ -7316,6 +7509,8 @@ export default function Home() {
       maskDensity: 100,
       maskFeather: 0,
       maskLinked: true,
+      maskOverlay: false,
+      maskTransform: defaultMaskTransform(),
     });
     setEditing('mask');
     snapshot('Selection to mask');
@@ -7341,8 +7536,36 @@ export default function Home() {
     const meta = selected(),
       surface = meta && surfacesRef.current.get(meta.id);
     if (!meta || isLocked(meta.id) || !surface?.mask) return;
-    const ctx = surface.pixels.getContext('2d')!,
-      alpha = maskToAlpha(surface.mask, meta.maskDensity, meta.maskFeather);
+    if (meta.kind === 'fill' && meta.fillLayer) {
+      const renderedFill = nativeFillCanvas(meta.fillLayer, doc.w, doc.h),
+        fillContext = surface.pixels.getContext('2d')!;
+      fillContext.clearRect(0, 0, doc.w, doc.h);
+      fillContext.drawImage(renderedFill, 0, 0);
+      renderedFill.width = renderedFill.height = 1;
+    }
+    const ctx = surface.pixels.getContext('2d')!;
+    let alpha =
+      meta.maskLinked === false
+        ? positionedMaskAlpha(
+            surface.mask,
+            meta.maskDensity,
+            meta.maskFeather,
+            meta.maskTransform,
+            doc.w,
+            doc.h,
+          )
+        : maskToAlpha(surface.mask, meta.maskDensity, meta.maskFeather);
+    if (meta.maskLinked === false) {
+      const local = makeCanvas(doc.w, doc.h),
+        localContext = local.getContext('2d')!;
+      localContext.translate(doc.w / 2, doc.h / 2);
+      localContext.scale(1 / (meta.scaleX || 1), 1 / (meta.scaleY || 1));
+      localContext.rotate((-(meta.rotation ?? 0) * Math.PI) / 180);
+      localContext.translate(-meta.x - doc.w / 2, -meta.y - doc.h / 2);
+      localContext.drawImage(alpha, 0, 0);
+      alpha.width = alpha.height = 1;
+      alpha = local;
+    }
     ctx.save();
     ctx.globalCompositeOperation = 'destination-in';
     ctx.drawImage(alpha, 0, 0);
@@ -7355,6 +7578,11 @@ export default function Home() {
       maskDensity: 100,
       maskFeather: 0,
       maskLinked: true,
+      maskOverlay: false,
+      maskTransform: defaultMaskTransform(),
+      ...(meta.kind === 'fill'
+        ? { kind: 'pixel' as const, fillLayer: undefined }
+        : {}),
     });
     setEditing('pixels');
     snapshot('Apply layer mask');
@@ -8926,16 +9154,19 @@ export default function Home() {
           setStatus('Select a layer with a raster mask first');
           return;
         }
-        const moved = makeCanvas(doc.w, doc.h);
-        moved
-          .getContext('2d')!
-          .drawImage(
-            surface.mask,
-            Math.round((options.amount - 50) * 2),
-            Math.round((options.secondary - 50) * 2),
-          );
-        surface.mask = moved;
-        patchLayer(meta.id, { maskLinked: false }, 'Move mask independently');
+        const transform = normalizeMaskTransform(meta.maskTransform);
+        patchLayer(
+          meta.id,
+          {
+            maskLinked: false,
+            maskTransform: normalizeMaskTransform({
+              ...transform,
+              x: transform.x + Math.round((options.amount - 50) * 2),
+              y: transform.y + Math.round((options.secondary - 50) * 2),
+            }),
+          },
+          'Move mask independently',
+        );
         render();
         setStatus('Mask moved independently from layer pixels');
         return;
@@ -9922,10 +10153,14 @@ export default function Home() {
             { separator: true },
             {
               name: 'Select and Mask…',
-              action: () =>
-                selectionRef.current
-                  ? setSelectMaskOpen(true)
-                  : setStatus('Make a selection first'),
+              action: () => {
+                if (!selectionRef.current) {
+                  setStatus('Make a selection first');
+                  return;
+                }
+                setSelectMaskTarget('selection');
+                setSelectMaskOpen(true);
+              },
             },
             {
               name: 'Save selection…',
@@ -11150,7 +11385,12 @@ export default function Home() {
                 onClick={() =>
                   patchLayer(
                     active.id,
-                    { maskLinked: active.maskLinked === false },
+                    {
+                      maskLinked: active.maskLinked === false,
+                      maskTransform: normalizeMaskTransform(
+                        active.maskTransform,
+                      ),
+                    },
                     active.maskLinked === false
                       ? 'Link layer mask'
                       : 'Unlink layer mask',
@@ -11158,6 +11398,28 @@ export default function Home() {
                 }
               >
                 {active.maskLinked === false ? 'Link mask' : 'Unlink mask'}
+              </Button>
+              <Button
+                size="sm"
+                variant={active.maskOverlay ? 'default' : 'ghost'}
+                onClick={() =>
+                  patchLayer(
+                    active.id,
+                    { maskOverlay: !active.maskOverlay },
+                    active.maskOverlay
+                      ? 'Hide mask overlay'
+                      : 'Show mask overlay',
+                  )
+                }
+              >
+                {active.maskOverlay ? 'Hide overlay' : 'Show overlay'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={openActiveMaskRefinement}
+              >
+                Refine edge…
               </Button>
             </>
           )}
@@ -12102,7 +12364,60 @@ export default function Home() {
                               }
                               onValueCommitted={() => snapshot('Mask density')}
                             />
+                            <label>
+                              Mask feather {active.maskFeather ?? 0}px
+                            </label>
+                            <Slider
+                              aria-label="Properties mask feather"
+                              min={0}
+                              max={250}
+                              value={active.maskFeather ?? 0}
+                              onValueChange={(v) =>
+                                patchLayer(active.id, {
+                                  maskFeather: sliderNumber(v),
+                                })
+                              }
+                              onValueCommitted={() => snapshot('Mask feather')}
+                            />
                             <div className="property-buttons">
+                              <button
+                                onClick={() =>
+                                  patchLayer(
+                                    active.id,
+                                    {
+                                      maskLinked: active.maskLinked === false,
+                                      maskTransform: normalizeMaskTransform(
+                                        active.maskTransform,
+                                      ),
+                                    },
+                                    active.maskLinked === false
+                                      ? 'Link layer mask'
+                                      : 'Unlink layer mask',
+                                  )
+                                }
+                              >
+                                {active.maskLinked === false
+                                  ? 'Link mask'
+                                  : 'Unlink mask'}
+                              </button>
+                              <button
+                                onClick={() =>
+                                  patchLayer(
+                                    active.id,
+                                    { maskOverlay: !active.maskOverlay },
+                                    active.maskOverlay
+                                      ? 'Hide mask overlay'
+                                      : 'Show mask overlay',
+                                  )
+                                }
+                              >
+                                {active.maskOverlay
+                                  ? 'Hide overlay'
+                                  : 'Show overlay'}
+                              </button>
+                              <button onClick={openActiveMaskRefinement}>
+                                Refine edge
+                              </button>
                               <button onClick={applyMask}>Apply mask</button>
                               <button onClick={removeMask}>Delete mask</button>
                               <button
@@ -12119,6 +12434,134 @@ export default function Home() {
                                   : 'Enable mask'}
                               </button>
                             </div>
+                            {active.maskLinked === false && (
+                              <details className="mask-transform-controls" open>
+                                <summary>Independent mask transform</summary>
+                                <div className="transform-grid">
+                                  <label>
+                                    X
+                                    <input
+                                      aria-label="Mask horizontal position"
+                                      type="number"
+                                      value={
+                                        normalizeMaskTransform(
+                                          active.maskTransform,
+                                        ).x
+                                      }
+                                      onChange={(event) =>
+                                        updateMaskTransform({
+                                          x: Number(event.target.value),
+                                        })
+                                      }
+                                      onBlur={() => snapshot('Move layer mask')}
+                                    />
+                                  </label>
+                                  <label>
+                                    Y
+                                    <input
+                                      aria-label="Mask vertical position"
+                                      type="number"
+                                      value={
+                                        normalizeMaskTransform(
+                                          active.maskTransform,
+                                        ).y
+                                      }
+                                      onChange={(event) =>
+                                        updateMaskTransform({
+                                          y: Number(event.target.value),
+                                        })
+                                      }
+                                      onBlur={() => snapshot('Move layer mask')}
+                                    />
+                                  </label>
+                                </div>
+                                <label>
+                                  Rotation{' '}
+                                  {
+                                    normalizeMaskTransform(active.maskTransform)
+                                      .rotation
+                                  }
+                                  °
+                                </label>
+                                <Slider
+                                  aria-label="Mask rotation"
+                                  min={-180}
+                                  max={180}
+                                  value={
+                                    normalizeMaskTransform(active.maskTransform)
+                                      .rotation
+                                  }
+                                  onValueChange={(value) =>
+                                    updateMaskTransform({
+                                      rotation: sliderNumber(value),
+                                    })
+                                  }
+                                  onValueCommitted={() =>
+                                    snapshot('Rotate layer mask')
+                                  }
+                                />
+                                <label>
+                                  Horizontal scale{' '}
+                                  {Math.round(
+                                    normalizeMaskTransform(active.maskTransform)
+                                      .scaleX * 100,
+                                  )}
+                                  %
+                                </label>
+                                <Slider
+                                  aria-label="Mask horizontal scale"
+                                  min={1}
+                                  max={400}
+                                  value={
+                                    normalizeMaskTransform(active.maskTransform)
+                                      .scaleX * 100
+                                  }
+                                  onValueChange={(value) =>
+                                    updateMaskTransform({
+                                      scaleX: sliderNumber(value) / 100,
+                                    })
+                                  }
+                                  onValueCommitted={() =>
+                                    snapshot('Scale layer mask horizontally')
+                                  }
+                                />
+                                <label>
+                                  Vertical scale{' '}
+                                  {Math.round(
+                                    normalizeMaskTransform(active.maskTransform)
+                                      .scaleY * 100,
+                                  )}
+                                  %
+                                </label>
+                                <Slider
+                                  aria-label="Mask vertical scale"
+                                  min={1}
+                                  max={400}
+                                  value={
+                                    normalizeMaskTransform(active.maskTransform)
+                                      .scaleY * 100
+                                  }
+                                  onValueChange={(value) =>
+                                    updateMaskTransform({
+                                      scaleY: sliderNumber(value) / 100,
+                                    })
+                                  }
+                                  onValueCommitted={() =>
+                                    snapshot('Scale layer mask vertically')
+                                  }
+                                />
+                                <button
+                                  onClick={() =>
+                                    updateMaskTransform(
+                                      defaultMaskTransform(),
+                                      'Reset mask transform',
+                                    )
+                                  }
+                                >
+                                  Reset mask transform
+                                </button>
+                              </details>
+                            )}
                           </div>
                         )}
                         <div className="property-buttons">
@@ -13732,8 +14175,10 @@ export default function Home() {
         <DialogContent className="select-mask-dialog">
           <DialogTitle>Select and Mask</DialogTitle>
           <DialogDescription>
-            Refine the active selection edge, including fine hair-like detail,
-            then optionally remove color fringe from edge pixels.
+            Refine the active{' '}
+            {selectMaskTarget === 'layer-mask' ? 'layer mask' : 'selection'}
+            edge, including fine hair-like detail, then optionally remove color
+            fringe from edge pixels.
           </DialogDescription>
           {[
             ['Edge detection radius', refineRadius, setRefineRadius, 0, 20],
@@ -13779,7 +14224,11 @@ export default function Home() {
             </label>
           )}
           <div className="dialog-actions">
-            <Button onClick={applySelectAndMask}>Apply refinement</Button>
+            <Button onClick={applySelectAndMask}>
+              {selectMaskTarget === 'layer-mask'
+                ? 'Apply to layer mask'
+                : 'Apply refinement'}
+            </Button>
             <Button variant="outline" onClick={() => setSelectMaskOpen(false)}>
               Cancel
             </Button>
