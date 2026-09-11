@@ -156,3 +156,17 @@ void test('tone curve zones independently lift and lower their handles', () => {
   assert.ok(toneCurveValue(0.25, 50, 0) > 0.25);
   assert.ok(toneCurveValue(0.75, 0, -50) < 0.75);
 });
+
+void test('per-channel curves change only their targeted color channel', () => {
+  const adjusted = adjustHighDepth(
+    {
+      width: 1,
+      height: 1,
+      data: new Float32Array([0.25, 0.25, 0.25, 1]),
+    },
+    { redCurveShadows: 50 },
+  );
+  assert.ok(adjusted[0] > 0.25);
+  assert.equal(adjusted[1], 0.25);
+  assert.equal(adjusted[2], 0.25);
+});

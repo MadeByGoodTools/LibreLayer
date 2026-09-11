@@ -34,6 +34,12 @@ export type HighDepthAdjustments = {
   levelsGamma?: number;
   curveShadows?: number;
   curveHighlights?: number;
+  redCurveShadows?: number;
+  redCurveHighlights?: number;
+  greenCurveShadows?: number;
+  greenCurveHighlights?: number;
+  blueCurveShadows?: number;
+  blueCurveHighlights?: number;
   exposure?: number;
   exposureGamma?: number;
   balanceCyanRed?: number;
@@ -147,6 +153,21 @@ export function adjustHighDepth(
     red = remap(red);
     green = remap(green);
     blue = remap(blue);
+    red = toneCurveValue(
+      red,
+      settings.redCurveShadows,
+      settings.redCurveHighlights,
+    );
+    green = toneCurveValue(
+      green,
+      settings.greenCurveShadows,
+      settings.greenCurveHighlights,
+    );
+    blue = toneCurveValue(
+      blue,
+      settings.blueCurveShadows,
+      settings.blueCurveHighlights,
+    );
 
     red += ((settings.balanceCyanRed ?? 0) / 100) * 0.25;
     green += ((settings.balanceMagentaGreen ?? 0) / 100) * 0.25;

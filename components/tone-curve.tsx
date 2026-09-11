@@ -1,27 +1,37 @@
 'use client';
 
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { toneCurveValue } from '@/lib/high-depth';
+import { toneCurveValue, type HighDepthAdjustments } from '@/lib/high-depth';
 
 const clamp = (value: number) => Math.max(-100, Math.min(100, value));
 const pointValue = (input: number, shadows: number, highlights: number) =>
   Math.max(0, Math.min(1, toneCurveValue(input, shadows, highlights)));
 
 export function ToneCurve({
-  shadows,
-  highlights,
+  adjustments,
   onChange,
   onCommit,
 }: {
-  shadows: number;
-  highlights: number;
-  onChange: (key: 'curveShadows' | 'curveHighlights', value: number) => void;
+  adjustments: HighDepthAdjustments;
+  onChange: (key: keyof HighDepthAdjustments, value: number) => void;
   onCommit: () => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<'shadows' | 'highlights' | null>(
     null,
   );
+  const [channel, setChannel] = useState<'rgb' | 'red' | 'green' | 'blue'>(
+    'rgb',
+  );
+  const keys = {
+    rgb: ['curveShadows', 'curveHighlights'],
+    red: ['redCurveShadows', 'redCurveHighlights'],
+    green: ['greenCurveShadows', 'greenCurveHighlights'],
+    blue: ['blueCurveShadows', 'blueCurveHighlights'],
+  } as const;
+  const [shadowKey, highlightKey] = keys[channel];
+  const shadows = Number(adjustments[shadowKey] ?? 0);
+  const highlights = Number(adjustments[highlightKey] ?? 0);
   const curve = Array.from({ length: 65 }, (_, index) => {
     const x = index / 64;
     return `${index ? 'L' : 'M'} ${x * 256} ${(1 - pointValue(x, shadows, highlights)) * 160}`;
@@ -46,7 +56,7 @@ export function ToneCurve({
     );
     const weight = input * (1 - input);
     onChange(
-      point === 'shadows' ? 'curveShadows' : 'curveHighlights',
+      point === 'shadows' ? shadowKey : highlightKey,
       clamp(Math.round(((1 - y - base) / weight) * 100)),
     );
   };
@@ -68,7 +78,7 @@ export function ToneCurve({
               current +
                 (event.key === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 10 : 1),
             );
-    onChange(point === 'shadows' ? 'curveShadows' : 'curveHighlights', next);
+    onChange(point === 'shadows' ? shadowKey : highlightKey, next);
     onCommit();
   };
   const handle = (point: 'shadows' | 'highlights', input: number) => {
@@ -82,7 +92,9 @@ export function ToneCurve({
         r="6"
         role="slider"
         tabIndex={0}
-        aria-label={`${point === 'shadows' ? 'Shadow' : 'Highlight'} curve point`}
+        aria-label={`${channel === 'rgb' ? 'RGB' : channel} ${
+          point === 'shadows' ? 'shadow' : 'highlight'
+        } curve point`}
         aria-valuemin={-100}
         aria-valuemax={100}
         aria-valuenow={value}
@@ -110,7 +122,28 @@ export function ToneCurve({
         <strong>Tone curve</strong>
         <span>Drag points vertically</span>
       </div>
-      <svg ref={svgRef} viewBox="0 0 256 160" aria-label="Editable tone curve">
+      <div
+        className="tone-curve-channels"
+        role="group"
+        aria-label="Curve channel"
+      >
+        {(['rgb', 'red', 'green', 'blue'] as const).map((item) => (
+          <button
+            key={item}
+            className={channel === item ? `active ${item}` : item}
+            aria-pressed={channel === item}
+            onClick={() => setChannel(item)}
+          >
+            {item === 'rgb' ? 'RGB' : item[0].toUpperCase()}
+          </button>
+        ))}
+      </div>
+      <svg
+        ref={svgRef}
+        className={`curve-${channel}`}
+        viewBox="0 0 256 160"
+        aria-label={`Editable ${channel === 'rgb' ? 'RGB' : channel} tone curve`}
+      >
         <path
           className="tone-curve-grid"
           d="M 64 0 V 160 M 128 0 V 160 M 192 0 V 160 M 0 40 H 256 M 0 80 H 256 M 0 120 H 256"
@@ -122,7 +155,8 @@ export function ToneCurve({
       </svg>
       <div className="tone-curve-values">
         <span>
-          Shadows {shadows > 0 ? '+' : ''}
+          {channel === 'rgb' ? 'RGB' : channel[0].toUpperCase()} shadows{' '}
+          {shadows > 0 ? '+' : ''}
           {shadows}
         </span>
         <span>

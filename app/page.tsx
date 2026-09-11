@@ -4213,6 +4213,12 @@ export default function Home() {
           levelsGamma: 1,
           curveShadows: 0,
           curveHighlights: 0,
+          redCurveShadows: 0,
+          redCurveHighlights: 0,
+          greenCurveShadows: 0,
+          greenCurveHighlights: 0,
+          blueCurveShadows: 0,
+          blueCurveHighlights: 0,
           balanceCyanRed: 0,
           balanceMagentaGreen: 0,
           balanceYellowBlue: 0,
@@ -12172,14 +12178,7 @@ export default function Home() {
                                   Combined floating-point recipe · editable
                                 </p>
                                 <ToneCurve
-                                  shadows={Number(
-                                    active.precisionAdjustment?.curveShadows ??
-                                      0,
-                                  )}
-                                  highlights={Number(
-                                    active.precisionAdjustment
-                                      ?.curveHighlights ?? 0,
-                                  )}
+                                  adjustments={active.precisionAdjustment ?? {}}
                                   onChange={updatePrecisionAdjustment}
                                   onCommit={() =>
                                     snapshot('Tone curve adjustment')

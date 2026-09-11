@@ -990,6 +990,36 @@ button {
   color: #eff1f4;
   font-size: 13px;
 }
+.tone-curve-channels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+.tone-curve-channels button {
+  min-height: 25px;
+  border: 1px solid #3e424a;
+  border-radius: 4px;
+  background: #202228;
+  color: #aeb3bd;
+  font-size: 11px;
+}
+.tone-curve-channels button.active {
+  border-color: #8da8da;
+  background: #303845;
+  color: white;
+}
+.tone-curve-channels button.active.red {
+  border-color: #ff777b;
+  color: #ffb1b4;
+}
+.tone-curve-channels button.active.green {
+  border-color: #5ed795;
+  color: #9aebbd;
+}
+.tone-curve-channels button.active.blue {
+  border-color: #6d9cff;
+  color: #aec7ff;
+}
 .tone-curve-editor svg {
   display: block;
   width: 100%;
@@ -1018,12 +1048,30 @@ button {
   stroke: #d9e4ff;
   stroke-width: 2;
 }
+.tone-curve-editor svg.curve-red .tone-curve-line {
+  stroke: #ff777b;
+}
+.tone-curve-editor svg.curve-green .tone-curve-line {
+  stroke: #5ed795;
+}
+.tone-curve-editor svg.curve-blue .tone-curve-line {
+  stroke: #6d9cff;
+}
 .tone-curve-editor circle {
   fill: #76a5ff;
   stroke: #f5f8ff;
   stroke-width: 2;
   cursor: ns-resize;
   vector-effect: non-scaling-stroke;
+}
+.tone-curve-editor svg.curve-red circle {
+  fill: #f05c63;
+}
+.tone-curve-editor svg.curve-green circle {
+  fill: #3ec67b;
+}
+.tone-curve-editor svg.curve-blue circle {
+  fill: #4e83f1;
 }
 .tone-curve-editor circle:hover,
 .tone-curve-editor circle:focus,
