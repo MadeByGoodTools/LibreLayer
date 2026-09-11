@@ -242,6 +242,10 @@ import {
   type LuminosityRange,
 } from '@/lib/selection-ranges';
 import {
+  semanticPixelWeight,
+  type SemanticSelectionTarget,
+} from '@/lib/semantic-selection';
+import {
   effectContourAlpha,
   effectOffset,
   normalizeLayerEffects,
@@ -1577,6 +1581,7 @@ export default function Home() {
       useState<SelectMaskPreviewMode>('overlay'),
     [selectMaskPreviewOpacity, setSelectMaskPreviewOpacity] = useState(55),
     [selectMaskSmartRadius, setSelectMaskSmartRadius] = useState(true),
+    [selectMaskRefineHair, setSelectMaskRefineHair] = useState(false),
     [selectMaskOutput, setSelectMaskOutput] = useState<
       'selection' | 'layer-mask' | 'new-layer-mask'
     >('selection'),
@@ -1619,7 +1624,8 @@ export default function Home() {
     [refineFeather, setRefineFeather] = useState(1),
     [refineShift, setRefineShift] = useState(0),
     [decontaminate, setDecontaminate] = useState(true),
-    [decontaminateAmount, setDecontaminateAmount] = useState(50);
+    [decontaminateAmount, setDecontaminateAmount] = useState(50),
+    [semanticSensitivity, setSemanticSensitivity] = useState(55);
   useEffect(() => {
     if (!rawDevelop) {
       setRawPreview('');
@@ -6585,6 +6591,47 @@ export default function Home() {
       if (out !== base) out.width = out.height = 1;
       out = softened;
     }
+    if (selectMaskRefineHair && selectMaskPreviewSourceRef.current) {
+      const search = expandMask(out, Math.max(3, Math.round(refineRadius + 2))),
+        refined = makeCanvas(doc.w, doc.h),
+        refinedContext = refined.getContext('2d')!,
+        outputPixels = out
+          .getContext('2d', { willReadFrequently: true })!
+          .getImageData(0, 0, doc.w, doc.h),
+        searchPixels = search
+          .getContext('2d', { willReadFrequently: true })!
+          .getImageData(0, 0, doc.w, doc.h),
+        sourcePixels = selectMaskPreviewSourceRef.current
+          .getContext('2d', { willReadFrequently: true })!
+          .getImageData(0, 0, doc.w, doc.h);
+      for (let y = 0; y < doc.h; y++)
+        for (let x = 0; x < doc.w; x++) {
+          const index = (y * doc.w + x) * 4;
+          if (searchPixels.data[index + 3] <= outputPixels.data[index + 3])
+            continue;
+          const weight = semanticPixelWeight(
+            'hair',
+            sourcePixels.data[index],
+            sourcePixels.data[index + 1],
+            sourcePixels.data[index + 2],
+            sourcePixels.data[index + 3],
+            x / Math.max(1, doc.w - 1),
+            y / Math.max(1, doc.h - 1),
+            semanticSensitivity,
+          );
+          const alpha = Math.round(searchPixels.data[index + 3] * weight);
+          if (alpha <= outputPixels.data[index + 3]) continue;
+          outputPixels.data[index] =
+            outputPixels.data[index + 1] =
+            outputPixels.data[index + 2] =
+              255;
+          outputPixels.data[index + 3] = alpha;
+        }
+      refinedContext.putImageData(outputPixels, 0, 0);
+      search.width = search.height = 1;
+      if (out !== base) out.width = out.height = 1;
+      out = refined;
+    }
     if (out !== base) base.width = base.height = 1;
     if (selectMaskTarget === 'layer-mask' && maskLayer && maskSurface) {
       maskSurface.mask = out;
@@ -6819,6 +6866,29 @@ export default function Home() {
     context.putImageData(image, 0, 0);
     commitSelectionMask(mask, `${label} · ${count.toLocaleString()} pixels`);
     snapshot(label);
+  };
+  const selectSemanticRange = (target: SemanticSelectionTarget) => {
+    const source = renderedActivePixels();
+    if (!source) {
+      setStatus('Select an image or fill layer first');
+      return;
+    }
+    const label = `${target[0].toUpperCase()}${target.slice(1)} mask selected locally`;
+    commitWeightedRange(
+      source,
+      (index, x, y) =>
+        semanticPixelWeight(
+          target,
+          source.data[index],
+          source.data[index + 1],
+          source.data[index + 2],
+          source.data[index + 3],
+          x / Math.max(1, doc.w - 1),
+          y / Math.max(1, doc.h - 1),
+          semanticSensitivity,
+        ),
+      label,
+    );
   };
   const selectSimilar = () => {
     if (!selectionRef.current) {
@@ -10742,6 +10812,14 @@ export default function Home() {
               shortcut: 'W',
             },
             { name: 'Select Subject', action: aiSelectSubject },
+            { name: 'Select People', action: aiSelectSubject },
+            { name: 'Select Sky', action: () => selectSemanticRange('sky') },
+            { name: 'Select Hair', action: () => selectSemanticRange('hair') },
+            { name: 'Select Skin', action: () => selectSemanticRange('skin') },
+            {
+              name: 'Select Clothing',
+              action: () => selectSemanticRange('clothing'),
+            },
             {
               name: 'Object Selection',
               action: () => {
@@ -15075,6 +15153,16 @@ export default function Home() {
                   />
                   Smart Radius
                 </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={selectMaskRefineHair}
+                    onChange={(event) =>
+                      setSelectMaskRefineHair(event.target.checked)
+                    }
+                  />
+                  Refine Hair
+                </label>
                 {[
                   ['Radius', refineRadius, setRefineRadius, 0, 20],
                   ['Smooth', refineSmooth, setRefineSmooth, 0, 20],
@@ -15095,6 +15183,19 @@ export default function Home() {
                     <strong>{value as number}</strong>
                   </label>
                 ))}
+                <label>
+                  <span>Detail sensitivity</span>
+                  <Slider
+                    aria-label="Semantic detail sensitivity"
+                    min={0}
+                    max={100}
+                    value={semanticSensitivity}
+                    onValueChange={(value) =>
+                      setSemanticSensitivity(sliderNumber(value))
+                    }
+                  />
+                  <strong>{semanticSensitivity}%</strong>
+                </label>
               </section>
               <section>
                 <h4>Output settings</h4>
