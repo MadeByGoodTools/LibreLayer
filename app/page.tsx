@@ -11320,6 +11320,8 @@ export default function Home() {
             view={view}
             onView={updateView}
             tool={tool}
+            sourceCanvas={displayRef.current}
+            revision={layers}
           >
             <canvas
               ref={displayRef}

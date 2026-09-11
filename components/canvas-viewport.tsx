@@ -1,23 +1,721 @@
 'use client';
-import {forwardRef,useEffect,useImperativeHandle,useRef,useState,type ReactNode} from 'react';
-import {Button} from '@/components/ui/button';
-import {Dialog,DialogContent,DialogTitle,DialogDescription} from '@/components/ui/dialog';
-import {clampZoom,documentPoint,fitZoom,type EditorView} from '@/lib/editor-view';
-export type ViewportHandle={point:(x:number,y:number)=>{x:number;y:number};fit:()=>void;zoomAt:(zoom:number,x?:number,y?:number)=>void};
-type Props={w:number;h:number;zoom:number;onZoom:(n:number)=>void;view:EditorView;onView:(v:EditorView)=>void;tool:string;children:ReactNode};
-export const CanvasViewport=forwardRef<ViewportHandle,Props>(function CanvasViewport({w,h,zoom,onZoom,view,onView,tool,children},ref){
- const stage=useRef<HTMLDivElement>(null),latest=useRef({w,h,zoom,view,onView,onZoom,tool});latest.current={w,h,zoom,view,onView,onZoom,tool};
- const [space,setSpace]=useState(false),spaceRef=useRef(false),[guidesOpen,setGuidesOpen]=useState(false),[axis,setAxis]=useState<'x'|'y'>('x'),[position,setPosition]=useState('0');
- const drag=useRef<{x:number;y:number;panX:number;panY:number;rotation:number;angle:number;mode:'pan'|'rotate'}|null>(null),guideDrag=useRef<{id:string;axis:'x'|'y'}|null>(null);
- const point=(x:number,y:number)=>documentPoint(x,y,stage.current!.getBoundingClientRect(),w,h,zoom,view);
- const zoomAt=(value:number,x?:number,y?:number)=>{const rect=stage.current!.getBoundingClientRect(),cx=x??rect.left+rect.width/2,cy=y??rect.top+rect.height/2,next=clampZoom(value),factor=next/zoom;onView({...view,x:cx-rect.left-rect.width/2-(cx-rect.left-rect.width/2-view.x)*factor,y:cy-rect.top-rect.height/2-(cy-rect.top-rect.height/2-view.y)*factor});onZoom(next)};
- const fit=()=>{const rect=stage.current!.getBoundingClientRect();onView({...view,x:0,y:0});onZoom(fitZoom(w,h,rect.width,rect.height,view.rotation))};
- useImperativeHandle(ref,()=>({point,fit,zoomAt}));
- useEffect(()=>{const down=(e:KeyboardEvent)=>{if(e.code!=='Space'||e.ctrlKey||e.metaKey||e.altKey||(e.target as HTMLElement)?.closest?.('input,textarea,select,[contenteditable=true],[role=dialog]'))return;e.preventDefault();spaceRef.current=true;setSpace(true)},up=()=>{spaceRef.current=false;setSpace(false);drag.current=null};const keyup=(e:KeyboardEvent)=>{if(e.code==='Space')up()};window.addEventListener('keydown',down);window.addEventListener('keyup',keyup);window.addEventListener('blur',up);return()=>{window.removeEventListener('keydown',down);window.removeEventListener('keyup',keyup);window.removeEventListener('blur',up)}},[]);
- useEffect(()=>{const el=stage.current!;const wheel=(e:WheelEvent)=>{e.preventDefault();const p=latest.current;if(e.ctrlKey||e.metaKey||e.altKey){const rect=el.getBoundingClientRect(),z=clampZoom(p.zoom*Math.exp(-e.deltaY*.002)),ratio=z/p.zoom,x=e.clientX-rect.left-rect.width/2,y=e.clientY-rect.top-rect.height/2;p.onView({...p.view,x:x-(x-p.view.x)*ratio,y:y-(y-p.view.y)*ratio});p.onZoom(z)}else p.onView({...p.view,x:p.view.x-e.deltaX,y:p.view.y-e.deltaY})};el.addEventListener('wheel',wheel,{passive:false});return()=>el.removeEventListener('wheel',wheel)},[]);
- const ruler=(extent:number,vertical:boolean)=>{const scale=zoom/100,axis=vertical?'y':'x',origin=view.rulerOrigin[axis],pixelsPerUnit=view.units==='%'?extent/100:view.units==='in'?view.resolution:view.units==='cm'?view.resolution/2.54:view.units==='mm'?view.resolution/25.4:1,desired=70/(scale*pixelsPerUnit),power=10**Math.floor(Math.log10(Math.max(.001,desired))),unitStep=([1,2,5,10].find(v=>v*power>=desired)??10)*power,step=unitStep*pixelsPerUnit,ticks=[];for(let p=Math.ceil((0-origin)/step)*step+origin;p<=extent&&ticks.length<500;p+=step)if(p>=0)ticks.push(p);const suffix=view.units==='px'?'':view.units;return <svg onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(view.guides.length>=100)return;const rect=e.currentTarget.getBoundingClientRect(),screenPosition=vertical?e.clientY-rect.top:e.clientX-rect.left,position=Math.max(0,Math.min(extent,screenPosition/scale)),id=crypto.randomUUID();onView({...view,guides:[...view.guides,{id,axis,position}]});guideDrag.current={id,axis}}} aria-label={vertical?'Vertical ruler — drag for horizontal guide':'Horizontal ruler — drag for vertical guide'} className={vertical?'document-ruler vertical':'document-ruler horizontal'} width={vertical?24:extent*scale} height={vertical?extent*scale:24}>{ticks.map(p=><g key={p} transform={vertical?`translate(0 ${p*scale})`:`translate(${p*scale} 0)`}><line x1={vertical?17:0} y1={vertical?0:17} x2={vertical?24:0} y2={vertical?0:24}/><text x={vertical?2:3} y={vertical?12:12}>{Math.round((p-origin)/pixelsPerUnit*100)/100}{suffix}</text></g>)}</svg>};
- return <div className="viewport-shell"><div className="viewport-toolbar"><Button size="sm" variant="ghost" onClick={fit}>Fit</Button><Button size="sm" variant="ghost" onClick={()=>zoomAt(100)}>100%</Button><label>View °<input aria-label="Canvas view rotation" type="number" min={-180} max={180} value={Math.round(view.rotation)} onChange={e=>{const n=Number(e.target.value);if(Number.isFinite(n))onView({...view,rotation:Math.max(-180,Math.min(180,n))})}}/></label><Button size="sm" variant="ghost" onClick={()=>onView({...view,x:0,y:0,rotation:0})}>Reset view</Button><Button size="sm" variant={view.rulers?'secondary':'ghost'} aria-pressed={view.rulers} onClick={()=>onView({...view,rulers:!view.rulers})}>Rulers</Button><Button size="sm" variant="ghost" onClick={()=>setGuidesOpen(true)}>Guides & grid</Button><span>Space-drag to pan · Alt-scroll to zoom</span></div>
- <div ref={stage} className={`canvas-stage navigation-stage ${space||tool==='hand'?'hand-view':''}`} aria-label="Canvas viewport" onPointerDownCapture={e=>{if(e.button!==1&&!spaceRef.current&&tool!=='hand'&&tool!=='rotateView')return;e.preventDefault();e.stopPropagation();const r=stage.current!.getBoundingClientRect();drag.current={x:e.clientX,y:e.clientY,panX:view.x,panY:view.y,rotation:view.rotation,angle:Math.atan2(e.clientY-r.top-r.height/2-view.y,e.clientX-r.left-r.width/2-view.x),mode:tool==='rotateView'&&!spaceRef.current&&e.button!==1?'rotate':'pan'};e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMoveCapture={e=>{const gd=guideDrag.current;if(gd){e.preventDefault();e.stopPropagation();const p=point(e.clientX,e.clientY),extent=gd.axis==='x'?w:h,position=Math.max(0,Math.min(extent,gd.axis==='x'?p.x:p.y));onView({...view,guides:view.guides.map(g=>g.id===gd.id?{...g,position}:g)});return}const d=drag.current;if(!d)return;e.preventDefault();e.stopPropagation();if(d.mode==='pan')onView({...view,x:d.panX+e.clientX-d.x,y:d.panY+e.clientY-d.y});else{const r=stage.current!.getBoundingClientRect(),angle=Math.atan2(e.clientY-r.top-r.height/2-view.y,e.clientX-r.left-r.width/2-view.x);let rotation=d.rotation+(angle-d.angle)*180/Math.PI;if(e.shiftKey)rotation=Math.round(rotation/15)*15;onView({...view,rotation:((rotation+180)%360+360)%360-180})}}} onPointerUpCapture={e=>{if(guideDrag.current){guideDrag.current=null;e.stopPropagation()}if(drag.current){e.stopPropagation();drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)}}} onPointerCancelCapture={()=>{drag.current=null;guideDrag.current=null}}>
- <div className="canvas-frame navigation-frame" style={{width:w*zoom/100,height:h*zoom/100,left:`calc(50% + ${view.x}px)`,top:`calc(50% + ${view.y}px)`,transform:`translate(-50%, -50%) rotate(${view.rotation}deg)`}}>{children}{view.grid&&view.gridSize*zoom/100>=4&&<div className="document-grid" style={{backgroundSize:`${view.gridSize*zoom/100}px ${view.gridSize*zoom/100}px`}}/>}{view.guides.map(g=><button key={g.id} aria-label={`${g.axis==='x'?'Vertical':'Horizontal'} guide at ${Math.round(g.position)} pixels`} onPointerDown={e=>{e.preventDefault();e.stopPropagation();guideDrag.current={id:g.id,axis:g.axis};e.currentTarget.setPointerCapture(e.pointerId)}} onDoubleClick={()=>onView({...view,guides:view.guides.filter(x=>x.id!==g.id)})} className={`document-guide ${g.axis}`} style={g.axis==='x'?{left:g.position/w*100+'%'}:{top:g.position/h*100+'%'}}/>)}{view.rulers&&<>{ruler(w,false)}{ruler(h,true)}</>}</div></div>
- <Dialog open={guidesOpen} onOpenChange={setGuidesOpen}><DialogContent onKeyDown={e=>e.stopPropagation()}><DialogTitle>Guides & grid</DialogTitle><DialogDescription>Drag from either ruler to add a guide, drag a guide to move it, or double-click it to remove it. Guides never appear in exports.</DialogDescription><label>Ruler units<select value={view.units} onChange={e=>onView({...view,units:e.target.value as typeof view.units})}><option value="px">Pixels</option><option value="%">Percent</option><option value="in">Inches</option><option value="cm">Centimetres</option><option value="mm">Millimetres</option></select></label><label>Resolution (pixels/inch)<input aria-label="Document resolution" type="number" min={1} max={2400} value={view.resolution} onChange={e=>{const n=+e.target.value;if(Number.isFinite(n)&&n>=1&&n<=2400)onView({...view,resolution:n})}}/></label><div className="guide-entry"><input aria-label="Horizontal ruler origin" type="number" value={view.rulerOrigin.x} onChange={e=>onView({...view,rulerOrigin:{...view.rulerOrigin,x:+e.target.value||0}})}/><input aria-label="Vertical ruler origin" type="number" value={view.rulerOrigin.y} onChange={e=>onView({...view,rulerOrigin:{...view.rulerOrigin,y:+e.target.value||0}})}/><Button variant="outline" onClick={()=>onView({...view,rulerOrigin:{x:0,y:0}})}>Reset origin</Button></div><label><input type="checkbox" checked={view.grid} onChange={e=>onView({...view,grid:e.target.checked})}/> Show grid</label><label>Grid spacing (px)<input type="number" min={1} max={10000} value={view.gridSize} onChange={e=>{const n=+e.target.value;if(Number.isFinite(n)&&n>=1&&n<=10000)onView({...view,gridSize:n})}}/></label><label><input type="checkbox" checked={view.snap} onChange={e=>onView({...view,snap:e.target.checked})}/> Snap to guides, grid and document bounds</label><div className="guide-entry"><select aria-label="Guide orientation" value={axis} onChange={e=>setAxis(e.target.value as 'x'|'y')}><option value="x">Vertical</option><option value="y">Horizontal</option></select><input aria-label="Guide position in pixels" type="number" min={0} max={axis==='x'?w:h} value={position} onChange={e=>setPosition(e.target.value)}/><Button disabled={view.guides.length>=100||position===''||!Number.isFinite(+position)||+position<0||+position>(axis==='x'?w:h)} onClick={()=>onView({...view,guides:[...view.guides,{id:crypto.randomUUID(),axis,position:+position}]})}>Add guide</Button></div><div className="guide-list">{view.guides.map(g=><div key={g.id}><span>{g.axis==='x'?'Vertical':'Horizontal'} · {Math.round(g.position*100)/100}px</span><Button variant="ghost" onClick={()=>onView({...view,guides:view.guides.filter(x=>x.id!==g.id)})}>Remove</Button></div>)}</div><Button variant="outline" disabled={!view.guides.length} onClick={()=>onView({...view,guides:[]})}>Clear guides</Button><Button onClick={()=>setGuidesOpen(false)}>Done</Button></DialogContent></Dialog></div>;
-});
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import {
+  clampZoom,
+  documentPoint,
+  fitZoom,
+  type EditorView,
+} from '@/lib/editor-view';
+export type ViewportHandle = {
+  point: (x: number, y: number) => { x: number; y: number };
+  fit: () => void;
+  zoomAt: (zoom: number, x?: number, y?: number) => void;
+};
+type Props = {
+  w: number;
+  h: number;
+  zoom: number;
+  onZoom: (n: number) => void;
+  view: EditorView;
+  onView: (v: EditorView) => void;
+  tool: string;
+  children: ReactNode;
+  sourceCanvas?: HTMLCanvasElement | null;
+  revision?: unknown;
+};
+export const CanvasViewport = forwardRef<ViewportHandle, Props>(
+  function CanvasViewport(
+    {
+      w,
+      h,
+      zoom,
+      onZoom,
+      view,
+      onView,
+      tool,
+      children,
+      sourceCanvas,
+      revision,
+    },
+    ref,
+  ) {
+    const stage = useRef<HTMLDivElement>(null),
+      latest = useRef({ w, h, zoom, view, onView, onZoom, tool });
+    latest.current = { w, h, zoom, view, onView, onZoom, tool };
+    const [space, setSpace] = useState(false),
+      spaceRef = useRef(false),
+      [guidesOpen, setGuidesOpen] = useState(false),
+      [axis, setAxis] = useState<'x' | 'y'>('x'),
+      [position, setPosition] = useState('0');
+    const [comparisonMode, setComparisonMode] = useState<
+        'off' | 'split' | 'side'
+      >('off'),
+      [referenceReady, setReferenceReady] = useState(false),
+      [splitPosition, setSplitPosition] = useState(50),
+      referenceSource = useRef<HTMLCanvasElement | null>(null),
+      referenceView = useRef<HTMLCanvasElement | null>(null),
+      currentView = useRef<HTMLCanvasElement | null>(null);
+    const drag = useRef<{
+        x: number;
+        y: number;
+        panX: number;
+        panY: number;
+        rotation: number;
+        angle: number;
+        mode: 'pan' | 'rotate';
+      } | null>(null),
+      guideDrag = useRef<{ id: string; axis: 'x' | 'y' } | null>(null);
+    const point = (x: number, y: number) =>
+      documentPoint(
+        x,
+        y,
+        stage.current!.getBoundingClientRect(),
+        w,
+        h,
+        zoom,
+        view,
+      );
+    const zoomAt = (value: number, x?: number, y?: number) => {
+      const rect = stage.current!.getBoundingClientRect(),
+        cx = x ?? rect.left + rect.width / 2,
+        cy = y ?? rect.top + rect.height / 2,
+        next = clampZoom(value),
+        factor = next / zoom;
+      onView({
+        ...view,
+        x:
+          cx -
+          rect.left -
+          rect.width / 2 -
+          (cx - rect.left - rect.width / 2 - view.x) * factor,
+        y:
+          cy -
+          rect.top -
+          rect.height / 2 -
+          (cy - rect.top - rect.height / 2 - view.y) * factor,
+      });
+      onZoom(next);
+    };
+    const fit = () => {
+      const rect = stage.current!.getBoundingClientRect();
+      onView({ ...view, x: 0, y: 0 });
+      onZoom(fitZoom(w, h, rect.width, rect.height, view.rotation));
+    };
+    useImperativeHandle(ref, () => ({ point, fit, zoomAt }));
+    useEffect(() => {
+      const down = (e: KeyboardEvent) => {
+          if (
+            e.code !== 'Space' ||
+            e.ctrlKey ||
+            e.metaKey ||
+            e.altKey ||
+            (e.target as HTMLElement)?.closest?.(
+              'input,textarea,select,[contenteditable=true],[role=dialog]',
+            )
+          )
+            return;
+          e.preventDefault();
+          spaceRef.current = true;
+          setSpace(true);
+        },
+        up = () => {
+          spaceRef.current = false;
+          setSpace(false);
+          drag.current = null;
+        };
+      const keyup = (e: KeyboardEvent) => {
+        if (e.code === 'Space') up();
+      };
+      window.addEventListener('keydown', down);
+      window.addEventListener('keyup', keyup);
+      window.addEventListener('blur', up);
+      return () => {
+        window.removeEventListener('keydown', down);
+        window.removeEventListener('keyup', keyup);
+        window.removeEventListener('blur', up);
+      };
+    }, []);
+    useEffect(() => {
+      const el = stage.current!;
+      const wheel = (e: WheelEvent) => {
+        e.preventDefault();
+        const p = latest.current;
+        if (e.ctrlKey || e.metaKey || e.altKey) {
+          const rect = el.getBoundingClientRect(),
+            z = clampZoom(p.zoom * Math.exp(-e.deltaY * 0.002)),
+            ratio = z / p.zoom,
+            x = e.clientX - rect.left - rect.width / 2,
+            y = e.clientY - rect.top - rect.height / 2;
+          p.onView({
+            ...p.view,
+            x: x - (x - p.view.x) * ratio,
+            y: y - (y - p.view.y) * ratio,
+          });
+          p.onZoom(z);
+        } else
+          p.onView({
+            ...p.view,
+            x: p.view.x - e.deltaX,
+            y: p.view.y - e.deltaY,
+          });
+      };
+      el.addEventListener('wheel', wheel, { passive: false });
+      return () => el.removeEventListener('wheel', wheel);
+    }, []);
+    useEffect(() => {
+      if (!referenceReady || comparisonMode === 'off') return;
+      const frame = requestAnimationFrame(() => {
+        const reference = referenceSource.current;
+        if (reference && referenceView.current) {
+          const target = referenceView.current;
+          target.width = w;
+          target.height = h;
+          const ctx = target.getContext('2d')!;
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(reference, 0, 0, w, h);
+        }
+        if (sourceCanvas && currentView.current) {
+          const target = currentView.current;
+          target.width = w;
+          target.height = h;
+          const ctx = target.getContext('2d')!;
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(sourceCanvas, 0, 0, w, h);
+        }
+      });
+      return () => cancelAnimationFrame(frame);
+    }, [comparisonMode, referenceReady, revision, sourceCanvas, w, h]);
+    const captureReference = () => {
+      if (!sourceCanvas) return;
+      const copy = document.createElement('canvas');
+      copy.width = sourceCanvas.width;
+      copy.height = sourceCanvas.height;
+      copy.getContext('2d')!.drawImage(sourceCanvas, 0, 0);
+      if (referenceSource.current)
+        referenceSource.current.width = referenceSource.current.height = 1;
+      referenceSource.current = copy;
+      setReferenceReady(true);
+      setComparisonMode('split');
+    };
+    const ruler = (extent: number, vertical: boolean) => {
+      const scale = zoom / 100,
+        axis = vertical ? 'y' : 'x',
+        origin = view.rulerOrigin[axis],
+        pixelsPerUnit =
+          view.units === '%'
+            ? extent / 100
+            : view.units === 'in'
+              ? view.resolution
+              : view.units === 'cm'
+                ? view.resolution / 2.54
+                : view.units === 'mm'
+                  ? view.resolution / 25.4
+                  : 1,
+        desired = 70 / (scale * pixelsPerUnit),
+        power = 10 ** Math.floor(Math.log10(Math.max(0.001, desired))),
+        unitStep =
+          ([1, 2, 5, 10].find((v) => v * power >= desired) ?? 10) * power,
+        step = unitStep * pixelsPerUnit,
+        ticks = [];
+      for (
+        let p = Math.ceil((0 - origin) / step) * step + origin;
+        p <= extent && ticks.length < 500;
+        p += step
+      )
+        if (p >= 0) ticks.push(p);
+      const suffix = view.units === 'px' ? '' : view.units;
+      return (
+        <svg
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (view.guides.length >= 100) return;
+            const rect = e.currentTarget.getBoundingClientRect(),
+              screenPosition = vertical
+                ? e.clientY - rect.top
+                : e.clientX - rect.left,
+              position = Math.max(0, Math.min(extent, screenPosition / scale)),
+              id = crypto.randomUUID();
+            onView({
+              ...view,
+              guides: [...view.guides, { id, axis, position }],
+            });
+            guideDrag.current = { id, axis };
+          }}
+          aria-label={
+            vertical
+              ? 'Vertical ruler — drag for horizontal guide'
+              : 'Horizontal ruler — drag for vertical guide'
+          }
+          className={
+            vertical ? 'document-ruler vertical' : 'document-ruler horizontal'
+          }
+          width={vertical ? 24 : extent * scale}
+          height={vertical ? extent * scale : 24}
+        >
+          {ticks.map((p) => (
+            <g
+              key={p}
+              transform={
+                vertical
+                  ? `translate(0 ${p * scale})`
+                  : `translate(${p * scale} 0)`
+              }
+            >
+              <line
+                x1={vertical ? 17 : 0}
+                y1={vertical ? 0 : 17}
+                x2={vertical ? 24 : 0}
+                y2={vertical ? 0 : 24}
+              />
+              <text x={vertical ? 2 : 3} y={vertical ? 12 : 12}>
+                {Math.round(((p - origin) / pixelsPerUnit) * 100) / 100}
+                {suffix}
+              </text>
+            </g>
+          ))}
+        </svg>
+      );
+    };
+    return (
+      <div className="viewport-shell">
+        <div className="viewport-toolbar">
+          <Button size="sm" variant="ghost" onClick={fit}>
+            Fit
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => zoomAt(100)}>
+            100%
+          </Button>
+          <label>
+            View °
+            <input
+              aria-label="Canvas view rotation"
+              type="number"
+              min={-180}
+              max={180}
+              value={Math.round(view.rotation)}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n))
+                  onView({
+                    ...view,
+                    rotation: Math.max(-180, Math.min(180, n)),
+                  });
+              }}
+            />
+          </label>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onView({ ...view, x: 0, y: 0, rotation: 0 })}
+          >
+            Reset view
+          </Button>
+          <Button
+            size="sm"
+            variant={view.rulers ? 'secondary' : 'ghost'}
+            aria-pressed={view.rulers}
+            onClick={() => onView({ ...view, rulers: !view.rulers })}
+          >
+            Rulers
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setGuidesOpen(true)}>
+            Guides & grid
+          </Button>
+          <Button
+            size="sm"
+            variant={referenceReady ? 'secondary' : 'ghost'}
+            onClick={captureReference}
+          >
+            Set reference
+          </Button>
+          <select
+            aria-label="Reference comparison"
+            value={comparisonMode}
+            disabled={!referenceReady}
+            onChange={(e) =>
+              setComparisonMode(e.target.value as typeof comparisonMode)
+            }
+          >
+            <option value="off">Compare off</option>
+            <option value="split">Split view</option>
+            <option value="side">Side by side</option>
+          </select>
+          {referenceReady && comparisonMode === 'split' && (
+            <input
+              className="comparison-position"
+              aria-label="Reference split position"
+              type="range"
+              min={5}
+              max={95}
+              value={splitPosition}
+              onChange={(e) => setSplitPosition(+e.target.value)}
+            />
+          )}
+          <span>Space-drag to pan · Alt-scroll to zoom</span>
+        </div>
+        <div
+          ref={stage}
+          className={`canvas-stage navigation-stage ${space || tool === 'hand' ? 'hand-view' : ''}`}
+          aria-label="Canvas viewport"
+          onPointerDownCapture={(e) => {
+            if (
+              e.button !== 1 &&
+              !spaceRef.current &&
+              tool !== 'hand' &&
+              tool !== 'rotateView'
+            )
+              return;
+            e.preventDefault();
+            e.stopPropagation();
+            const r = stage.current!.getBoundingClientRect();
+            drag.current = {
+              x: e.clientX,
+              y: e.clientY,
+              panX: view.x,
+              panY: view.y,
+              rotation: view.rotation,
+              angle: Math.atan2(
+                e.clientY - r.top - r.height / 2 - view.y,
+                e.clientX - r.left - r.width / 2 - view.x,
+              ),
+              mode:
+                tool === 'rotateView' && !spaceRef.current && e.button !== 1
+                  ? 'rotate'
+                  : 'pan',
+            };
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }}
+          onPointerMoveCapture={(e) => {
+            const gd = guideDrag.current;
+            if (gd) {
+              e.preventDefault();
+              e.stopPropagation();
+              const p = point(e.clientX, e.clientY),
+                extent = gd.axis === 'x' ? w : h,
+                position = Math.max(
+                  0,
+                  Math.min(extent, gd.axis === 'x' ? p.x : p.y),
+                );
+              onView({
+                ...view,
+                guides: view.guides.map((g) =>
+                  g.id === gd.id ? { ...g, position } : g,
+                ),
+              });
+              return;
+            }
+            const d = drag.current;
+            if (!d) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (d.mode === 'pan')
+              onView({
+                ...view,
+                x: d.panX + e.clientX - d.x,
+                y: d.panY + e.clientY - d.y,
+              });
+            else {
+              const r = stage.current!.getBoundingClientRect(),
+                angle = Math.atan2(
+                  e.clientY - r.top - r.height / 2 - view.y,
+                  e.clientX - r.left - r.width / 2 - view.x,
+                );
+              let rotation = d.rotation + ((angle - d.angle) * 180) / Math.PI;
+              if (e.shiftKey) rotation = Math.round(rotation / 15) * 15;
+              onView({
+                ...view,
+                rotation: ((((rotation + 180) % 360) + 360) % 360) - 180,
+              });
+            }
+          }}
+          onPointerUpCapture={(e) => {
+            if (guideDrag.current) {
+              guideDrag.current = null;
+              e.stopPropagation();
+            }
+            if (drag.current) {
+              e.stopPropagation();
+              drag.current = null;
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            }
+          }}
+          onPointerCancelCapture={() => {
+            drag.current = null;
+            guideDrag.current = null;
+          }}
+        >
+          <div
+            className="canvas-frame navigation-frame"
+            style={{
+              width: (w * zoom) / 100,
+              height: (h * zoom) / 100,
+              left: `calc(50% + ${view.x}px)`,
+              top: `calc(50% + ${view.y}px)`,
+              transform: `translate(-50%, -50%) rotate(${view.rotation}deg)`,
+            }}
+          >
+            {children}
+            {referenceReady && comparisonMode === 'split' && (
+              <div
+                className="reference-comparison split"
+                aria-label="Split reference comparison"
+                style={{ width: `${splitPosition}%` }}
+              >
+                <canvas
+                  ref={referenceView}
+                  style={{ width: `${10000 / splitPosition}%` }}
+                />
+                <span>Reference</span>
+                <i />
+              </div>
+            )}
+            {referenceReady && comparisonMode === 'side' && (
+              <div
+                className="reference-comparison side-by-side"
+                aria-label="Side-by-side reference comparison"
+              >
+                <div>
+                  <canvas ref={referenceView} />
+                  <span>Reference</span>
+                </div>
+                <div>
+                  <canvas ref={currentView} />
+                  <span>Current</span>
+                </div>
+              </div>
+            )}
+            {view.grid && (view.gridSize * zoom) / 100 >= 4 && (
+              <div
+                className="document-grid"
+                style={{
+                  backgroundSize: `${(view.gridSize * zoom) / 100}px ${(view.gridSize * zoom) / 100}px`,
+                }}
+              />
+            )}
+            {view.guides.map((g) => (
+              <button
+                key={g.id}
+                aria-label={`${g.axis === 'x' ? 'Vertical' : 'Horizontal'} guide at ${Math.round(g.position)} pixels`}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  guideDrag.current = { id: g.id, axis: g.axis };
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onDoubleClick={() =>
+                  onView({
+                    ...view,
+                    guides: view.guides.filter((x) => x.id !== g.id),
+                  })
+                }
+                className={`document-guide ${g.axis}`}
+                style={
+                  g.axis === 'x'
+                    ? { left: (g.position / w) * 100 + '%' }
+                    : { top: (g.position / h) * 100 + '%' }
+                }
+              />
+            ))}
+            {view.rulers && (
+              <>
+                {ruler(w, false)}
+                {ruler(h, true)}
+              </>
+            )}
+          </div>
+        </div>
+        <Dialog open={guidesOpen} onOpenChange={setGuidesOpen}>
+          <DialogContent onKeyDown={(e) => e.stopPropagation()}>
+            <DialogTitle>Guides & grid</DialogTitle>
+            <DialogDescription>
+              Drag from either ruler to add a guide, drag a guide to move it, or
+              double-click it to remove it. Guides never appear in exports.
+            </DialogDescription>
+            <label>
+              Ruler units
+              <select
+                value={view.units}
+                onChange={(e) =>
+                  onView({
+                    ...view,
+                    units: e.target.value as typeof view.units,
+                  })
+                }
+              >
+                <option value="px">Pixels</option>
+                <option value="%">Percent</option>
+                <option value="in">Inches</option>
+                <option value="cm">Centimetres</option>
+                <option value="mm">Millimetres</option>
+              </select>
+            </label>
+            <label>
+              Resolution (pixels/inch)
+              <input
+                aria-label="Document resolution"
+                type="number"
+                min={1}
+                max={2400}
+                value={view.resolution}
+                onChange={(e) => {
+                  const n = +e.target.value;
+                  if (Number.isFinite(n) && n >= 1 && n <= 2400)
+                    onView({ ...view, resolution: n });
+                }}
+              />
+            </label>
+            <div className="guide-entry">
+              <input
+                aria-label="Horizontal ruler origin"
+                type="number"
+                value={view.rulerOrigin.x}
+                onChange={(e) =>
+                  onView({
+                    ...view,
+                    rulerOrigin: {
+                      ...view.rulerOrigin,
+                      x: +e.target.value || 0,
+                    },
+                  })
+                }
+              />
+              <input
+                aria-label="Vertical ruler origin"
+                type="number"
+                value={view.rulerOrigin.y}
+                onChange={(e) =>
+                  onView({
+                    ...view,
+                    rulerOrigin: {
+                      ...view.rulerOrigin,
+                      y: +e.target.value || 0,
+                    },
+                  })
+                }
+              />
+              <Button
+                variant="outline"
+                onClick={() => onView({ ...view, rulerOrigin: { x: 0, y: 0 } })}
+              >
+                Reset origin
+              </Button>
+            </div>
+            <label>
+              <input
+                type="checkbox"
+                checked={view.grid}
+                onChange={(e) => onView({ ...view, grid: e.target.checked })}
+              />{' '}
+              Show grid
+            </label>
+            <label>
+              Grid spacing (px)
+              <input
+                type="number"
+                min={1}
+                max={10000}
+                value={view.gridSize}
+                onChange={(e) => {
+                  const n = +e.target.value;
+                  if (Number.isFinite(n) && n >= 1 && n <= 10000)
+                    onView({ ...view, gridSize: n });
+                }}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={view.snap}
+                onChange={(e) => onView({ ...view, snap: e.target.checked })}
+              />{' '}
+              Snap to guides, grid and document bounds
+            </label>
+            <div className="guide-entry">
+              <select
+                aria-label="Guide orientation"
+                value={axis}
+                onChange={(e) => setAxis(e.target.value as 'x' | 'y')}
+              >
+                <option value="x">Vertical</option>
+                <option value="y">Horizontal</option>
+              </select>
+              <input
+                aria-label="Guide position in pixels"
+                type="number"
+                min={0}
+                max={axis === 'x' ? w : h}
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+              />
+              <Button
+                disabled={
+                  view.guides.length >= 100 ||
+                  position === '' ||
+                  !Number.isFinite(+position) ||
+                  +position < 0 ||
+                  +position > (axis === 'x' ? w : h)
+                }
+                onClick={() =>
+                  onView({
+                    ...view,
+                    guides: [
+                      ...view.guides,
+                      { id: crypto.randomUUID(), axis, position: +position },
+                    ],
+                  })
+                }
+              >
+                Add guide
+              </Button>
+            </div>
+            <div className="guide-list">
+              {view.guides.map((g) => (
+                <div key={g.id}>
+                  <span>
+                    {g.axis === 'x' ? 'Vertical' : 'Horizontal'} ·{' '}
+                    {Math.round(g.position * 100) / 100}px
+                  </span>
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      onView({
+                        ...view,
+                        guides: view.guides.filter((x) => x.id !== g.id),
+                      })
+                    }
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <Button
+              variant="outline"
+              disabled={!view.guides.length}
+              onClick={() => onView({ ...view, guides: [] })}
+            >
+              Clear guides
+            </Button>
+            <Button onClick={() => setGuidesOpen(false)}>Done</Button>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  },
+);

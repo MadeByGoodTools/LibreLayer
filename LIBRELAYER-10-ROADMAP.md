@@ -65,7 +65,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Floating-point Reinhard/filmic HDR toning and skin-protected perceptual vibrance.
 - [x] Lift/gamma/gain color wheels with independent tonal levels.
 - [x] Waveform/parade/vector zoom and trace-brightness controls.
-- [ ] Side-by-side reference comparison with matched view navigation.
+- [x] Captured-reference split and side-by-side comparison with matched zoom, pan, and rotation.
 
 ## 4. Selections and masking
 
