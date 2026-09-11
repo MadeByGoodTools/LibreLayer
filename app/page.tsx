@@ -217,6 +217,11 @@ import {
   type MaskTransform,
 } from '@/lib/mask-transform';
 import {
+  marqueeBounds,
+  strongestEdgeInPatch,
+  type MarqueeShape,
+} from '@/lib/selection-geometry';
+import {
   createPsdCompatibilityReport,
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
@@ -1616,9 +1621,8 @@ export default function Home() {
   const moveOrigins = useRef(new Map<string, { x: number; y: number }>());
   const [, setHistoryVersion] = useState(0);
   const [editing, setEditing] = useState<'pixels' | 'mask'>('pixels');
-  const [selectionShape, setSelectionShape] = useState<
-    'rectangle' | 'ellipse' | 'row' | 'column'
-  >('rectangle');
+  const [selectionShape, setSelectionShape] =
+    useState<MarqueeShape>('rectangle');
   const [lassoMode, setLassoMode] = useState<
     'freehand' | 'polygonal' | 'magnetic'
   >('freehand');
@@ -3795,12 +3799,7 @@ export default function Home() {
     if (tool === 'marquee' || tool === 'crop') {
       if (dragRect && dragRect.w > 2 && dragRect.h > 2) {
         if (tool === 'marquee') {
-          const chosen =
-              selectionShape === 'row'
-                ? { x: 0, y: Math.round(dragRect.y), w: doc.w, h: 1 }
-                : selectionShape === 'column'
-                  ? { x: Math.round(dragRect.x), y: 0, w: 1, h: doc.h }
-                  : dragRect,
+          const chosen = marqueeBounds(selectionShape, dragRect, doc.w, doc.h),
             mask = makeCanvas(doc.w, doc.h),
             ctx = mask.getContext('2d')!;
           ctx.fillStyle = 'white';
@@ -4097,22 +4096,20 @@ export default function Home() {
     if (!surface || !meta) return p;
     const local = toLayerPoint(meta, p),
       ctx = surface.pixels.getContext('2d', { willReadFrequently: true })!,
-      x0 = Math.max(1, Math.floor(local.x) - 7),
-      y0 = Math.max(1, Math.floor(local.y) - 7),
-      x1 = Math.min(doc.w - 2, Math.floor(local.x) + 7),
-      y1 = Math.min(doc.h - 2, Math.floor(local.y) + 7);
-    let best = local,
-      score = -1;
-    for (let y = y0; y <= y1; y += 2)
-      for (let x = x0; x <= x1; x += 2) {
-        const d = ctx.getImageData(x - 1, y - 1, 3, 3).data,
-          g = (i: number) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2],
-          n = Math.abs(g(16) - g(20)) + Math.abs(g(4) - g(28));
-        if (n > score) {
-          score = n;
-          best = { x, y };
-        }
-      }
+      x0 = Math.max(0, Math.floor(local.x) - 8),
+      y0 = Math.max(0, Math.floor(local.y) - 8),
+      x1 = Math.min(doc.w, Math.floor(local.x) + 9),
+      y1 = Math.min(doc.h, Math.floor(local.y) + 9),
+      patch = ctx.getImageData(x0, y0, x1 - x0, y1 - y0),
+      snapped = strongestEdgeInPatch(
+        patch.data,
+        patch.width,
+        patch.height,
+        x0,
+        y0,
+        2,
+      ),
+      best = snapped.score > 0 ? snapped : local;
     const cx = doc.w / 2,
       cy = doc.h / 2,
       a = ((meta.rotation ?? 0) * Math.PI) / 180,
