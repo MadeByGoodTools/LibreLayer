@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Slider } from '@/components/ui/slider';
+import { adjustHighDepth, precisionToEncodedRgba } from '@/lib/high-depth';
 
 export type AdvancedAdjustmentOptions = {
   brightness: number;
@@ -68,17 +69,90 @@ const numberValue = (value: number | readonly number[]) =>
 
 export function AdvancedAdjustmentsDialog({
   open,
+  sourceCanvas,
   onClose,
   onApply,
 }: {
   open: boolean;
+  sourceCanvas?: HTMLCanvasElement | null;
   onClose: () => void;
   onApply: (options: AdvancedAdjustmentOptions) => void;
 }) {
   const [value, setValue] = useState(defaults);
+  const [previewEnabled, setPreviewEnabled] = useState(true);
+  const previewRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    if (open) setValue(defaults);
+    if (open) {
+      setValue(defaults);
+      setPreviewEnabled(true);
+    }
   }, [open]);
+  useEffect(() => {
+    if (!open || !sourceCanvas || !previewRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const preview = previewRef.current;
+      if (!preview) return;
+      const scale = Math.min(
+        1,
+        560 / sourceCanvas.width,
+        250 / sourceCanvas.height,
+      );
+      preview.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+      preview.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+      const context = preview.getContext('2d')!;
+      context.clearRect(0, 0, preview.width, preview.height);
+      context.drawImage(sourceCanvas, 0, 0, preview.width, preview.height);
+      if (!previewEnabled) return;
+      const pixels = context.getImageData(0, 0, preview.width, preview.height);
+      const adjusted = adjustHighDepth(
+        { width: preview.width, height: preview.height, data: pixels.data },
+        value,
+      );
+      pixels.data.set(
+        precisionToEncodedRgba({
+          width: preview.width,
+          height: preview.height,
+          data: adjusted,
+        }),
+      );
+      context.putImageData(pixels, 0, 0);
+      if (value.blurMode !== 'none' && value.blurRadius > 0) {
+        const copy = document.createElement('canvas');
+        copy.width = preview.width;
+        copy.height = preview.height;
+        copy.getContext('2d')!.drawImage(preview, 0, 0);
+        context.clearRect(0, 0, preview.width, preview.height);
+        if (value.blurMode === 'gaussian') {
+          context.filter = `blur(${Math.max(0.5, value.blurRadius * scale)}px)`;
+          context.drawImage(copy, 0, 0);
+          context.filter = 'none';
+        } else {
+          const samples = 13;
+          const angle = (value.blurAngle * Math.PI) / 180;
+          context.globalAlpha = 1 / samples;
+          for (let index = 0; index < samples; index++) {
+            const amount = index / (samples - 1) - 0.5;
+            context.save();
+            if (value.blurMode === 'motion') {
+              context.translate(
+                Math.cos(angle) * value.blurRadius * scale * amount * 2,
+                Math.sin(angle) * value.blurRadius * scale * amount * 2,
+              );
+            } else {
+              context.translate(preview.width / 2, preview.height / 2);
+              context.rotate((amount * value.blurRadius * Math.PI) / 900);
+              context.translate(-preview.width / 2, -preview.height / 2);
+            }
+            context.drawImage(copy, 0, 0);
+            context.restore();
+          }
+          context.globalAlpha = 1;
+        }
+        copy.width = copy.height = 1;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, previewEnabled, sourceCanvas, value]);
   const slider = (
     label: string,
     key: keyof AdvancedAdjustmentOptions,
@@ -114,13 +188,32 @@ export function AdvancedAdjustmentsDialog({
         if (!next) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="advanced-adjustments-dialog">
         <DialogTitle>Adjustments and blur</DialogTitle>
         <DialogDescription>
           Apply tonal, color, black-and-white, or photographic blur corrections
           to the active pixel layer. Color corrections run together in one tiled
           floating-point pass, then write one undoable result.
         </DialogDescription>
+        <div className="advanced-preview-shell">
+          {sourceCanvas ? (
+            <canvas
+              ref={previewRef}
+              role="img"
+              aria-label="Live active-layer adjustment preview"
+            />
+          ) : (
+            <p>Select a pixel layer to preview these corrections.</p>
+          )}
+          <label className="inline-check advanced-preview-toggle">
+            <input
+              type="checkbox"
+              checked={previewEnabled}
+              onChange={(event) => setPreviewEnabled(event.target.checked)}
+            />
+            Preview
+          </label>
+        </div>
         <div className="advanced-adjustments-grid">
           {slider('Brightness', 'brightness', -100, 100)}
           {slider('Contrast', 'contrast', -100, 100)}
@@ -222,6 +315,9 @@ export function AdvancedAdjustmentsDialog({
             slider('Motion angle', 'blurAngle', -180, 180, '°')}
         </div>
         <div className="dialog-actions">
+          <Button variant="outline" onClick={() => setValue(defaults)}>
+            Reset
+          </Button>
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>

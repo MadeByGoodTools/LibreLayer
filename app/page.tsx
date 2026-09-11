@@ -8209,6 +8209,7 @@ export default function Home() {
         psdPending ||
         psdError ||
         newDocumentOpen ||
+        adjustmentsOpen ||
         ['INPUT', 'TEXTAREA', 'SELECT'].includes(
           (e.target as HTMLElement)?.tagName,
         ) ||
@@ -12531,6 +12532,11 @@ export default function Home() {
       />
       <AdvancedAdjustmentsDialog
         open={adjustmentsOpen}
+        sourceCanvas={
+          active && active.kind !== 'group' && active.kind !== 'adjustment'
+            ? surfacesRef.current.get(active.id)?.pixels
+            : null
+        }
         onClose={() => setAdjustmentsOpen(false)}
         onApply={applyAdvancedAdjustments}
       />

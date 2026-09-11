@@ -1545,6 +1545,54 @@ button {
   overflow: auto;
   padding: 2px 4px 2px 0;
 }
+.advanced-adjustments-dialog {
+  width: min(94vw, 760px);
+  max-width: 760px;
+  max-height: 92vh;
+  overflow: hidden;
+}
+.advanced-preview-shell {
+  position: relative;
+  display: grid;
+  min-height: 156px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: #17181b;
+  background-image:
+    linear-gradient(45deg, #22242a 25%, transparent 25%),
+    linear-gradient(-45deg, #22242a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #22242a 75%),
+    linear-gradient(-45deg, transparent 75%, #22242a 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+.advanced-preview-shell canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 250px;
+  object-fit: contain;
+}
+.advanced-preview-shell > p {
+  padding: 32px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.advanced-preview-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, white 10%);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  box-shadow: 0 3px 12px #0008;
+}
 .advanced-adjustment-row {
   display: grid;
   gap: 7px;
