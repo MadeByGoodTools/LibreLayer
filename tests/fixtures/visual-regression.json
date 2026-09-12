@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "width": 64,
+  "height": 48,
+  "seed": 2718,
+  "cases": [
+    { "name": "reference-invert", "expectedSha256": "47e19856b3ba7f388ff735bb0e329be18acf52216286e4eeb9c926db9ceb54c3" },
+    { "name": "warm-channel-grade", "expectedSha256": "90c1191e8499639fe6aca80307b159c74d723181dc1038c00c2575b93ccaa2be" },
+    { "name": "oil-paint", "expectedSha256": "6c6134b6370c29d59215df84b9787b4dfb2e380a1314626894d6f77f01c2f091" },
+    { "name": "seeded-clouds", "expectedSha256": "2c99249edb5a120358e029f0e2345848d4052f9a4f775161dfb88d4071d9c138" }
+  ]
+}

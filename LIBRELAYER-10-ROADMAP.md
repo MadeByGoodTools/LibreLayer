@@ -209,6 +209,6 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Open-source repository, MIT license, local-first privacy statement, compatibility notes, and automated core checks.
 - [x] Complete manual, shortcut map, format matrix, performance expectations, and privacy model.
 - [x] Migration and backward-compatibility policy.
-- [ ] Stable fixture pack and reproducible visual-regression suite.
+- [x] Stable fixture pack and reproducible visual-regression suite.
 - [x] Security review, dependency audit, contributor guide, issue templates, and release notes.
 - [ ] Independent professional-editor beta and release-candidate signoff.
