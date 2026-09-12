@@ -67,3 +67,14 @@ void test('render cache is least-recently-used and enforces its budget', () => {
   cache.set('too-large', 'X', 9);
   assert.deepEqual(disposed, ['B', 'X']);
 });
+
+void test('render cache releases old entries when its runtime budget shrinks', () => {
+  const disposed: string[] = [],
+    cache = new VersionedRenderCache<string>(10, (value) => disposed.push(value));
+  cache.set('one', 'one', 4);
+  cache.set('two', 'two', 4);
+  cache.setBudget(5);
+  assert.equal(cache.size, 1);
+  assert.equal(cache.currentCost, 4);
+  assert.deepEqual(disposed, ['one']);
+});

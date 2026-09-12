@@ -357,6 +357,11 @@ import {
 } from '@/lib/filter-plugin';
 import { runGpuCpuReferenceCheck } from '@/lib/gpu-filter-reference';
 import {
+  adaptivePerformancePolicy,
+  normalizePerformanceMode,
+  previewScaleForPixels,
+} from '@/lib/performance-policy';
+import {
   multiScaleExportPlan,
   normalizeArtboard,
   normalizeFrame,
@@ -1536,6 +1541,7 @@ const drawLayer = (
   w: number,
   h: number,
   quality: FilterGraphQuality = 'final',
+  previewPixelBudget = 2_000_000,
 ) => {
   let source =
     layer.kind === 'fill' && layer.fillLayer
@@ -1626,11 +1632,26 @@ const drawLayer = (
     if (source !== surface.pixels) source.width = source.height = 1;
     source = copy;
   } else {
+    const previewScale =
+      quality === 'preview'
+        ? previewScaleForPixels(w * h, previewPixelBudget)
+        : 1;
+    if (previewScale < 1) {
+      const reduced = makeCanvas(
+        Math.max(1, Math.round(w * previewScale)),
+        Math.max(1, Math.round(h * previewScale)),
+      );
+      reduced
+        .getContext('2d')!
+        .drawImage(source, 0, 0, reduced.width, reduced.height);
+      if (source !== surface.pixels) source.width = source.height = 1;
+      source = reduced;
+    }
     for (const smartFilter of activeSmartFilters) {
       const filtered =
           smartFilter.name === 'Sharpen'
             ? sharpenCanvasTiled(source, smartFilter.amount)
-            : makeCanvas(w, h),
+            : makeCanvas(source.width, source.height),
         fc = filtered.getContext('2d')!;
       if (smartFilter.name !== 'Sharpen') {
         fc.filter =
@@ -1655,7 +1676,7 @@ const drawLayer = (
         fc.drawImage(alpha, 0, 0);
         alpha.width = alpha.height = 1;
       }
-      const combined = makeCanvas(w, h),
+      const combined = makeCanvas(source.width, source.height),
         cc = combined.getContext('2d')!;
       cc.drawImage(source, 0, 0);
       cc.globalAlpha = smartFilter.opacity / 100;
@@ -1665,6 +1686,12 @@ const drawLayer = (
       if (source !== surface.pixels) source.width = source.height = 1;
       filtered.width = filtered.height = 1;
       source = combined;
+    }
+    if (previewScale < 1) {
+      const expanded = makeCanvas(w, h);
+      expanded.getContext('2d')!.drawImage(source, 0, 0, w, h);
+      source.width = source.height = 1;
+      source = expanded;
     }
     if (cacheable) {
       const stored = makeCanvas(w, h);
@@ -2062,6 +2089,7 @@ export default function Home() {
             p.historyDepth,
             p.historyBudgetMb,
           ).budgetMb,
+          performanceMode: normalizePerformanceMode(p.performanceMode),
           workspaces: p.workspaces
             .filter(
               (w: any) =>
@@ -2790,6 +2818,17 @@ export default function Home() {
     size = doc,
     quality: FilterGraphQuality = 'final',
   ) => {
+    const device = navigator as Navigator & { deviceMemory?: number };
+    const performancePolicy = adaptivePerformancePolicy({
+      mode: preferences.performanceMode,
+      documentPixels: size.w * size.h,
+      layerCount: stack.length,
+      deviceMemoryGb: device.deviceMemory,
+      hardwareConcurrency: device.hardwareConcurrency,
+    });
+    smartFilterRenderCache.setBudget(
+      Math.max(1, Math.floor((performancePolicy.cacheBudgetMb * 1048576) / 4)),
+    );
     const visible = (layer: LayerMeta) =>
       layer.visible && !ancestors(stack, layer.id).some((p) => !p.visible);
     const erase = (
@@ -2830,6 +2869,7 @@ export default function Home() {
         size.w,
         size.h,
         quality,
+        performancePolicy.previewPixelBudget,
       );
       return appearance;
     };
@@ -7652,7 +7692,15 @@ export default function Home() {
       smartFilterPreviewRef.current = false;
       smartFilterFinalTimer.current = null;
       render();
-    }, 140);
+    },
+    adaptivePerformancePolicy({
+      mode: preferences.performanceMode,
+      documentPixels: doc.w * doc.h,
+      layerCount: layersRef.current.length,
+      deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number })
+        .deviceMemory,
+      hardwareConcurrency: navigator.hardwareConcurrency,
+    }).finalDelayMs);
   };
   const moveSmartFilter = (id: string, direction: -1 | 1) => {
     const meta = selected();
@@ -13004,6 +13052,17 @@ export default function Home() {
     );
   };
   const active = selected();
+  const activePerformancePolicy = adaptivePerformancePolicy({
+    mode: preferences.performanceMode,
+    documentPixels: doc.w * doc.h,
+    layerCount: layers.length,
+    deviceMemoryGb:
+      typeof navigator === 'undefined'
+        ? undefined
+        : (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    hardwareConcurrency:
+      typeof navigator === 'undefined' ? undefined : navigator.hardwareConcurrency,
+  });
   const brushFolders = Array.from(
       new Set(brushTips.map((tip) => tip.folder).filter(Boolean)),
     ).sort((a, b) => a.localeCompare(b)),
@@ -19967,7 +20026,7 @@ export default function Home() {
         onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
         onProtectStorage={() => void protectLocalStorage()}
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
-        documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/${preferences.historyDepth ?? 32} history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels`}
+        documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/${preferences.historyDepth ?? 32} history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels · ${activePerformancePolicy.mode} mode · ${activePerformancePolicy.pressure} pressure · ${(activePerformancePolicy.previewPixelBudget / 1_000_000).toFixed(1)} MP interactive preview`}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}
         onApply={(p) => {

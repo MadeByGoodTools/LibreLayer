@@ -51,6 +51,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Shared Smart Object instances whose source replacements propagate without merging instance-specific filters, plus independent-copy conversion and cyclic-dependency rejection on open
 - Layered embedded Smart Object source documents that open in linked tabs, synchronize edits to every shared instance, create parent history states, and persist inside the project
 - Versioned Smart Filter parameters with separately keyed live-preview and final-render caches, bounded least-recently-used memory, and automatic invalidation after source or parameter changes
+- Adaptive Performance, Balanced, and Quality rendering modes scale interactive Smart Filter resolution, final-settle timing, and cache memory to document size and available device resources
 - Layer masks with live density, feather, overlay, direct edge refinement, and independent position, rotation, and two-axis scale
 - Rectangular, elliptical, single-row, single-column, freehand, polygonal, and optimized magnetic-edge selection tools
 - Soft Color Range and Similar matching, Focus Range, shadows/midtones/highlights luminosity masks, Grow, and numeric Transform Selection

@@ -17,6 +17,7 @@ import {
   type ToolbarPreferences,
 } from '@/lib/toolbar-config';
 import type { MotionPreference } from '@/lib/accessibility-preferences';
+import type { PerformanceMode } from '@/lib/performance-policy';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -57,6 +58,7 @@ export type EditorPreferences = {
   theme?: 'dark' | 'light' | 'contrast';
   interfaceScale?: 85 | 100 | 115 | 125;
   motion?: MotionPreference;
+  performanceMode?: PerformanceMode;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -72,6 +74,7 @@ export const defaultPreferences: EditorPreferences = {
   theme: 'dark',
   interfaceScale: 100,
   motion: 'system',
+  performanceMode: 'balanced',
 };
 export function WorkspaceSettings({
   commands,
@@ -748,6 +751,28 @@ export function WorkspaceSettings({
               <span>{documentStatus}</span>
               <span>{storageStatus}</span>
             </div>
+            <label>
+              Rendering preference
+              <select
+                className="block border rounded p-2 bg-background w-full"
+                value={value.performanceMode ?? 'balanced'}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    performanceMode: event.target.value as PerformanceMode,
+                  })
+                }
+              >
+                <option value="performance">Performance — fastest previews</option>
+                <option value="balanced">Balanced — adaptive</option>
+                <option value="quality">Quality — sharper live previews</option>
+              </select>
+            </label>
+            <p>
+              LibreLayer automatically reduces interactive preview work when a
+              document approaches this computer&apos;s memory budget, then renders
+              the final full-quality result after the control settles.
+            </p>
             <label>
               Undo history states
               <input

@@ -147,7 +147,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] WebGPU renderer with WebGL2/CPU fallback.
 - [ ] OffscreenCanvas workers and WASM SIMD/threaded operations.
 - [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
-- [ ] Memory-pressure adaptation and preview/final quality scheduling.
+- [x] Memory-pressure adaptation and preview/final quality scheduling.
 - [ ] OPFS scratch storage with selectable locations and quotas.
 - [ ] Incremental saving, pixel deduplication, compressed history, and transaction journal.
 - [ ] Cancelable jobs, watchdogs, and crash recovery.

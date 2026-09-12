@@ -45,7 +45,7 @@ export const filterGraphKey = ({
 export class VersionedRenderCache<T> {
   private entries = new Map<string, { value: T; cost: number }>();
   private cost = 0;
-  private readonly maxCost: number;
+  private maxCost: number;
   private readonly dispose?: (value: T) => void;
 
   constructor(
@@ -83,6 +83,17 @@ export class VersionedRenderCache<T> {
     }
     this.entries.set(key, { value, cost });
     this.cost += cost;
+    this.trim();
+  }
+
+  setBudget(maxCost: number) {
+    if (!Number.isFinite(maxCost) || maxCost < 1)
+      throw Error('Render cache requires a positive budget');
+    this.maxCost = maxCost;
+    this.trim();
+  }
+
+  private trim() {
     while (this.cost > this.maxCost) {
       const oldest = this.entries.entries().next().value as
         | [string, { value: T; cost: number }]
@@ -102,5 +113,9 @@ export class VersionedRenderCache<T> {
 
   get size() {
     return this.entries.size;
+  }
+
+  get currentCost() {
+    return this.cost;
   }
 }
