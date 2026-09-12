@@ -156,7 +156,7 @@ This is the release ledger for closing the remaining gap with a professional des
 ## 12. Typography, vectors, and layout
 
 - [x] Editable text, basic shapes, Pen paths, fill/stroke, transforms, alignment, and guides.
-- [ ] Full Character/Paragraph controls, OpenType, variable fonts, international shaping, and missing-font handling.
+- [x] Full Character/Paragraph controls, OpenType, variable fonts, international shaping, and missing-font handling.
 - [ ] Text on/in paths, Warp Text, dynamic fitting, and text-to-shape/path conversion.
 - [ ] Complete Bézier/Curvature Pen, anchor conversion, direct selection, and Boolean path operations.
 - [ ] Stroke caps, joins, dashes, variable width, SVG import/export, and vector-preserving output.

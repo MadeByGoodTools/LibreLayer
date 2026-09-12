@@ -296,6 +296,8 @@ button {
   align-items: center;
 }
 .options-bar {
+  position: relative;
+  z-index: 60;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -3393,6 +3395,10 @@ button {
 .brush-dynamics {
   position: relative;
 }
+.options-bar:has(.brush-dynamics[open]) {
+  z-index: 90;
+  overflow: visible;
+}
 .brush-dynamics > summary {
   cursor: pointer;
   list-style: none;
@@ -3818,7 +3824,12 @@ button {
 }
 
 .type-controls > div {
-  max-width: min(82vw, 780px);
+  position: fixed;
+  z-index: 180;
+  top: calc(88px * var(--ui-scale));
+  left: 50%;
+  width: min(82vw, 780px);
+  transform: translateX(-50%);
   grid-template-columns: repeat(4, minmax(110px, 1fr));
 }
 
@@ -4177,4 +4188,26 @@ button {
   .command-search-button {
     display: none;
   }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.control-warning {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-radius: 7px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  font-size: 11px;
+  line-height: 1.35;
 }

@@ -35,6 +35,12 @@ Clone Source provides five reusable source slots with offset, scale, rotation, f
 
 Content-Aware Fill shows a live local preview: green is the sampling coverage and red is the replacement target. Choose Auto, Rectangular, Custom, or All Visible Layers; then tune color, rotation, scale, and mirror adaptation before Apply. A whole-canvas selection has no surrounding source in Auto mode—use a smaller selection or All Visible Layers.
 
+## Typography
+
+Choose Text (`T`), enter point or paragraph copy, and click the canvas. Character & paragraph controls cover font, continuous variable weight, width, style, size, tracking, kerning, leading, baseline shift, alignment, first-line indent, paragraph spacing, underline, strikethrough, small caps, and ligatures. Automatic or explicit left-to-right/right-to-left direction and a language setting preserve native browser shaping for Arabic, Hebrew, Indic, CJK, accented text, emoji, and other complex runs.
+
+Load local font accepts WOFF2, WOFF, TTF, and OTF files without uploading them. Locally loaded fonts last for the current editing session. When a project references a font that is not installed, LibreLayer displays a missing-font warning and uses a visible system fallback until the font is loaded.
+
 ## Color and adjustments
 
 Use nondestructive adjustment layers whenever an edit may need revisiting. Available controls include exposure, brightness/contrast, RGB and per-channel Levels, point/freehand Curves, hue/saturation ranges, vibrance, color balance, black-and-white channel mixing, Channel Mixer, Selective Color, Gradient Map, Photo Filter, Shadows/Highlights, Replace Color, Match Color, HDR toning, and lift/gamma/gain wheels.

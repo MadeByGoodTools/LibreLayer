@@ -79,6 +79,17 @@ import {
 } from '@/lib/document-limits';
 import { preflightImage } from '@/lib/image-preflight';
 import {
+  canvasFont,
+  canvasFontStretch,
+  canvasVariableFont,
+  graphemes,
+  languageOptions,
+  resolveTextDirection,
+  shouldDrawShapedRun,
+  type TextDirection,
+  type TextStyle,
+} from '@/lib/text-engine';
+import {
   commandKey,
   defaultCommandKey,
   shortcutLabel,
@@ -372,6 +383,8 @@ type TextLayerData = {
   width: number;
   family: string;
   weight: number;
+  style: TextStyle;
+  stretch: number;
   size: number;
   tracking: number;
   kerning: boolean;
@@ -382,6 +395,13 @@ type TextLayerData = {
   warp: number;
   smallCaps: boolean;
   ligatures: boolean;
+  direction: TextDirection;
+  language: string;
+  underline: boolean;
+  strike: boolean;
+  indent: number;
+  spaceBefore: number;
+  spaceAfter: number;
 };
 type LayerKind = 'pixel' | 'group' | 'adjustment' | 'fill';
 type LayerMeta = {
@@ -774,14 +794,30 @@ const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = value.color;
-  ctx.font = `${value.weight} ${value.size}px ${value.family}`;
+  const fontOptions = {
+    family: value.family,
+    size: value.size,
+    weight: value.weight,
+    style: value.style ?? 'normal',
+  };
+  ctx.font = canvasFont(fontOptions);
+  const safeFont = ctx.font;
+  ctx.font = canvasVariableFont({
+    ...fontOptions,
+    stretch: value.stretch ?? 100,
+  });
+  if (ctx.font === safeFont && 'fontStretch' in ctx)
+    ctx.fontStretch = canvasFontStretch(value.stretch ?? 100);
   ctx.fontKerning = value.kerning ? 'normal' : 'none';
   ctx.fontVariantCaps = value.smallCaps ? 'small-caps' : 'normal';
   ctx.textBaseline = 'alphabetic';
-  const typed = value.ligatures
-      ? value.content.replaceAll('fi', 'ﬁ').replaceAll('fl', 'ﬂ')
-      : value.content,
-    content = value.smallCaps ? typed.toUpperCase() : typed,
+  ctx.direction = resolveTextDirection(value.content, value.direction ?? 'auto');
+  const sourceContent = value.ligatures
+      ? value.content
+      : value.content.replace(/f(?=[il])/g, 'f\u200c'),
+    content = value.smallCaps
+      ? sourceContent.toLocaleUpperCase(value.language ?? 'en')
+      : sourceContent,
     lineHeight = value.size * value.leading,
     lines: string[] = [];
   if (value.paragraph) {
@@ -798,35 +834,71 @@ const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
     }
   } else lines.push(...content.split('\n'));
   lines.forEach((line, lineIndex) => {
-    const width =
+    const lineIndent = lineIndex === 0 ? (value.indent ?? 0) : 0,
+      width =
         ctx.measureText(line).width +
         Math.max(0, line.length - 1) * value.tracking,
       x =
         value.align === 'center'
-          ? value.originX - width / 2
+          ? value.originX - width / 2 + lineIndent
           : value.align === 'right'
-            ? value.originX - width
-            : value.originX,
-      y = value.originY + value.baseline + lineIndex * lineHeight;
+            ? value.originX - width + lineIndent
+            : value.originX + lineIndent,
+      y =
+        value.originY +
+        value.baseline +
+        (value.spaceBefore ?? 0) +
+        lineIndex * lineHeight +
+        (lineIndex > 0 ? value.spaceAfter ?? 0 : 0);
     let cursor = x;
     const justifyExtra =
       value.align === 'justify' && value.paragraph
         ? Math.max(0, value.width - width) /
           Math.max(1, line.split(' ').length - 1)
         : 0;
-    for (let index = 0; index < line.length; index++) {
-      const character = line[index],
-        progress = index / Math.max(1, line.length - 1),
+    if (
+      shouldDrawShapedRun({
+        tracking: value.tracking,
+        justifyExtra,
+        onPath: value.onPath,
+        warp: value.warp,
+      })
+    ) {
+      // One native text run preserves OpenType ligatures and complex-script shaping.
+      ctx.fillText(line, cursor, y);
+    } else {
+      const clusters = graphemes(line, value.language ?? 'en');
+      for (let index = 0; index < clusters.length; index++) {
+        const character = clusters[index],
+        progress = index / Math.max(1, clusters.length - 1),
         pathOffset = value.onPath
           ? -Math.sin(progress * Math.PI) * value.size * 0.45
           : 0,
         warpOffset = Math.sin(progress * Math.PI * 2) * value.warp;
-      ctx.fillText(character, cursor, y + pathOffset + warpOffset);
-      cursor +=
-        ctx.measureText(character).width +
-        value.tracking +
-        (character === ' ' ? justifyExtra : 0);
+        ctx.fillText(character, cursor, y + pathOffset + warpOffset);
+        cursor +=
+          ctx.measureText(character).width +
+          value.tracking +
+          (character === ' ' ? justifyExtra : 0);
+      }
     }
+    const decorationWidth = Math.max(0, cursor === x ? width : cursor - x);
+    ctx.save();
+    ctx.strokeStyle = value.color;
+    ctx.lineWidth = Math.max(1, value.size / 18);
+    if (value.underline) {
+      ctx.beginPath();
+      ctx.moveTo(x, y + value.size * 0.12);
+      ctx.lineTo(x + decorationWidth, y + value.size * 0.12);
+      ctx.stroke();
+    }
+    if (value.strike) {
+      ctx.beginPath();
+      ctx.moveTo(x, y - value.size * 0.3);
+      ctx.lineTo(x + decorationWidth, y - value.size * 0.3);
+      ctx.stroke();
+    }
+    ctx.restore();
   });
 };
 const rawImageCanvas = (output: {
@@ -1795,6 +1867,7 @@ export default function Home() {
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
+  const customFontFileRef = useRef<HTMLInputElement>(null);
   const smartObjectFileRef = useRef<HTMLInputElement>(null);
   const smartFileAction = useRef<'link' | 'replace' | 'relink'>('link');
   const clipboardRef = useRef<{
@@ -1979,6 +2052,10 @@ export default function Home() {
     [textWidth, setTextWidth] = useState(420),
     [fontFamily, setFontFamily] = useState('Arial'),
     [fontWeight, setFontWeight] = useState(600),
+    [fontStyle, setFontStyle] = useState<TextStyle>('normal'),
+    [fontStretch, setFontStretch] = useState(100),
+    [fontAvailable, setFontAvailable] = useState(true),
+    [customFonts, setCustomFonts] = useState<string[]>([]),
     [textTracking, setTextTracking] = useState(0),
     [textKerning, setTextKerning] = useState(true),
     [textLeading, setTextLeading] = useState(1.2),
@@ -1989,7 +2066,14 @@ export default function Home() {
     [textOnPath, setTextOnPath] = useState(false),
     [textWarp, setTextWarp] = useState(0),
     [textSmallCaps, setTextSmallCaps] = useState(false),
-    [textLigatures, setTextLigatures] = useState(true);
+    [textLigatures, setTextLigatures] = useState(true),
+    [textDirection, setTextDirection] = useState<TextDirection>('auto'),
+    [textLanguage, setTextLanguage] = useState('en'),
+    [textUnderline, setTextUnderline] = useState(false),
+    [textStrike, setTextStrike] = useState(false),
+    [textIndent, setTextIndent] = useState(0),
+    [textSpaceBefore, setTextSpaceBefore] = useState(0),
+    [textSpaceAfter, setTextSpaceAfter] = useState(0);
   const firstDocumentId = useRef(crypto.randomUUID());
   const activeDocumentRef = useRef(firstDocumentId.current);
   const documentStoreRef = useRef(new Map<string, EditorDocument>());
@@ -1999,6 +2083,46 @@ export default function Home() {
   const [documents, setDocuments] = useState<
     { id: string; name: string; saved: boolean }[]
   >([{ id: firstDocumentId.current, name: 'Untitled artwork', saved: true }]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      if (!cancelled)
+        setFontAvailable(
+          document.fonts.check(`${fontWeight} 16px "${fontFamily}"`),
+        );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fontFamily, fontWeight, customFonts]);
+
+  const loadCustomFont = async (file?: File) => {
+    if (!file) return;
+    const family = file.name
+      .replace(/\.(woff2?|ttf|otf)$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .trim();
+    if (!family) return;
+    try {
+      const face = new FontFace(family, await file.arrayBuffer(), {
+        weight: '1 1000',
+        stretch: '50% 200%',
+      });
+      await face.load();
+      document.fonts.add(face);
+      setCustomFonts((items) =>
+        items.includes(family) ? items : [...items, family],
+      );
+      setFontFamily(family);
+      setFontAvailable(true);
+      setStatus(`${family} loaded locally for this editing session`);
+    } catch {
+      setStatus('That font could not be loaded. Try WOFF2, WOFF, TTF, or OTF.');
+    } finally {
+      if (customFontFileRef.current) customFontFileRef.current.value = '';
+    }
+  };
 
   const syncLayers = (next: LayerMeta[]) => {
     next = treeOrder(next);
@@ -4536,6 +4660,8 @@ export default function Home() {
       width: textWidth,
       family: fontFamily,
       weight: fontWeight,
+      style: fontStyle,
+      stretch: fontStretch,
       size: fontSize,
       tracking: textTracking,
       kerning: textKerning,
@@ -4546,6 +4672,13 @@ export default function Home() {
       warp: textWarp,
       smallCaps: textSmallCaps,
       ligatures: textLigatures,
+      direction: textDirection,
+      language: textLanguage,
+      underline: textUnderline,
+      strike: textStrike,
+      indent: textIndent,
+      spaceBefore: textSpaceBefore,
+      spaceAfter: textSpaceAfter,
     };
     drawEditableText(surface.pixels, textLayer);
     patchLayer(id, { textLayer }, 'Create editable text layer');
@@ -4568,6 +4701,8 @@ export default function Home() {
       width: textWidth,
       family: fontFamily,
       weight: fontWeight,
+      style: fontStyle,
+      stretch: fontStretch,
       size: fontSize,
       tracking: textTracking,
       kerning: textKerning,
@@ -4578,6 +4713,13 @@ export default function Home() {
       warp: textWarp,
       smallCaps: textSmallCaps,
       ligatures: textLigatures,
+      direction: textDirection,
+      language: textLanguage,
+      underline: textUnderline,
+      strike: textStrike,
+      indent: textIndent,
+      spaceBefore: textSpaceBefore,
+      spaceAfter: textSpaceAfter,
     };
     drawEditableText(surface.pixels, textLayer);
     patchLayer(meta.id, { textLayer }, 'Edit text layer');
@@ -4984,6 +5126,8 @@ export default function Home() {
       setTextWidth(textValue.width);
       setFontFamily(textValue.family);
       setFontWeight(textValue.weight);
+      setFontStyle(textValue.style ?? 'normal');
+      setFontStretch(textValue.stretch ?? 100);
       setFontSize(textValue.size);
       setTextTracking(textValue.tracking);
       setTextKerning(textValue.kerning);
@@ -4994,6 +5138,13 @@ export default function Home() {
       setTextWarp(textValue.warp);
       setTextSmallCaps(textValue.smallCaps);
       setTextLigatures(textValue.ligatures);
+      setTextDirection(textValue.direction ?? 'auto');
+      setTextLanguage(textValue.language ?? 'en');
+      setTextUnderline(textValue.underline ?? false);
+      setTextStrike(textValue.strike ?? false);
+      setTextIndent(textValue.indent ?? 0);
+      setTextSpaceBefore(textValue.spaceBefore ?? 0);
+      setTextSpaceAfter(textValue.spaceAfter ?? 0);
     }
     setEditing('pixels');
   };
@@ -12793,21 +12944,78 @@ export default function Home() {
                     <option value="Courier New">Courier New</option>
                     <option value="Verdana">Verdana</option>
                     <option value="system-ui">System UI</option>
-                  </select>
-                </label>
-                <label>
-                  Weight
-                  <select
-                    aria-label="Font weight"
-                    value={fontWeight}
-                    onChange={(event) => setFontWeight(+event.target.value)}
-                  >
-                    {[300, 400, 500, 600, 700, 800, 900].map((weight) => (
-                      <option key={weight} value={weight}>
-                        {weight}
+                    {customFonts.map((family) => (
+                      <option key={family} value={family}>
+                        {family} (local)
                       </option>
                     ))}
                   </select>
+                </label>
+                <div className="brush-preset-actions">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => customFontFileRef.current?.click()}
+                  >
+                    Load local font…
+                  </Button>
+                  <input
+                    ref={customFontFileRef}
+                    className="sr-only"
+                    type="file"
+                    aria-label="Load local font"
+                    accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf"
+                    onChange={(event) => void loadCustomFont(event.target.files?.[0])}
+                  />
+                </div>
+                {!fontAvailable && (
+                  <p className="control-warning" role="status">
+                    {fontFamily} is missing. A system fallback is shown; load the font to preserve the design.
+                  </p>
+                )}
+                <label>
+                  Weight
+                  <input
+                    aria-label="Font weight"
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={fontWeight}
+                    onChange={(event) =>
+                      setFontWeight(
+                        Math.max(1, Math.min(1000, +event.target.value || 400)),
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Style
+                  <select
+                    aria-label="Font style"
+                    value={fontStyle}
+                    onChange={(event) =>
+                      setFontStyle(event.target.value as TextStyle)
+                    }
+                  >
+                    <option value="normal">Roman</option>
+                    <option value="italic">Italic</option>
+                    <option value="oblique">Oblique</option>
+                  </select>
+                </label>
+                <label>
+                  Width axis
+                  <input
+                    aria-label="Font width axis"
+                    type="number"
+                    min="50"
+                    max="200"
+                    value={fontStretch}
+                    onChange={(event) =>
+                      setFontStretch(
+                        Math.max(50, Math.min(200, +event.target.value || 100)),
+                      )
+                    }
+                  />
                 </label>
                 <label>
                   Tracking
@@ -12867,6 +13075,75 @@ export default function Home() {
                   </select>
                 </label>
                 <label>
+                  Direction
+                  <select
+                    aria-label="Text direction"
+                    value={textDirection}
+                    onChange={(event) =>
+                      setTextDirection(event.target.value as TextDirection)
+                    }
+                  >
+                    <option value="auto">Automatic</option>
+                    <option value="ltr">Left to right</option>
+                    <option value="rtl">Right to left</option>
+                  </select>
+                </label>
+                <label>
+                  Language
+                  <select
+                    aria-label="Text language"
+                    value={textLanguage}
+                    onChange={(event) => setTextLanguage(event.target.value)}
+                  >
+                    {languageOptions.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {textParagraph && (
+                  <>
+                    <label>
+                      First-line indent
+                      <input
+                        aria-label="First-line indent"
+                        type="number"
+                        min="-500"
+                        max="500"
+                        value={textIndent}
+                        onChange={(event) => setTextIndent(+event.target.value || 0)}
+                      />
+                    </label>
+                    <label>
+                      Space before
+                      <input
+                        aria-label="Paragraph space before"
+                        type="number"
+                        min="0"
+                        max="500"
+                        value={textSpaceBefore}
+                        onChange={(event) =>
+                          setTextSpaceBefore(Math.max(0, +event.target.value || 0))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Space after
+                      <input
+                        aria-label="Paragraph space after"
+                        type="number"
+                        min="0"
+                        max="500"
+                        value={textSpaceAfter}
+                        onChange={(event) =>
+                          setTextSpaceAfter(Math.max(0, +event.target.value || 0))
+                        }
+                      />
+                    </label>
+                  </>
+                )}
+                <label>
                   Warp
                   <input
                     aria-label="Text warp"
@@ -12908,6 +13185,22 @@ export default function Home() {
                     onChange={(event) => setTextLigatures(event.target.checked)}
                   />
                   OpenType ligatures
+                </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={textUnderline}
+                    onChange={(event) => setTextUnderline(event.target.checked)}
+                  />
+                  Underline
+                </label>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={textStrike}
+                    onChange={(event) => setTextStrike(event.target.checked)}
+                  />
+                  Strikethrough
                 </label>
                 <div className="brush-preset-actions">
                   <Button
