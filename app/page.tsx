@@ -324,6 +324,15 @@ import {
   type FilterGraphQuality,
 } from '@/lib/smart-filter-cache';
 import { traceAlphaContours } from '@/lib/vector-trace';
+import {
+  anchorsFromPoints,
+  combinePathMasks,
+  convertAnchorKind,
+  moveAnchor,
+  moveAnchorHandle,
+  type BezierAnchor,
+  type PathBooleanOperation,
+} from '@/lib/path-engine';
 import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
@@ -379,8 +388,76 @@ type SavedPath = {
   id: string;
   name: string;
   points: Point[];
+  anchors?: BezierAnchor[];
+  closed?: boolean;
   curved?: boolean;
   tension?: number;
+};
+
+const pathAnchors = (path: SavedPath) =>
+  path.anchors?.length === path.points.length
+    ? path.anchors
+    : anchorsFromPoints(path.points, path.curved === true, path.tension);
+
+const traceSavedPath = (
+  ctx: CanvasRenderingContext2D,
+  path: SavedPath,
+  mapPoint: (point: Point) => Point = (point) => point,
+) => {
+  const anchors = pathAnchors(path);
+  if (anchors.length < 2) return false;
+  const mapped = anchors.map((anchor) => ({
+    ...mapPoint(anchor),
+    incoming: anchor.incoming ? mapPoint(anchor.incoming) : undefined,
+    outgoing: anchor.outgoing ? mapPoint(anchor.outgoing) : undefined,
+  }));
+  ctx.beginPath();
+  ctx.moveTo(mapped[0].x, mapped[0].y);
+  for (let index = 1; index < mapped.length; index++) {
+    const previous = mapped[index - 1],
+      current = mapped[index];
+    if (previous.outgoing || current.incoming)
+      ctx.bezierCurveTo(
+        previous.outgoing?.x ?? previous.x,
+        previous.outgoing?.y ?? previous.y,
+        current.incoming?.x ?? current.x,
+        current.incoming?.y ?? current.y,
+        current.x,
+        current.y,
+      );
+    else ctx.lineTo(current.x, current.y);
+  }
+  if (path.closed !== false) {
+    const previous = mapped.at(-1)!,
+      current = mapped[0];
+    if (previous.outgoing || current.incoming)
+      ctx.bezierCurveTo(
+        previous.outgoing?.x ?? previous.x,
+        previous.outgoing?.y ?? previous.y,
+        current.incoming?.x ?? current.x,
+        current.incoming?.y ?? current.y,
+        current.x,
+        current.y,
+      );
+    else ctx.lineTo(current.x, current.y);
+    ctx.closePath();
+  }
+  return true;
+};
+
+const savedPathSvgData = (path: SavedPath) => {
+  const anchors = pathAnchors(path);
+  if (anchors.length < 2) return '';
+  let data = `M ${anchors[0].x} ${anchors[0].y}`;
+  const segment = (previous: BezierAnchor, current: BezierAnchor) =>
+    previous.outgoing || current.incoming
+      ? ` C ${previous.outgoing?.x ?? previous.x} ${previous.outgoing?.y ?? previous.y} ${current.incoming?.x ?? current.x} ${current.incoming?.y ?? current.y} ${current.x} ${current.y}`
+      : ` L ${current.x} ${current.y}`;
+  for (let index = 1; index < anchors.length; index++)
+    data += segment(anchors[index - 1], anchors[index]);
+  if (path.closed !== false)
+    data += `${segment(anchors.at(-1)!, anchors[0])} Z`;
+  return data;
 };
 type SavedSelection = { id: string; name: string; mask: string };
 type SmartFilter = {
@@ -724,7 +801,8 @@ const smartFilterRenderCache = new VersionedRenderCache<HTMLCanvasElement>(
 const canvasBlob = (canvas: HTMLCanvasElement) =>
   new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(Error('Canvas encoding failed'))),
+      (blob) =>
+        blob ? resolve(blob) : reject(Error('Canvas encoding failed')),
       'image/png',
     ),
   );
@@ -749,7 +827,10 @@ const imageMaskCanvas = async (blob: Blob) => {
     const image = new Image();
     image.src = url;
     await image.decode();
-    const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight)),
+    const scale = Math.min(
+        1,
+        512 / Math.max(image.naturalWidth, image.naturalHeight),
+      ),
       width = Math.max(1, Math.round(image.naturalWidth * scale)),
       height = Math.max(1, Math.round(image.naturalHeight * scale)),
       canvas = makeCanvas(width, height),
@@ -801,10 +882,23 @@ const abrBrushMask = (
   }
   const canvas = makeCanvas(256, 256),
     context = canvas.getContext('2d')!,
-    roundness = Math.max(0.05, Math.min(1, Number(shape.roundness ?? 100) / 100)),
-    hardness = Math.max(0, Math.min(1, Number(shape.hardness ?? shape.tipsHardness ?? 80) / 100)),
+    roundness = Math.max(
+      0.05,
+      Math.min(1, Number(shape.roundness ?? 100) / 100),
+    ),
+    hardness = Math.max(
+      0,
+      Math.min(1, Number(shape.hardness ?? shape.tipsHardness ?? 80) / 100),
+    ),
     radius = 118,
-    gradient = context.createRadialGradient(0, 0, radius * hardness, 0, 0, radius);
+    gradient = context.createRadialGradient(
+      0,
+      0,
+      radius * hardness,
+      0,
+      0,
+      radius,
+    );
   gradient.addColorStop(0, 'white');
   gradient.addColorStop(Math.min(0.999, hardness), 'white');
   gradient.addColorStop(1, 'rgba(255,255,255,0)');
@@ -1061,7 +1155,10 @@ const drawEditableText = (
   ctx.fontKerning = value.kerning ? 'normal' : 'none';
   ctx.fontVariantCaps = value.smallCaps ? 'small-caps' : 'normal';
   ctx.textBaseline = 'alphabetic';
-  ctx.direction = resolveTextDirection(value.content, value.direction ?? 'auto');
+  ctx.direction = resolveTextDirection(
+    value.content,
+    value.direction ?? 'auto',
+  );
   const sourceContent = value.ligatures
       ? value.content
       : value.content.replace(/f(?=[il])/g, 'f\u200c'),
@@ -1125,7 +1222,7 @@ const drawEditableText = (
         value.baseline +
         (value.spaceBefore ?? 0) +
         lineIndex * lineHeight +
-        (lineIndex > 0 ? value.spaceAfter ?? 0 : 0);
+        (lineIndex > 0 ? (value.spaceAfter ?? 0) : 0);
     let cursor = x;
     const justifyExtra =
       value.align === 'justify' && value.paragraph
@@ -1431,7 +1528,8 @@ const drawLayer = (
     source = temp;
   }
   const smartObject = layer.smartObject,
-    activeSmartFilters = smartObject?.filters.filter((filter) => filter.enabled) ?? [],
+    activeSmartFilters =
+      smartObject?.filters.filter((filter) => filter.enabled) ?? [],
     cacheable =
       !!smartObject &&
       !!activeSmartFilters.length &&
@@ -2381,6 +2479,8 @@ export default function Home() {
       'straight',
     ),
     [pathTension, setPathTension] = useState(50),
+    [selectedPathIds, setSelectedPathIds] = useState<string[]>([]),
+    [selectedAnchorIndex, setSelectedAnchorIndex] = useState(0),
     [shapeKind, setShapeKind] = useState<'rectangle' | 'ellipse' | 'polygon'>(
       'rectangle',
     ),
@@ -2434,7 +2534,10 @@ export default function Home() {
       .then(async (records) => {
         for (const record of records) {
           if (cancelled) return;
-          brushTipCanvases.current.set(record.id, await blobCanvas(record.blob));
+          brushTipCanvases.current.set(
+            record.id,
+            await blobCanvas(record.blob),
+          );
           const url = URL.createObjectURL(record.blob);
           brushTipUrls.current.set(record.id, url);
         }
@@ -2916,10 +3019,7 @@ export default function Home() {
           ? { ...selectionRef.current }
           : null,
         selectionPath: selectionPathRef.current?.map((p) => ({ ...p })) ?? null,
-        paths: paths.map((p) => ({
-          ...p,
-          points: p.points.map((point) => ({ ...point })),
-        })),
+        paths: paths.map((path) => structuredClone(path)),
         layerComps: layerComps.map((c) => ({
           ...c,
           states: c.states.map((s) => ({ ...s })),
@@ -3016,13 +3116,7 @@ export default function Home() {
     setSelectionPath(snap.selectionPath?.map((p) => ({ ...p })) ?? null);
     selectionPathRef.current =
       snap.selectionPath?.map((p) => ({ ...p })) ?? null;
-    if (snap.paths)
-      setPaths(
-        snap.paths.map((p) => ({
-          ...p,
-          points: p.points.map((point) => ({ ...point })),
-        })),
-      );
+    if (snap.paths) setPaths(snap.paths.map((path) => structuredClone(path)));
     if (snap.layerComps) {
       const comps = snap.layerComps.map((c) => ({
         ...c,
@@ -3148,10 +3242,7 @@ export default function Home() {
         zoom,
         selection: snap.selectionBounds ? { ...snap.selectionBounds } : null,
         selectionPath: snap.selectionPath?.map((point) => ({ ...point })),
-        paths: snap.paths?.map((path) => ({
-          ...path,
-          points: path.points.map((point) => ({ ...point })),
-        })),
+        paths: snap.paths?.map((path) => structuredClone(path)),
         layerComps: snap.layerComps?.map((comp) => ({
           ...comp,
           states: comp.states.map((state) => ({ ...state })),
@@ -3493,8 +3584,7 @@ export default function Home() {
       paths,
       savedSelections,
       feather,
-      smartObjectSource:
-        documentStoreRef.current.get(id)?.smartObjectSource,
+      smartObjectSource: documentStoreRef.current.get(id)?.smartObjectSource,
     });
   };
   const embeddedDataForDocument = (
@@ -3530,7 +3620,9 @@ export default function Home() {
     if (!source || !binding) return;
     const parent = documentStoreRef.current.get(binding.parentDocumentId);
     if (!parent) {
-      setStatus('The parent document was closed; source edits remain in this tab');
+      setStatus(
+        'The parent document was closed; source edits remain in this tab',
+      );
       return;
     }
     const embeddedDocument = embeddedDataForDocument(source);
@@ -3961,86 +4053,139 @@ export default function Home() {
       ctx.fill();
       commitSelectionMask(mask, `Lasso selection · ${clean.length} points`);
     } else {
+      const id = crypto.randomUUID(),
+        curved = pathMode === 'curvature' || pathCurved;
       const next = {
-        id: crypto.randomUUID(),
+        id,
         name: `Work Path ${paths.length + 1}`,
         points: clean,
-        curved: pathMode === 'curvature' || pathCurved,
+        anchors: anchorsFromPoints(clean, curved, pathTension),
+        closed: true,
+        curved,
         tension: pathTension,
       };
       setPaths((items) => [next, ...items]);
+      setSelectedPathIds([id]);
+      setSelectedAnchorIndex(0);
       setTimeout(() => snapshot('Save work path'), 0);
       setStatus(`${next.name} saved`);
     }
     polygonDraft.current = [];
     setDraftPoints([]);
   };
-  const updateFrontPath = (
+  const updateSelectedPath = (
     label: string,
     change: (path: SavedPath) => SavedPath,
   ) => {
-    if (!paths.length) {
+    const targetId =
+      selectedPathIds.find((id) => paths.some((path) => path.id === id)) ??
+      paths[0]?.id;
+    if (!targetId) {
       setStatus('Create or select a saved path first');
       return;
     }
-    setPaths((items) => [change(items[0]), ...items.slice(1)]);
+    setPaths((items) =>
+      items.map((path) => (path.id === targetId ? change(path) : path)),
+    );
     setTimeout(() => snapshot(label), 0);
     setStatus(label);
   };
   const addPathAnchor = () =>
-    updateFrontPath('Anchor point added', (path) => {
-      const first = path.points[0],
-        last = path.points.at(-1)!;
+    updateSelectedPath('Anchor point added', (path) => {
+      const anchors = pathAnchors(path),
+        first = anchors[0],
+        last = anchors.at(-1)!,
+        next = {
+          x: (first.x + last.x) / 2,
+          y: (first.y + last.y) / 2,
+          kind: 'corner' as const,
+        },
+        updated = [...anchors, next];
+      setSelectedAnchorIndex(updated.length - 1);
       return {
         ...path,
-        points: [
-          ...path.points,
-          { x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 },
-        ],
+        points: updated.map(({ x, y }) => ({ x, y })),
+        anchors: updated,
       };
     });
   const deletePathAnchor = () =>
-    updateFrontPath('Anchor point deleted', (path) => ({
-      ...path,
-      points: path.points.length > 3 ? path.points.slice(0, -1) : path.points,
-    }));
+    updateSelectedPath('Anchor point deleted', (path) => {
+      const anchors = pathAnchors(path);
+      if (anchors.length <= 3) return path;
+      const updated = anchors.filter(
+        (_, index) =>
+          index !== Math.min(selectedAnchorIndex, anchors.length - 1),
+      );
+      setSelectedAnchorIndex((index) => Math.min(index, updated.length - 1));
+      return {
+        ...path,
+        points: updated.map(({ x, y }) => ({ x, y })),
+        anchors: updated,
+      };
+    });
   const togglePathPointType = () =>
-    updateFrontPath('Corner and smooth points converted', (path) => ({
-      ...path,
-      curved: !path.curved,
-    }));
-  const nudgePath = (dx: number, dy: number) =>
-    updateFrontPath('Path moved with Direct Selection', (path) => ({
-      ...path,
-      points: path.points.map((point) => ({
-        x: point.x + dx,
-        y: point.y + dy,
-      })),
-    }));
+    updateSelectedPath('Anchor point converted', (path) => {
+      const anchors = pathAnchors(path),
+        index = Math.min(selectedAnchorIndex, anchors.length - 1),
+        kind = anchors[index]?.kind === 'smooth' ? 'corner' : 'smooth',
+        updated = convertAnchorKind(anchors, index, kind);
+      return {
+        ...path,
+        curved: updated.some((anchor) => anchor.kind === 'smooth'),
+        anchors: updated,
+      };
+    });
+  const moveSelectedPathAnchor = (x: number, y: number) =>
+    updateSelectedPath('Anchor moved with Direct Selection', (path) => {
+      const updated = moveAnchor(pathAnchors(path), selectedAnchorIndex, x, y);
+      return {
+        ...path,
+        points: updated.map((anchor) => ({ x: anchor.x, y: anchor.y })),
+        anchors: updated,
+      };
+    });
+  const nudgePathAnchor = (dx: number, dy: number) => {
+    const path =
+        paths.find((item) => selectedPathIds.includes(item.id)) ?? paths[0],
+      anchor = path && pathAnchors(path)[selectedAnchorIndex];
+    if (anchor) moveSelectedPathAnchor(anchor.x + dx, anchor.y + dy);
+  };
+  const dragPathControl = (
+    pathId: string,
+    index: number,
+    point: Point,
+    handle?: 'incoming' | 'outgoing',
+  ) =>
+    setPaths((items) =>
+      items.map((path) => {
+        if (path.id !== pathId) return path;
+        const anchors = handle
+          ? moveAnchorHandle(pathAnchors(path), index, handle, point.x, point.y)
+          : moveAnchor(pathAnchors(path), index, point.x, point.y);
+        return {
+          ...path,
+          curved: anchors.some((anchor) => anchor.kind === 'smooth'),
+          points: anchors.map((anchor) => ({
+            x: anchor.x,
+            y: anchor.y,
+          })),
+          anchors,
+        };
+      }),
+    );
   const fillStrokePath = (fillPath: boolean) => {
-    const path = paths[0],
+    const path =
+        paths.find((item) => selectedPathIds.includes(item.id)) ?? paths[0],
       target = targetContext();
     if (!path || !target || path.points.length < 2) {
       setStatus('Select a saved path and an unlocked pixel layer first');
       return;
     }
-    const points = path.points.map((point) => toLayerPoint(target.meta, point));
     withSelection(target.ctx, target.meta, () => {
       target.ctx.save();
-      target.ctx.beginPath();
-      target.ctx.moveTo(points[0].x, points[0].y);
-      if (path.curved && points.length > 2) {
-        const tension = (path.tension ?? 50) / 100;
-        for (let index = 1; index < points.length; index++) {
-          const previous = points[index - 1],
-            current = points[index],
-            cx = previous.x + (current.x - previous.x) * tension,
-            cy = previous.y + (current.y - previous.y) * tension;
-          target.ctx.quadraticCurveTo(cx, cy, current.x, current.y);
-        }
-      } else
-        points.slice(1).forEach((point) => target.ctx.lineTo(point.x, point.y));
-      target.ctx.closePath();
+      traceSavedPath(target.ctx, path, (point) =>
+        toLayerPoint(target.meta, point),
+      );
       target.ctx.globalAlpha = opacity / 100;
       if (fillPath) {
         target.ctx.fillStyle = color;
@@ -4648,7 +4793,11 @@ export default function Home() {
                       )
                     : paint,
                 dabPaint = (() => {
-                  if (!mixerBrush || editing !== 'pixels' || paintTool !== 'brush')
+                  if (
+                    !mixerBrush ||
+                    editing !== 'pixels' ||
+                    paintTool !== 'brush'
+                  )
                     return jitteredPaint;
                   const sampled = target.ctx.getImageData(
                       Math.max(0, Math.min(doc.w - 1, Math.round(x))),
@@ -5424,11 +5573,7 @@ export default function Home() {
     const image = surface.pixels
         .getContext('2d', { willReadFrequently: true })!
         .getImageData(0, 0, surface.pixels.width, surface.pixels.height),
-      contours = traceAlphaContours(
-        image.data,
-        image.width,
-        image.height,
-      );
+      contours = traceAlphaContours(image.data, image.width, image.height);
     if (!contours.length) {
       setStatus('The text has no visible glyph outlines to convert');
       return;
@@ -5953,38 +6098,78 @@ export default function Home() {
     if (group?.kind === 'group')
       patchLayer(id, { collapsed: !group.collapsed });
   };
-  const makePathSelection = (points: Point[], curved = false) => {
-    if (points.length < 3) return;
+  const makePathSelection = (path: SavedPath) => {
+    if (path.points.length < 3) return;
     const mask = makeCanvas(doc.w, doc.h),
       ctx = mask.getContext('2d')!;
     ctx.fillStyle = 'white';
-    ctx.beginPath();
-    if (curved) {
-      const firstMid = {
-        x: (points[0].x + points[1].x) / 2,
-        y: (points[0].y + points[1].y) / 2,
-      };
-      ctx.moveTo(firstMid.x, firstMid.y);
-      for (let index = 1; index <= points.length; index++) {
-        const anchor = points[index % points.length],
-          next = points[(index + 1) % points.length];
-        ctx.quadraticCurveTo(
-          anchor.x,
-          anchor.y,
-          (anchor.x + next.x) / 2,
-          (anchor.y + next.y) / 2,
-        );
-      }
-    } else {
-      ctx.moveTo(points[0].x, points[0].y);
-      points.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
-    }
-    ctx.closePath();
+    traceSavedPath(ctx, path);
     ctx.fill();
     commitSelectionMask(mask, 'Path loaded as selection');
-    setSelectionPath(points.map((point) => ({ ...point })));
-    selectionPathRef.current = points.map((point) => ({ ...point }));
+    setSelectionPath(path.points.map((point) => ({ ...point })));
+    selectionPathRef.current = path.points.map((point) => ({ ...point }));
     snapshot('Path to selection');
+  };
+  const combineSelectedPaths = (operation: PathBooleanOperation) => {
+    const selectedPaths = selectedPathIds
+      .map((id) => paths.find((path) => path.id === id))
+      .filter((path): path is SavedPath => Boolean(path));
+    if (selectedPaths.length !== 2) {
+      setStatus('Select exactly two paths for a Boolean operation');
+      return;
+    }
+    const pathMask = (path: SavedPath) => {
+        const canvas = makeCanvas(doc.w, doc.h),
+          context = canvas.getContext('2d')!;
+        context.fillStyle = 'white';
+        traceSavedPath(context, path);
+        context.fill();
+        const rgba = context.getImageData(0, 0, doc.w, doc.h).data,
+          alpha = new Uint8ClampedArray(doc.w * doc.h);
+        for (let index = 0; index < alpha.length; index++)
+          alpha[index] = rgba[index * 4 + 3];
+        return alpha;
+      },
+      alpha = combinePathMasks(
+        pathMask(selectedPaths[0]),
+        pathMask(selectedPaths[1]),
+        operation,
+      ),
+      rgba = new Uint8ClampedArray(doc.w * doc.h * 4);
+    for (let index = 0; index < alpha.length; index++) {
+      rgba[index * 4] = 255;
+      rgba[index * 4 + 1] = 255;
+      rgba[index * 4 + 2] = 255;
+      rgba[index * 4 + 3] = alpha[index];
+    }
+    const contours = traceAlphaContours(rgba, doc.w, doc.h, 24, 10_000),
+      label =
+        operation === 'union'
+          ? 'Union'
+          : operation === 'subtract'
+            ? 'Subtract'
+            : operation === 'intersect'
+              ? 'Intersect'
+              : 'Exclude overlap',
+      created = contours.map<SavedPath>((points, index) => ({
+        id: crypto.randomUUID(),
+        name: `${label}${contours.length > 1 ? ` ${index + 1}` : ''}`,
+        points,
+        anchors: anchorsFromPoints(points, false),
+        closed: true,
+        curved: false,
+      }));
+    if (!created.length) {
+      setStatus(`${label} produced an empty path`);
+      return;
+    }
+    setPaths((items) => [...created, ...items]);
+    setSelectedPathIds(created.map((path) => path.id));
+    setSelectedAnchorIndex(0);
+    setTimeout(() => snapshot(`Boolean path ${label}`), 0);
+    setStatus(
+      `${label} created ${created.length} editable contour${created.length === 1 ? '' : 's'}`,
+    );
   };
   const duplicatePath = (id: string) => {
     const path = paths.find((item) => item.id === id);
@@ -5995,13 +6180,20 @@ export default function Home() {
         id: crypto.randomUUID(),
         name: `${path.name} copy`,
         points: path.points.map((point) => ({ ...point })),
+        anchors: pathAnchors(path).map((anchor) => ({
+          ...anchor,
+          incoming: anchor.incoming ? { ...anchor.incoming } : undefined,
+          outgoing: anchor.outgoing ? { ...anchor.outgoing } : undefined,
+        })),
       },
       ...items,
     ]);
     setTimeout(() => snapshot('Duplicate path'), 0);
+    setStatus(`${path.name} duplicated`);
   };
   const removePath = (id: string) => {
     setPaths((items) => items.filter((item) => item.id !== id));
+    setSelectedPathIds((items) => items.filter((item) => item !== id));
     setTimeout(() => snapshot('Delete path'), 0);
   };
   const duplicate = () => {
@@ -7030,7 +7222,9 @@ export default function Home() {
       return;
     }
     if (smart.kind === 'linked') {
-      setStatus('Linked Smart Objects use Refresh, Relink, or Replace contents');
+      setStatus(
+        'Linked Smart Objects use Refresh, Relink, or Replace contents',
+      );
       return;
     }
     const instanceId = smart.instanceId ?? crypto.randomUUID(),
@@ -7056,14 +7250,17 @@ export default function Home() {
         const image = new Image();
         image.onload = () => {
           if (image.naturalWidth !== width || image.naturalHeight !== height) {
-            reject(Error('Embedded Smart Object pixel dimensions do not match'));
+            reject(
+              Error('Embedded Smart Object pixel dimensions do not match'),
+            );
             return;
           }
           const pixels = makeCanvas(width, height);
           pixels.getContext('2d')!.drawImage(image, 0, 0);
           resolve(pixels);
         };
-        image.onerror = () => reject(Error('Embedded Smart Object pixels are invalid'));
+        image.onerror = () =>
+          reject(Error('Embedded Smart Object pixels are invalid'));
         image.src = uri;
       });
     try {
@@ -7074,7 +7271,11 @@ export default function Home() {
           nextSurfaces = new Map<string, LayerSurface>();
         for (const record of embedded.surfaces)
           nextSurfaces.set(record.id, {
-            pixels: await decode(record.pixels, embedded.width, embedded.height),
+            pixels: await decode(
+              record.pixels,
+              embedded.width,
+              embedded.height,
+            ),
             mask: record.mask
               ? await decode(record.mask, embedded.width, embedded.height)
               : undefined,
@@ -7427,7 +7628,8 @@ export default function Home() {
         const { readAbr } = await import('ag-psd'),
           pack = readAbr(new Uint8Array(await file.arrayBuffer())),
           folder = file.name.replace(/\.abr$/i, '') || 'Imported ABR';
-        if (!pack.brushes.length) throw Error('No brushes were found in this ABR file');
+        if (!pack.brushes.length)
+          throw Error('No brushes were found in this ABR file');
         let first: BrushTipRecord | undefined;
         for (let index = 0; index < pack.brushes.length; index++) {
           const brush = pack.brushes[index],
@@ -7450,9 +7652,7 @@ export default function Home() {
               settings: {
                 size: Number(shape.size ?? 32),
                 angle: Number(shape.angle ?? 0),
-                roundness: Number(
-                  'roundness' in shape ? shape.roundness : 100,
-                ),
+                roundness: Number('roundness' in shape ? shape.roundness : 100),
                 spacing: Number(shape.spacing ?? brush.spacing ?? 10),
                 sizeJitter: brush.shapeDynamics?.sizeDynamics.jitter,
                 opacityJitter: brush.transfer?.opacityDynamics.jitter,
@@ -7487,7 +7687,9 @@ export default function Home() {
       }
     } catch (error) {
       setStatus(
-        error instanceof Error ? error.message : 'Brush tips could not be imported',
+        error instanceof Error
+          ? error.message
+          : 'Brush tips could not be imported',
       );
     } finally {
       if (brushTipFileRef.current) brushTipFileRef.current.value = '';
@@ -7495,13 +7697,17 @@ export default function Home() {
   };
   const updateBrushTip = async (
     id: string,
-    patch: Partial<Pick<BrushTipRecord, 'name' | 'folder' | 'tags' | 'favorite'>>,
+    patch: Partial<
+      Pick<BrushTipRecord, 'name' | 'folder' | 'tags' | 'favorite'>
+    >,
   ) => {
     const current = brushTips.find((tip) => tip.id === id);
     if (!current) return;
     const next = { ...current, ...patch, updated: Date.now() };
     await saveBrushTip(next);
-    setBrushTips((items) => items.map((item) => (item.id === id ? next : item)));
+    setBrushTips((items) =>
+      items.map((item) => (item.id === id ? next : item)),
+    );
   };
   const removeBrushTip = async (id: string) => {
     await deleteBrushTip(id);
@@ -9836,6 +10042,21 @@ export default function Home() {
         Array.isArray(points) &&
         points.length <= 10000 &&
         points.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+      const validAnchors = (anchors: unknown): anchors is BezierAnchor[] =>
+        Array.isArray(anchors) &&
+        anchors.length <= 10000 &&
+        anchors.every(
+          (anchor) =>
+            anchor &&
+            Number.isFinite(anchor.x) &&
+            Number.isFinite(anchor.y) &&
+            (anchor.kind === 'corner' || anchor.kind === 'smooth') &&
+            [anchor.incoming, anchor.outgoing].every(
+              (handle) =>
+                handle === undefined ||
+                (Number.isFinite(handle.x) && Number.isFinite(handle.y)),
+            ),
+        );
       const importedPaths = Array.isArray(data.paths)
         ? data.paths
             .filter(
@@ -9848,7 +10069,18 @@ export default function Home() {
               id: path.id,
               name: path.name,
               points: path.points.map((point) => ({ ...point })),
+              anchors:
+                validAnchors(path.anchors) &&
+                path.anchors.length === path.points.length
+                  ? structuredClone(path.anchors)
+                  : anchorsFromPoints(
+                      path.points,
+                      path.curved === true,
+                      path.tension,
+                    ),
+              closed: path.closed !== false,
               curved: path.curved === true,
+              tension: Number.isFinite(path.tension) ? path.tension : 50,
             }))
         : [];
       loadImportedDocument(
@@ -9899,7 +10131,12 @@ export default function Home() {
           : 0,
       );
       if (validPoints(data.selectionPath) && data.selectionPath.length >= 3) {
-        makePathSelection(data.selectionPath);
+        makePathSelection({
+          id: 'imported-selection',
+          name: 'Imported selection',
+          points: data.selectionPath,
+          closed: true,
+        });
       } else if (
         data.selection &&
         ['x', 'y', 'w', 'h'].every((key) =>
@@ -12520,6 +12757,10 @@ export default function Home() {
     return canvas;
   };
 
+  const activePath = paths.find((path) => path.id === selectedPathIds[0]),
+    activePathAnchors = activePath ? pathAnchors(activePath) : [],
+    activePathAnchor = activePathAnchors[selectedAnchorIndex];
+
   return (
     <main
       className={`editor-shell theme-${preferences.theme ?? 'dark'} ui-scale-${preferences.interfaceScale ?? 100} ${motionClassName(preferences.motion)}`}
@@ -13266,7 +13507,10 @@ export default function Home() {
                 <details className="brush-dynamics">
                   <summary>Brush dynamics</summary>
                   <div>
-                    <section className="brush-library" aria-label="Brush library">
+                    <section
+                      className="brush-library"
+                      aria-label="Brush library"
+                    >
                       <div className="brush-library-heading">
                         <strong>Brush library</strong>
                         <Button
@@ -13299,12 +13543,16 @@ export default function Home() {
                           aria-label="Search brush tips"
                           placeholder="Search brushes…"
                           value={brushQuery}
-                          onChange={(event) => setBrushQuery(event.target.value)}
+                          onChange={(event) =>
+                            setBrushQuery(event.target.value)
+                          }
                         />
                         <select
                           aria-label="Brush folder"
                           value={brushFolder}
-                          onChange={(event) => setBrushFolder(event.target.value)}
+                          onChange={(event) =>
+                            setBrushFolder(event.target.value)
+                          }
                         >
                           <option value="all">All folders</option>
                           {brushFolders.map((folder) => (
@@ -13324,21 +13572,29 @@ export default function Home() {
                           Favorites
                         </label>
                       </div>
-                      <div className="brush-tip-grid" aria-label="Available brush tips">
+                      <div
+                        className="brush-tip-grid"
+                        aria-label="Available brush tips"
+                      >
                         <button
                           type="button"
                           className={!activeBrushTipId ? 'active' : ''}
                           aria-pressed={!activeBrushTipId}
                           onClick={() => applyBrushTip()}
                         >
-                          <span className="round-tip-preview" aria-hidden="true" />
+                          <span
+                            className="round-tip-preview"
+                            aria-hidden="true"
+                          />
                           <span>Soft round</span>
                         </button>
                         {visibleBrushTips.map((tip) => (
                           <button
                             type="button"
                             key={tip.id}
-                            className={tip.id === activeBrushTipId ? 'active' : ''}
+                            className={
+                              tip.id === activeBrushTipId ? 'active' : ''
+                            }
                             aria-pressed={tip.id === activeBrushTipId}
                             title={`${tip.name} · ${tip.folder} · ${tip.tags.join(', ')}`}
                             onClick={() => applyBrushTip(tip)}
@@ -13348,7 +13604,10 @@ export default function Home() {
                               src={brushTipUrls.current.get(tip.id)}
                               alt=""
                             />
-                            <span>{tip.favorite ? '★ ' : ''}{tip.name}</span>
+                            <span>
+                              {tip.favorite ? '★ ' : ''}
+                              {tip.name}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -13375,8 +13634,11 @@ export default function Home() {
                               maxLength={60}
                               onChange={(event) => {
                                 const folder = event.target.value || 'Custom';
-                                if (brushFolder !== 'all') setBrushFolder(folder);
-                                void updateBrushTip(activeBrushTip.id, { folder });
+                                if (brushFolder !== 'all')
+                                  setBrushFolder(folder);
+                                void updateBrushTip(activeBrushTip.id, {
+                                  folder,
+                                });
                               }}
                             />
                           </label>
@@ -13405,12 +13667,16 @@ export default function Home() {
                                 })
                               }
                             >
-                              {activeBrushTip.favorite ? '★ Favorite' : '☆ Favorite'}
+                              {activeBrushTip.favorite
+                                ? '★ Favorite'
+                                : '☆ Favorite'}
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => void removeBrushTip(activeBrushTip.id)}
+                              onClick={() =>
+                                void removeBrushTip(activeBrushTip.id)
+                              }
                             >
                               Remove tip
                             </Button>
@@ -14191,29 +14457,108 @@ export default function Home() {
                     }
                   />
                 </label>
-                <Button size="sm" variant="ghost" onClick={addPathAnchor}>
-                  Add point
-                </Button>
-                <Button size="sm" variant="ghost" onClick={deletePathAnchor}>
-                  Delete point
-                </Button>
-                <Button size="sm" variant="ghost" onClick={togglePathPointType}>
-                  Corner / smooth
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => nudgePath(-1, 0)}
-                >
-                  Direct select ←
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => nudgePath(1, 0)}
-                >
-                  Direct select →
-                </Button>
+                <details className="path-direct-controls">
+                  <summary>Direct selection</summary>
+                  <div>
+                    <label>
+                      Anchor
+                      <select
+                        aria-label="Selected path anchor"
+                        disabled={!activePathAnchors.length}
+                        value={Math.min(
+                          selectedAnchorIndex,
+                          Math.max(0, activePathAnchors.length - 1),
+                        )}
+                        onChange={(event) =>
+                          setSelectedAnchorIndex(+event.target.value)
+                        }
+                      >
+                        {activePathAnchors.map((anchor, index) => (
+                          <option key={index} value={index}>
+                            {index + 1} · {anchor.kind}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      X
+                      <input
+                        aria-label="Selected anchor X"
+                        className="number-option compact-number"
+                        type="number"
+                        value={Math.round(activePathAnchor?.x ?? 0)}
+                        disabled={!activePathAnchor}
+                        onChange={(event) =>
+                          activePathAnchor &&
+                          moveSelectedPathAnchor(
+                            +event.target.value || 0,
+                            activePathAnchor.y,
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      Y
+                      <input
+                        aria-label="Selected anchor Y"
+                        className="number-option compact-number"
+                        type="number"
+                        value={Math.round(activePathAnchor?.y ?? 0)}
+                        disabled={!activePathAnchor}
+                        onChange={(event) =>
+                          activePathAnchor &&
+                          moveSelectedPathAnchor(
+                            activePathAnchor.x,
+                            +event.target.value || 0,
+                          )
+                        }
+                      />
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activePathAnchor}
+                      onClick={togglePathPointType}
+                    >
+                      Convert{' '}
+                      {activePathAnchor?.kind === 'smooth'
+                        ? 'corner'
+                        : 'smooth'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activePathAnchor}
+                      onClick={() => nudgePathAnchor(-1, 0)}
+                    >
+                      ← 1 px
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activePathAnchor}
+                      onClick={() => nudgePathAnchor(1, 0)}
+                    >
+                      1 px →
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activePath}
+                      onClick={addPathAnchor}
+                    >
+                      Add point
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={activePathAnchors.length <= 3}
+                      onClick={deletePathAnchor}
+                    >
+                      Delete point
+                    </Button>
+                  </div>
+                </details>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -14344,12 +14689,15 @@ export default function Home() {
                     type="file"
                     aria-label="Load local font"
                     accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf"
-                    onChange={(event) => void loadCustomFont(event.target.files?.[0])}
+                    onChange={(event) =>
+                      void loadCustomFont(event.target.files?.[0])
+                    }
                   />
                 </div>
                 {!fontAvailable && (
                   <p className="control-warning" role="status">
-                    {fontFamily} is missing. A system fallback is shown; load the font to preserve the design.
+                    {fontFamily} is missing. A system fallback is shown; load
+                    the font to preserve the design.
                   </p>
                 )}
                 <label>
@@ -14491,7 +14839,9 @@ export default function Home() {
                         min="-500"
                         max="500"
                         value={textIndent}
-                        onChange={(event) => setTextIndent(+event.target.value || 0)}
+                        onChange={(event) =>
+                          setTextIndent(+event.target.value || 0)
+                        }
                       />
                     </label>
                     <label>
@@ -14503,7 +14853,9 @@ export default function Home() {
                         max="500"
                         value={textSpaceBefore}
                         onChange={(event) =>
-                          setTextSpaceBefore(Math.max(0, +event.target.value || 0))
+                          setTextSpaceBefore(
+                            Math.max(0, +event.target.value || 0),
+                          )
                         }
                       />
                     </label>
@@ -14516,7 +14868,9 @@ export default function Home() {
                         max="500"
                         value={textSpaceAfter}
                         onChange={(event) =>
-                          setTextSpaceAfter(Math.max(0, +event.target.value || 0))
+                          setTextSpaceAfter(
+                            Math.max(0, +event.target.value || 0),
+                          )
                         }
                       />
                     </label>
@@ -15227,6 +15581,165 @@ export default function Home() {
               <div className="selection-box" style={selectionStyle} />
             )}{' '}
             {dragRect && <div className="drag-box" style={dragStyle} />}{' '}
+            {tool === 'path' && activePath && (
+              <svg
+                className="saved-path-overlay"
+                viewBox={`0 0 ${doc.w} ${doc.h}`}
+                preserveAspectRatio="none"
+                aria-label={`Editing ${activePath.name}`}
+              >
+                <path d={savedPathSvgData(activePath)} />
+                {activePathAnchors.map((anchor, index) => (
+                  <Fragment key={index}>
+                    {anchor.incoming && (
+                      <line
+                        x1={anchor.incoming.x}
+                        y1={anchor.incoming.y}
+                        x2={anchor.x}
+                        y2={anchor.y}
+                      />
+                    )}
+                    {anchor.outgoing && (
+                      <line
+                        x1={anchor.x}
+                        y1={anchor.y}
+                        x2={anchor.outgoing.x}
+                        y2={anchor.outgoing.y}
+                      />
+                    )}
+                    {anchor.incoming && (
+                      <circle
+                        className="bezier-handle"
+                        cx={anchor.incoming.x}
+                        cy={anchor.incoming.y}
+                        r={Math.max(2, (3 / zoom) * 100)}
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          setSelectedAnchorIndex(index);
+                          event.currentTarget.setPointerCapture(
+                            event.pointerId,
+                          );
+                        }}
+                        onPointerMove={(event) => {
+                          if (
+                            !event.currentTarget.hasPointerCapture(
+                              event.pointerId,
+                            )
+                          )
+                            return;
+                          const next = viewportRef.current?.point(
+                            event.clientX,
+                            event.clientY,
+                          );
+                          if (next)
+                            dragPathControl(
+                              activePath.id,
+                              index,
+                              next,
+                              'incoming',
+                            );
+                        }}
+                        onPointerUp={(event) => {
+                          event.currentTarget.releasePointerCapture(
+                            event.pointerId,
+                          );
+                          setTimeout(
+                            () => snapshot('Bézier handle dragged'),
+                            0,
+                          );
+                          setStatus('Bézier handles adjusted');
+                        }}
+                      />
+                    )}
+                    {anchor.outgoing && (
+                      <circle
+                        className="bezier-handle"
+                        cx={anchor.outgoing.x}
+                        cy={anchor.outgoing.y}
+                        r={Math.max(2, (3 / zoom) * 100)}
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          setSelectedAnchorIndex(index);
+                          event.currentTarget.setPointerCapture(
+                            event.pointerId,
+                          );
+                        }}
+                        onPointerMove={(event) => {
+                          if (
+                            !event.currentTarget.hasPointerCapture(
+                              event.pointerId,
+                            )
+                          )
+                            return;
+                          const next = viewportRef.current?.point(
+                            event.clientX,
+                            event.clientY,
+                          );
+                          if (next)
+                            dragPathControl(
+                              activePath.id,
+                              index,
+                              next,
+                              'outgoing',
+                            );
+                        }}
+                        onPointerUp={(event) => {
+                          event.currentTarget.releasePointerCapture(
+                            event.pointerId,
+                          );
+                          setTimeout(
+                            () => snapshot('Bézier handle dragged'),
+                            0,
+                          );
+                          setStatus('Bézier handles adjusted');
+                        }}
+                      />
+                    )}
+                    <circle
+                      className={
+                        index === selectedAnchorIndex ? 'active-anchor' : ''
+                      }
+                      cx={anchor.x}
+                      cy={anchor.y}
+                      r={Math.max(3, (5 / zoom) * 100)}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        setSelectedAnchorIndex(index);
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={(event) => {
+                        if (
+                          !event.currentTarget.hasPointerCapture(
+                            event.pointerId,
+                          )
+                        )
+                          return;
+                        event.stopPropagation();
+                        const next = viewportRef.current?.point(
+                          event.clientX,
+                          event.clientY,
+                        );
+                        if (!next) return;
+                        dragPathControl(activePath.id, index, next);
+                      }}
+                      onPointerUp={(event) => {
+                        if (
+                          !event.currentTarget.hasPointerCapture(
+                            event.pointerId,
+                          )
+                        )
+                          return;
+                        event.currentTarget.releasePointerCapture(
+                          event.pointerId,
+                        );
+                        setTimeout(() => snapshot('Anchor dragged'), 0);
+                        setStatus('Anchor moved with Direct Selection');
+                      }}
+                    />
+                  </Fragment>
+                ))}
+              </svg>
+            )}
             {(selectionPath || draftPoints.length > 0) && (
               <svg
                 className="polygon-overlay"
@@ -15768,7 +16281,9 @@ export default function Home() {
                                       : 'Open once to create an editable layered source'}
                                   </small>
                                 </div>
-                                <button onClick={() => void editSmartContents()}>
+                                <button
+                                  onClick={() => void editSmartContents()}
+                                >
                                   Edit contents
                                 </button>
                               </div>
@@ -17309,11 +17824,40 @@ export default function Home() {
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => setTool('path')}
+                        onClick={() => {
+                          setTool('path');
+                          setSelectedPathIds([]);
+                          setSelectedAnchorIndex(0);
+                          polygonDraft.current = [];
+                          setDraftPoints([]);
+                          setStatus('Click the canvas to draw a new work path');
+                        }}
                       >
                         <PenTool />
                         Draw work path
                       </Button>
+                      <section
+                        className="path-boolean-actions"
+                        aria-label="Boolean path operations"
+                      >
+                        {(
+                          [
+                            ['union', 'Unite'],
+                            ['subtract', 'Subtract'],
+                            ['intersect', 'Intersect'],
+                            ['exclude', 'Exclude'],
+                          ] as const
+                        ).map(([operation, label]) => (
+                          <button
+                            key={operation}
+                            disabled={selectedPathIds.length !== 2}
+                            onClick={() => combineSelectedPaths(operation)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                        <small>Select exactly two paths</small>
+                      </section>
                       {paths.length === 0 ? (
                         <p>
                           No saved paths. Use the Pen Path tool and close with
@@ -17321,20 +17865,46 @@ export default function Home() {
                         </p>
                       ) : (
                         paths.map((path) => (
-                          <div key={path.id}>
+                          <div
+                            key={path.id}
+                            className={
+                              selectedPathIds.includes(path.id)
+                                ? 'selected'
+                                : ''
+                            }
+                          >
                             <span>
-                              <PenTool />
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${path.name} for path editing`}
+                                checked={selectedPathIds.includes(path.id)}
+                                onChange={(event) => {
+                                  setSelectedPathIds((items) =>
+                                    event.target.checked
+                                      ? [
+                                          path.id,
+                                          ...items.filter(
+                                            (item) => item !== path.id,
+                                          ),
+                                        ].slice(0, 2)
+                                      : items.filter(
+                                          (item) => item !== path.id,
+                                        ),
+                                  );
+                                  setSelectedAnchorIndex(0);
+                                }}
+                              />
                               <strong>{path.name}</strong>
                               <small>
                                 {path.points.length} points ·{' '}
-                                {path.curved ? 'curved' : 'straight'}
+                                {pathAnchors(path).some(
+                                  (anchor) => anchor.kind === 'smooth',
+                                )
+                                  ? 'Bézier'
+                                  : 'corner'}
                               </small>
                             </span>
-                            <button
-                              onClick={() =>
-                                makePathSelection(path.points, path.curved)
-                              }
-                            >
+                            <button onClick={() => makePathSelection(path)}>
                               Make selection
                             </button>
                             <button onClick={() => duplicatePath(path.id)}>

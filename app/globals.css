@@ -1017,7 +1017,8 @@ button {
   height: 28px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: repeating-conic-gradient(#303238 0 25%, #24262b 0 50%) 50% / 8px 8px;
+  background: repeating-conic-gradient(#303238 0 25%, #24262b 0 50%) 50% / 8px
+    8px;
   object-fit: cover;
 }
 .history-list .history-utility {
@@ -2195,6 +2196,41 @@ button {
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
+.saved-path-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.saved-path-overlay path {
+  fill: #55d4a414;
+  stroke: #55d4a4;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.saved-path-overlay line {
+  stroke: #efb75f;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.saved-path-overlay circle {
+  fill: #f4f4f5;
+  stroke: #16171a;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: pointer;
+}
+.saved-path-overlay circle.active-anchor {
+  fill: #55d4a4;
+  stroke: #fff;
+}
+.saved-path-overlay circle.bezier-handle {
+  fill: #efb75f;
+}
 @keyframes polygon-march {
   to {
     stroke-dashoffset: 18;
@@ -2454,10 +2490,20 @@ button {
   border-radius: 5px;
   padding: 6px;
 }
+.paths-list > div.selected {
+  border-color: #55d4a4;
+  background: #303b38;
+}
 .paths-list > div span {
   display: grid;
   grid-template-columns: 18px 1fr;
   align-items: center;
+}
+.paths-list > div span input {
+  grid-row: 1/3;
+  width: 14px;
+  height: 14px;
+  accent-color: #55d4a4;
 }
 .paths-list > div span svg {
   grid-row: 1/3;
@@ -2485,6 +2531,73 @@ button {
 }
 .paths-list > div button svg {
   width: 12px;
+}
+.path-boolean-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid #404147;
+  border-radius: 5px;
+  background: #292a2f;
+}
+.path-boolean-actions button {
+  min-width: 0;
+  border: 1px solid #484950;
+  border-radius: 4px;
+  padding: 5px 2px;
+  background: #34353a;
+  color: #ddd;
+  font-size: 9px;
+  cursor: pointer;
+}
+.path-boolean-actions button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.path-boolean-actions small {
+  grid-column: 1 / -1;
+  color: #92939c;
+  font-size: 9px;
+  text-align: center;
+}
+.path-direct-controls {
+  position: relative;
+}
+.path-direct-controls > summary {
+  height: 27px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid #4a4b52;
+  border-radius: 5px;
+  color: #ddd;
+  font-size: 11px;
+  cursor: pointer;
+  list-style: none;
+}
+.path-direct-controls > div {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 5px);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 7px;
+  min-width: 320px;
+  padding: 9px;
+  border: 1px solid #505159;
+  border-radius: 7px;
+  background: #25262b;
+  box-shadow: 0 10px 28px #0008;
+}
+.path-direct-controls label {
+  display: grid;
+  gap: 3px;
+}
+.options-bar:has(.path-direct-controls[open]) {
+  z-index: 90;
+  overflow: visible;
 }
 .group-properties {
   display: grid;

@@ -158,7 +158,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Editable text, basic shapes, Pen paths, fill/stroke, transforms, alignment, and guides.
 - [x] Full Character/Paragraph controls, OpenType, variable fonts, international shaping, and missing-font handling.
 - [x] Text on/in paths, Warp Text, dynamic fitting, and text-to-shape/path conversion.
-- [ ] Complete Bézier/Curvature Pen, anchor conversion, direct selection, and Boolean path operations.
+- [x] Complete Bézier/Curvature Pen, anchor conversion, direct selection, and Boolean path operations.
 - [ ] Stroke caps, joins, dashes, variable width, SVG import/export, and vector-preserving output.
 - [ ] Artboards, frames, key-object alignment, smart spacing, and multi-scale asset export.
 

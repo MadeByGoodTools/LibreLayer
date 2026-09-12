@@ -57,6 +57,10 @@ Choose Text (`T`), enter point or paragraph copy, and click the canvas. Characte
 
 Path placement follows a chosen saved path using its actual segment distances and tangents, or flows paragraph text inside a closed saved path with clipping. Warp Text provides Arc, Arch, Flag, Wave, Bulge, and Fish recipes with an editable bend value. Paragraph text can remain at its authored size, shrink until it fits, or expand to fill a bounded text box. **Convert to shapes** preserves the rendered appearance and traces visible glyph alpha into separate editable outline paths, including disconnected contours, instead of substituting a bounding rectangle.
 
+## Paths
+
+Use the Pen tool in Straight, Curvature, or Freeform mode and close the draft to save a work path. The selected path appears on the canvas with its real cubic curve, anchors, direction handles, and control lines. Drag an anchor or either Bézier handle directly; smooth handles remain mirrored. The Direct Selection menu also provides exact anchor selection, numeric X/Y positioning, one-pixel nudging, point insertion/deletion, and corner/smooth conversion. In the Paths panel, select exactly two paths and choose Unite, Subtract, Intersect, or Exclude to create new editable result contours. Path edits, conversions, and Boolean results are preserved in project files and undo history.
+
 Load local font accepts WOFF2, WOFF, TTF, and OTF files without uploading them. Locally loaded fonts last for the current editing session. When a project references a font that is not installed, LibreLayer displays a missing-font warning and uses a visible system fallback until the font is loaded.
 
 ## Color and adjustments
@@ -84,18 +88,18 @@ Changed documents are saved locally about every 10 seconds and when the page bec
 
 ## Core shortcuts
 
-| Action | Shortcut |
-| --- | --- |
-| New / Open / Save | `Ctrl/⌘+N` / `Ctrl/⌘+O` / `Ctrl/⌘+S` |
-| Undo / Redo | `Ctrl/⌘+Z` / `Ctrl/⌘+Shift+Z` |
-| Cut / Copy / Paste layer | `Ctrl/⌘+X` / `Ctrl/⌘+C` / `Ctrl/⌘+V` |
-| Free Transform / Duplicate | `Ctrl/⌘+T` / `Ctrl/⌘+J` |
-| Select all / Deselect / Reselect | `Ctrl/⌘+A` / `Ctrl/⌘+D` / `Ctrl/⌘+Shift+D` |
-| Clipping mask | `Alt/Option+Ctrl/⌘+G` |
-| Merge down / Merge visible | `Ctrl/⌘+E` / `Ctrl/⌘+Shift+E` |
-| Search commands / Hide panels | `Ctrl/⌘+K` / `Tab` |
-| Zoom in / out / fit / 100% | `Ctrl/⌘+=` / `Ctrl/⌘+-` / `Ctrl/⌘+0` / `Ctrl/⌘+1` |
-| Rulers | `Ctrl/⌘+R` |
+| Action                           | Shortcut                                          |
+| -------------------------------- | ------------------------------------------------- |
+| New / Open / Save                | `Ctrl/⌘+N` / `Ctrl/⌘+O` / `Ctrl/⌘+S`              |
+| Undo / Redo                      | `Ctrl/⌘+Z` / `Ctrl/⌘+Shift+Z`                     |
+| Cut / Copy / Paste layer         | `Ctrl/⌘+X` / `Ctrl/⌘+C` / `Ctrl/⌘+V`              |
+| Free Transform / Duplicate       | `Ctrl/⌘+T` / `Ctrl/⌘+J`                           |
+| Select all / Deselect / Reselect | `Ctrl/⌘+A` / `Ctrl/⌘+D` / `Ctrl/⌘+Shift+D`        |
+| Clipping mask                    | `Alt/Option+Ctrl/⌘+G`                             |
+| Merge down / Merge visible       | `Ctrl/⌘+E` / `Ctrl/⌘+Shift+E`                     |
+| Search commands / Hide panels    | `Ctrl/⌘+K` / `Tab`                                |
+| Zoom in / out / fit / 100%       | `Ctrl/⌘+=` / `Ctrl/⌘+-` / `Ctrl/⌘+0` / `Ctrl/⌘+1` |
+| Rulers                           | `Ctrl/⌘+R`                                        |
 
 Tool keys: `H` Hand, `R` Rotate View, `V` Move, `M` Marquee, `L` Lasso, `W` Smart Selection, `C` Crop, `I` Eyedropper, `B` Brush, `S` Clone, `J` Retouch, `E` Eraser, `G` Fill, `D` Gradient, `T` Text, `U` Shape, `P` Pen, and `Z` Zoom. Tool and command shortcuts can be reassigned under Workspace & presets; browser-reserved shortcuts may remain unavailable.
 
