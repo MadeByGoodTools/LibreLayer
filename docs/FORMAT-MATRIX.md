@@ -13,6 +13,8 @@
 | PSD / PSB | Yes | Yes, bounded | Supported RGB raster layers, groups, masks, names, visibility, opacity, and supported blends. Unsupported content produces a report and saved-composite choice. See `PSD-COMPATIBILITY.md`. |
 | Camera RAW: CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 | Yes for supported Bayer/X-Trans sensor data | Developed image / 16-bit TIFF master | Opens into the local RAW developer with persisted demosaic, white-balance, camera/DNG profile, detail/noise, and focal-family optics recipes plus optional Smart Object source recovery. Camera coverage is not yet a complete vendor/model matrix. |
 | LibreLayer Camera Raw recipe: `.libreRAW.json` | Yes | Yes | Portable validated development sidecar only; it contains no source image pixels, rejects unknown recipe versions or out-of-range settings, and can drive sequential local PNG batch development. |
+| LibreLayer Action set: `.libreactions` | Yes | Yes | Portable validated sets of editable, ordered, conditional steps; unknown commands and unsafe settings fail closed. |
+| LibreLayer droplet recipe: `.libredroplet` | Yes | Yes | Portable Action plus bounded Image Processor output settings. It contains no source images or executable code. |
 | `.cube` LUT | Import into adjustments | No LUT authoring | 3D LUT parser with bounded grid/domain validation and live amount. |
 | `.psbrush.json` | Yes | Yes | LibreLayer brush recipe including dynamics and mixer settings. |
 | `.abr` brush pack | Yes, v6/v7/v9/v10 | No ABR authoring | Imports every parsed brush into a persistent local folder. Sampled tips and supported size, angle, roundness, spacing, scatter, opacity, flow, and size dynamics are retained; unsupported proprietary effects are omitted. |

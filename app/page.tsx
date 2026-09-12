@@ -13203,24 +13203,15 @@ export default function Home() {
         return;
       }
       if (feature.command === 'actions') {
-        localStorage.setItem(
-          'pixel-studio-action',
-          JSON.stringify({
-            name: options.text || 'Action 1',
-            amount: options.amount,
-            color: options.color,
-          }),
-        );
-        setStatus('Action recorded and available for replay');
+        setStatus('Use the Actions workspace to record and play editable sets');
         return;
       }
       if (
         feature.command === 'batch' ||
         feature.command === 'image-processor'
       ) {
-        const count = documents.length;
         setStatus(
-          `${feature.label} prepared ${count} open ${count === 1 ? 'document' : 'documents'} with the current export settings`,
+          'Use Image Processor to apply a saved action to selected local files',
         );
         return;
       }
@@ -20670,6 +20661,20 @@ export default function Home() {
         open={proSuiteOpen}
         onClose={() => setProSuiteOpen(false)}
         onRun={runProFeature}
+        automationContext={{
+          width: doc.w,
+          height: doc.h,
+          hasSelection: Boolean(selectionRef.current),
+          layerKind: active?.textLayer
+            ? 'text'
+            : active?.kind === 'group'
+              ? 'group'
+              : active?.kind === 'adjustment'
+                ? 'adjustment'
+                : active?.kind === 'fill'
+                  ? 'fill'
+                  : 'pixel',
+        }}
       />
       <input
         ref={smartObjectFileRef}

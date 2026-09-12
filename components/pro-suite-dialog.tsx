@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
+import { AutomationStudio } from '@/components/automation-studio';
 import {
   runSuiteSelfTest,
   suiteFeatures,
@@ -23,15 +24,18 @@ import {
   resolveRecipeFeature,
   type EditRecipeStep,
 } from '@/lib/edit-recipe';
+import type { ActionStep, AutomationContext } from '@/lib/automation';
 
 export function ProSuiteDialog({
   open,
   onClose,
   onRun,
+  automationContext,
 }: {
   open: boolean;
   onClose: () => void;
-  onRun: (feature: SuiteFeature, options: SuiteOptions) => void;
+  onRun: (feature: SuiteFeature, options: SuiteOptions) => Promise<void> | void;
+  automationContext: AutomationContext;
 }) {
   const groups = [...new Set(suiteFeatures.map((x) => x.group))];
   const [amount, setAmount] = useState(50),
@@ -40,7 +44,7 @@ export function ProSuiteDialog({
     [text, setText] = useState('LibreLayer'),
     [report, setReport] = useState(''),
     [plannedSteps, setPlannedSteps] = useState<EditRecipeStep[]>([]),
-    [recordedSteps, setRecordedSteps] = useState<EditRecipeStep[]>([]);
+    [recordedSteps, setRecordedSteps] = useState<ActionStep[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
   const options = { amount, secondary, color, text };
   const sliderNumber = (value: number | readonly number[]) =>
@@ -120,10 +124,19 @@ export function ProSuiteDialog({
             disabled={!plannedSteps.length}
             onClick={() => {
               plannedSteps.forEach((step) =>
-                onRun(resolveRecipeFeature(step.command), step.options),
+                void onRun(resolveRecipeFeature(step.command), step.options),
               );
               setRecordedSteps((steps) =>
-                [...steps, ...plannedSteps].slice(-100),
+                [
+                  ...steps,
+                  ...plannedSteps.map((step) => ({
+                    ...step,
+                    id: crypto.randomUUID(),
+                    enabled: true,
+                    condition: 'always' as const,
+                    stopOnFailure: true,
+                  })),
+                ].slice(-100),
               );
               setReport(`${plannedSteps.length} planned steps applied`);
               setPlannedSteps([]);
@@ -158,10 +171,32 @@ export function ProSuiteDialog({
                     key={feature.id}
                     variant="outline"
                     onClick={() => {
-                      onRun(feature, options);
+                      if (
+                        ['actions', 'batch', 'image-processor'].includes(
+                          feature.command,
+                        )
+                      ) {
+                        document
+                          .querySelector('.automation-studio')
+                          ?.scrollIntoView({ block: 'nearest' });
+                        setReport(
+                          feature.command === 'actions'
+                            ? 'Use Actions below to edit, save, import, export, and play action sets.'
+                            : 'Use Image Processor below to run an action across selected local files.',
+                        );
+                        return;
+                      }
+                      void onRun(feature, options);
                       setRecordedSteps((steps) => [
                         ...steps.slice(-99),
-                        { command: feature.command, options: { ...options } },
+                        {
+                          id: crypto.randomUUID(),
+                          command: feature.command,
+                          options: { ...options },
+                          enabled: true,
+                          condition: 'always',
+                          stopOnFailure: true,
+                        },
                       ]);
                     }}
                   >
@@ -178,6 +213,14 @@ export function ProSuiteDialog({
             </TabsContent>
           ))}
         </Tabs>
+        <AutomationStudio
+          recordedSteps={recordedSteps}
+          setRecordedSteps={setRecordedSteps}
+          actionName={text}
+          setActionName={setText}
+          onRun={onRun}
+          context={automationContext}
+        />
         <div className="pro-suite-footer">
           <input
             ref={importRef}
@@ -193,9 +236,17 @@ export function ProSuiteDialog({
                   throw Error('Workflow files must be smaller than 1 MB.');
                 const recipe = parseEditRecipe(await file.text());
                 recipe.steps.forEach((step) =>
-                  onRun(resolveRecipeFeature(step.command), step.options),
+                  void onRun(resolveRecipeFeature(step.command), step.options),
                 );
-                setRecordedSteps(recipe.steps);
+                setRecordedSteps(
+                  recipe.steps.map((step) => ({
+                    ...step,
+                    id: crypto.randomUUID(),
+                    enabled: true,
+                    condition: 'always',
+                    stopOnFailure: true,
+                  })),
+                );
                 setReport(
                   `${recipe.steps.length} local workflow steps applied from ${recipe.name}`,
                 );

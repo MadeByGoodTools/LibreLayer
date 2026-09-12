@@ -116,6 +116,12 @@ Creative filters include Oil Paint, Lighting Effects, Clouds, Fibers, Filter Gal
 
 Undo/redo use `Ctrl/⌘+Z` and `Ctrl/⌘+Shift+Z`. The History panel can restore a state, name a snapshot, branch a state into a new tab, or create a change map. Performance settings configure 5–100 undo states and a 128–2,048 MB combined history budget. Oldest states are compacted when either limit is exceeded.
 
+## Actions and Image Processor
+
+Open **Filter → Professional Studio** to record the tools you run as an editable Action. Each step can be enabled or disabled, reordered, removed, set to stop on failure, or made conditional on selection state, active-layer type, or document orientation. Save Actions into browser-local sets, reopen and update them, import/export portable `.libreactions` files, or save a selected Action as a `.libredroplet` recipe.
+
+The **Image Processor** runs the selected saved Action—or the current draft—over chosen local image files one at a time. Choose PNG, JPEG, or WebP output, quality, optional maximum edge, and a filename suffix. Only pixel-compatible Action steps run in this file workflow; document and layer commands are skipped. Progress and failures are reported, Stop leaves source files unchanged, and the browser may ask permission for multiple downloads.
+
 Current limits are 16,384 pixels per side, 64 megapixels per document, 96 million expanded layer/mask pixels across open tabs, 100 layers, 20 nested groups, and 256 MiB per input file. Close unused documents, reduce history, or lower dimensions when browser memory is constrained.
 
 ## Recovery and privacy

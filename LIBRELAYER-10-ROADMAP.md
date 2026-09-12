@@ -182,7 +182,7 @@ This is the release ledger for closing the remaining gap with a professional des
 ## 15. Automation and extensibility
 
 - [x] Recorded/exportable/validated local workflows and searchable registered commands.
-- [ ] Editable actions, sets, conditionals, batch, Image Processor, and saved droplets.
+- [x] Editable actions, sets, conditionals, batch, Image Processor, and saved droplets.
 - [ ] Variables, datasets, layer/artboard export, contact sheets, panorama, HDR merge, and focus stack.
 - [ ] Auto-align, Auto-Blend, image stacks, and statistical modes.
 - [ ] Sandboxed JavaScript/WASM plugin manifest, permissions, panels, filters, exporters, and versioning.
