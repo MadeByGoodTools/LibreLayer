@@ -100,6 +100,8 @@ import {
 } from '@/lib/editor-shortcuts';
 import {
   clearDefaultSaveDirectory,
+  brushTipRecords,
+  deleteBrushTip,
   deleteVersion,
   forgetRecentFile,
   getDefaultSaveDirectory,
@@ -112,15 +114,23 @@ import {
   saveRawAsset,
   saveVersion,
   saveWorkspaceState,
+  saveBrushTip,
   setDefaultSaveDirectory,
   deleteRecovery,
   type LocalDirectoryHandle,
+  type BrushTipRecord,
   type LocalFileHandle,
   type RecentFileRecord,
   type RecoveryRecord,
   type VersionRecord,
   versionRecords,
 } from '@/lib/recovery';
+import {
+  abrAlphaToRgba,
+  filterBrushTips,
+  maskAlphaFromRgba,
+  normalizeBrushTags,
+} from '@/lib/brush-library';
 import type { Layer as PsdLayer } from 'ag-psd';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
@@ -659,6 +669,110 @@ const makeCanvas = (w: number, h: number) => {
   c.width = w;
   c.height = h;
   return c;
+};
+
+const canvasBlob = (canvas: HTMLCanvasElement) =>
+  new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(Error('Canvas encoding failed'))),
+      'image/png',
+    ),
+  );
+
+const blobCanvas = async (blob: Blob) => {
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const canvas = makeCanvas(image.naturalWidth, image.naturalHeight);
+    canvas.getContext('2d')!.drawImage(image, 0, 0);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
+const imageMaskCanvas = async (blob: Blob) => {
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight)),
+      width = Math.max(1, Math.round(image.naturalWidth * scale)),
+      height = Math.max(1, Math.round(image.naturalHeight * scale)),
+      canvas = makeCanvas(width, height),
+      context = canvas.getContext('2d', { willReadFrequently: true })!;
+    context.drawImage(image, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height),
+      alpha = maskAlphaFromRgba(pixels.data);
+    for (let pixel = 0; pixel < alpha.length; pixel++) {
+      const at = pixel * 4;
+      pixels.data[at] = pixels.data[at + 1] = pixels.data[at + 2] = 255;
+      pixels.data[at + 3] = alpha[pixel];
+    }
+    context.putImageData(pixels, 0, 0);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
+const abrBrushMask = (
+  brush: {
+    shape?: Record<string, unknown>;
+  },
+  samples: Array<{
+    id: string;
+    bounds: { w: number; h: number };
+    alpha: Uint8Array;
+  }>,
+) => {
+  const shape = brush.shape ?? {},
+    sample =
+      shape.type === 'sampled'
+        ? samples.find((item) => item.id === shape.sampledData)
+        : undefined;
+  if (sample) {
+    const scale = Math.min(1, 512 / Math.max(sample.bounds.w, sample.bounds.h)),
+      width = Math.max(1, Math.round(sample.bounds.w * scale)),
+      height = Math.max(1, Math.round(sample.bounds.h * scale)),
+      source = makeCanvas(sample.bounds.w, sample.bounds.h),
+      sourceContext = source.getContext('2d')!,
+      pixels = sourceContext.createImageData(sample.bounds.w, sample.bounds.h);
+    pixels.data.set(abrAlphaToRgba(sample.alpha));
+    sourceContext.putImageData(pixels, 0, 0);
+    if (scale === 1) return source;
+    const output = makeCanvas(width, height);
+    output.getContext('2d')!.drawImage(source, 0, 0, width, height);
+    source.width = source.height = 1;
+    return output;
+  }
+  const canvas = makeCanvas(256, 256),
+    context = canvas.getContext('2d')!,
+    roundness = Math.max(0.05, Math.min(1, Number(shape.roundness ?? 100) / 100)),
+    hardness = Math.max(0, Math.min(1, Number(shape.hardness ?? shape.tipsHardness ?? 80) / 100)),
+    radius = 118,
+    gradient = context.createRadialGradient(0, 0, radius * hardness, 0, 0, radius);
+  gradient.addColorStop(0, 'white');
+  gradient.addColorStop(Math.min(0.999, hardness), 'white');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.translate(128, 128);
+  context.rotate((Number(shape.angle ?? 0) * Math.PI) / 180);
+  context.scale(1, roundness);
+  context.fillStyle = gradient;
+  context.beginPath();
+  if (String(shape.tipsType ?? shape.shape).includes('square'))
+    context.rect(-radius, -radius, radius * 2, radius * 2);
+  else if (String(shape.tipsType ?? shape.shape).includes('triangle')) {
+    context.moveTo(0, -radius);
+    context.lineTo(radius, radius);
+    context.lineTo(-radius, radius);
+    context.closePath();
+  } else context.arc(0, 0, radius, 0, Math.PI * 2);
+  context.fill();
+  return canvas;
 };
 const downloadBlob = (name: string, blob: Blob) => {
   const url = URL.createObjectURL(blob),
@@ -1872,6 +1986,10 @@ export default function Home() {
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
+  const brushTipFileRef = useRef<HTMLInputElement>(null);
+  const brushTipCanvases = useRef(new Map<string, HTMLCanvasElement>());
+  const brushTipUrls = useRef(new Map<string, string>());
+  const tintedBrushTips = useRef(new Map<string, HTMLCanvasElement>());
   const customFontFileRef = useRef<HTMLInputElement>(null);
   const smartObjectFileRef = useRef<HTMLInputElement>(null);
   const smartFileAction = useRef<'link' | 'replace' | 'relink'>('link');
@@ -1978,7 +2096,12 @@ export default function Home() {
     [mixerWet, setMixerWet] = useState(50),
     [mixerLoad, setMixerLoad] = useState(50),
     [mixerMix, setMixerMix] = useState(50),
-    [mixerBrush, setMixerBrush] = useState(false);
+    [mixerBrush, setMixerBrush] = useState(false),
+    [brushTips, setBrushTips] = useState<BrushTipRecord[]>([]),
+    [activeBrushTipId, setActiveBrushTipId] = useState(''),
+    [brushQuery, setBrushQuery] = useState(''),
+    [brushFolder, setBrushFolder] = useState('all'),
+    [brushFavoritesOnly, setBrushFavoritesOnly] = useState(false);
   const [paintMode, setPaintMode] = useState<'brush' | 'pencil'>('brush');
   const [color, setColor] = useState('#171717');
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -2088,6 +2211,39 @@ export default function Home() {
   const [documents, setDocuments] = useState<
     { id: string; name: string; saved: boolean }[]
   >([{ id: firstDocumentId.current, name: 'Untitled artwork', saved: true }]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void brushTipRecords()
+      .then(async (records) => {
+        for (const record of records) {
+          if (cancelled) return;
+          brushTipCanvases.current.set(record.id, await blobCanvas(record.blob));
+          const url = URL.createObjectURL(record.blob);
+          brushTipUrls.current.set(record.id, url);
+        }
+        if (cancelled) return;
+        setBrushTips(records);
+        const remembered = localStorage.getItem('librelayer-active-brush-tip');
+        if (remembered && records.some((record) => record.id === remembered))
+          setActiveBrushTipId(remembered);
+        else localStorage.removeItem('librelayer-active-brush-tip');
+      })
+      .catch(() => setStatus('Saved brush tips could not be restored'));
+    return () => {
+      cancelled = true;
+      brushTipUrls.current.forEach((url) => URL.revokeObjectURL(url));
+      brushTipUrls.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!brushTips.length) return;
+    if (activeBrushTipId)
+      localStorage.setItem('librelayer-active-brush-tip', activeBrushTipId);
+    else localStorage.removeItem('librelayer-active-brush-tip');
+    tintedBrushTips.current.clear();
+  }, [activeBrushTipId, brushTips.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4110,7 +4266,66 @@ export default function Home() {
                 continue;
               }
               const radius = dabSize / 2,
-                inner = radius * Math.max(0, Math.min(1, hardness / 100)),
+                customTip = activeBrushTipId
+                  ? brushTipCanvases.current.get(activeBrushTipId)
+                  : undefined;
+              if (customTip) {
+                const cacheKey = `${activeBrushTipId}:${dabPaint}`;
+                let tinted = tintedBrushTips.current.get(cacheKey);
+                if (!tinted) {
+                  if (tintedBrushTips.current.size > 24)
+                    tintedBrushTips.current.clear();
+                  tinted = makeCanvas(customTip.width, customTip.height);
+                  const tintedContext = tinted.getContext('2d')!;
+                  tintedContext.drawImage(customTip, 0, 0);
+                  tintedContext.globalCompositeOperation = 'source-in';
+                  tintedContext.fillStyle = dabPaint;
+                  tintedContext.fillRect(0, 0, tinted.width, tinted.height);
+                  tintedBrushTips.current.set(cacheKey, tinted);
+                }
+                const aspect = customTip.width / customTip.height,
+                  width = aspect >= 1 ? dabSize : dabSize * aspect,
+                  height = aspect >= 1 ? dabSize / aspect : dabSize,
+                  drawCustomTip = (
+                    centerX: number,
+                    centerY: number,
+                    scale = 1,
+                    rotation = brushAngle,
+                  ) => {
+                    ctx.save();
+                    ctx.translate(centerX, centerY);
+                    ctx.rotate((rotation * Math.PI) / 180);
+                    ctx.scale(1, Math.max(0.05, brushRoundness / 100));
+                    if (tilt) {
+                      ctx.rotate(tiltAngle);
+                      ctx.scale(1, Math.max(0.18, 1 - tiltMagnitude));
+                    }
+                    ctx.drawImage(
+                      tinted!,
+                      (-width * scale) / 2,
+                      (-height * scale) / 2,
+                      width * scale,
+                      height * scale,
+                    );
+                    ctx.restore();
+                  };
+                drawCustomTip(x, y);
+                if (dualBrush) {
+                  const offset = (dualBrushOffset / 100) * radius,
+                    angle = (brushAngle * Math.PI) / 180;
+                  ctx.save();
+                  ctx.globalAlpha *= 0.72;
+                  drawCustomTip(
+                    x + Math.cos(angle) * offset,
+                    y + Math.sin(angle) * offset,
+                    dualBrushScale / 100,
+                    brushAngle + 45,
+                  );
+                  ctx.restore();
+                }
+                continue;
+              }
+              const inner = radius * Math.max(0, Math.min(1, hardness / 100)),
                 g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius),
                 transparentPaint = dabPaint.startsWith('#')
                   ? `${dabPaint}00`
@@ -6349,6 +6564,194 @@ export default function Home() {
     );
     render();
     setStatus('Smart Object rasterized; layer effects remain editable');
+  };
+  const storeBrushTip = async (
+    record: BrushTipRecord,
+    canvas: HTMLCanvasElement,
+  ) => {
+    await saveBrushTip(record);
+    brushTipCanvases.current.set(record.id, canvas);
+    const previousUrl = brushTipUrls.current.get(record.id);
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    brushTipUrls.current.set(record.id, URL.createObjectURL(record.blob));
+    setBrushTips((items) =>
+      [...items.filter((item) => item.id !== record.id), record].sort(
+        (a, b) =>
+          Number(b.favorite) - Number(a.favorite) ||
+          a.name.localeCompare(b.name),
+      ),
+    );
+  };
+  const applyBrushTip = (record?: BrushTipRecord) => {
+    setActiveBrushTipId(record?.id ?? '');
+    if (!record) {
+      setStatus('Standard round brush tip selected');
+      return;
+    }
+    const settings = record.settings;
+    if (settings?.size) setSize(Math.max(1, Math.min(300, settings.size)));
+    if (settings?.angle !== undefined)
+      setBrushAngle(Math.max(-180, Math.min(180, settings.angle)));
+    if (settings?.roundness)
+      setBrushRoundness(Math.max(5, Math.min(100, settings.roundness)));
+    if (settings?.spacing)
+      setBrushSpacing(Math.max(1, Math.min(200, settings.spacing)));
+    if (settings?.sizeJitter !== undefined)
+      setSizeJitter(Math.max(0, Math.min(100, settings.sizeJitter)));
+    if (settings?.opacityJitter !== undefined)
+      setOpacityJitter(Math.max(0, Math.min(100, settings.opacityJitter)));
+    if (settings?.flowJitter !== undefined)
+      setFlowJitter(Math.max(0, Math.min(100, settings.flowJitter)));
+    if (settings?.scatter !== undefined)
+      setBrushScatter(Math.max(0, Math.min(300, settings.scatter)));
+    setStatus(`${record.name} selected from ${record.folder}`);
+  };
+  const defineBrushFromSelection = async () => {
+    const bounds = selectionRef.current ?? { x: 0, y: 0, w: doc.w, h: doc.h },
+      left = Math.max(0, Math.floor(bounds.x)),
+      top = Math.max(0, Math.floor(bounds.y)),
+      width = Math.max(1, Math.min(doc.w - left, Math.ceil(bounds.w))),
+      height = Math.max(1, Math.min(doc.h - top, Math.ceil(bounds.h))),
+      scale = Math.min(1, 512 / Math.max(width, height)),
+      composite = makeCanvas(doc.w, doc.h),
+      canvas = makeCanvas(
+        Math.max(1, Math.round(width * scale)),
+        Math.max(1, Math.round(height * scale)),
+      );
+    renderLayers(composite.getContext('2d')!);
+    const context = canvas.getContext('2d', { willReadFrequently: true })!;
+    context.drawImage(
+      composite,
+      left,
+      top,
+      width,
+      height,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height),
+      alpha = maskAlphaFromRgba(pixels.data);
+    for (let pixel = 0; pixel < alpha.length; pixel++) {
+      const at = pixel * 4;
+      pixels.data[at] = pixels.data[at + 1] = pixels.data[at + 2] = 255;
+      pixels.data[at + 3] = alpha[pixel];
+    }
+    context.putImageData(pixels, 0, 0);
+    composite.width = composite.height = 1;
+    const record: BrushTipRecord = {
+      id: crypto.randomUUID(),
+      name: `Custom tip ${brushTips.length + 1}`,
+      folder: 'Custom',
+      tags: ['selection'],
+      favorite: false,
+      source: 'image',
+      width: canvas.width,
+      height: canvas.height,
+      blob: await canvasBlob(canvas),
+      updated: Date.now(),
+    };
+    await storeBrushTip(record, canvas);
+    applyBrushTip(record);
+    setBrushFolder('Custom');
+    setStatus(
+      `${record.name} defined from ${selectionRef.current ? 'the active selection' : 'the document'}`,
+    );
+  };
+  const importBrushTips = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (/\.abr$/i.test(file.name)) {
+        const { readAbr } = await import('ag-psd'),
+          pack = readAbr(new Uint8Array(await file.arrayBuffer())),
+          folder = file.name.replace(/\.abr$/i, '') || 'Imported ABR';
+        if (!pack.brushes.length) throw Error('No brushes were found in this ABR file');
+        let first: BrushTipRecord | undefined;
+        for (let index = 0; index < pack.brushes.length; index++) {
+          const brush = pack.brushes[index],
+            shape = brush.shape,
+            canvas = abrBrushMask(
+              brush as unknown as { shape?: Record<string, unknown> },
+              pack.samples,
+            ),
+            record: BrushTipRecord = {
+              id: crypto.randomUUID(),
+              name: brush.name?.trim() || `Brush ${index + 1}`,
+              folder,
+              tags: ['abr', String(shape.type)],
+              favorite: false,
+              source: 'abr',
+              width: canvas.width,
+              height: canvas.height,
+              blob: await canvasBlob(canvas),
+              updated: Date.now(),
+              settings: {
+                size: Number(shape.size ?? 32),
+                angle: Number(shape.angle ?? 0),
+                roundness: Number(
+                  'roundness' in shape ? shape.roundness : 100,
+                ),
+                spacing: Number(shape.spacing ?? brush.spacing ?? 10),
+                sizeJitter: brush.shapeDynamics?.sizeDynamics.jitter,
+                opacityJitter: brush.transfer?.opacityDynamics.jitter,
+                flowJitter: brush.transfer?.flowDynamics.jitter,
+                scatter: brush.scatter?.scatterDynamics.jitter,
+              },
+            };
+          await storeBrushTip(record, canvas);
+          first ??= record;
+        }
+        applyBrushTip(first);
+        setBrushFolder(folder);
+        setStatus(`${pack.brushes.length} ABR brushes imported into ${folder}`);
+      } else {
+        const canvas = await imageMaskCanvas(file),
+          record: BrushTipRecord = {
+            id: crypto.randomUUID(),
+            name: file.name.replace(/\.[^.]+$/, '') || 'Custom tip',
+            folder: 'Custom',
+            tags: ['custom'],
+            favorite: false,
+            source: 'image',
+            width: canvas.width,
+            height: canvas.height,
+            blob: await canvasBlob(canvas),
+            updated: Date.now(),
+          };
+        await storeBrushTip(record, canvas);
+        applyBrushTip(record);
+        setBrushFolder('Custom');
+        setStatus(`${record.name} imported as a persistent custom brush tip`);
+      }
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : 'Brush tips could not be imported',
+      );
+    } finally {
+      if (brushTipFileRef.current) brushTipFileRef.current.value = '';
+    }
+  };
+  const updateBrushTip = async (
+    id: string,
+    patch: Partial<Pick<BrushTipRecord, 'name' | 'folder' | 'tags' | 'favorite'>>,
+  ) => {
+    const current = brushTips.find((tip) => tip.id === id);
+    if (!current) return;
+    const next = { ...current, ...patch, updated: Date.now() };
+    await saveBrushTip(next);
+    setBrushTips((items) => items.map((item) => (item.id === id ? next : item)));
+  };
+  const removeBrushTip = async (id: string) => {
+    await deleteBrushTip(id);
+    brushTipCanvases.current.delete(id);
+    const url = brushTipUrls.current.get(id);
+    if (url) URL.revokeObjectURL(url);
+    brushTipUrls.current.delete(id);
+    tintedBrushTips.current.clear();
+    setBrushTips((items) => items.filter((item) => item.id !== id));
+    if (activeBrushTipId === id) setActiveBrushTipId('');
+    setStatus('Custom brush tip removed');
   };
   const exportBrushPreset = () => {
     const preset = {
@@ -11063,6 +11466,16 @@ export default function Home() {
     );
   };
   const active = selected();
+  const brushFolders = Array.from(
+      new Set(brushTips.map((tip) => tip.folder).filter(Boolean)),
+    ).sort((a, b) => a.localeCompare(b)),
+    visibleBrushTips = filterBrushTips(
+      brushTips,
+      brushQuery,
+      brushFolder,
+      brushFavoritesOnly,
+    ),
+    activeBrushTip = brushTips.find((tip) => tip.id === activeBrushTipId);
   const activeFill = normalizeFillLayerRecipe(active?.fillLayer);
   const updatePrecisionAdjustment = (
     key: keyof HighDepthAdjustments,
@@ -12044,6 +12457,158 @@ export default function Home() {
                 <details className="brush-dynamics">
                   <summary>Brush dynamics</summary>
                   <div>
+                    <section className="brush-library" aria-label="Brush library">
+                      <div className="brush-library-heading">
+                        <strong>Brush library</strong>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void defineBrushFromSelection()}
+                        >
+                          Define from selection
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => brushTipFileRef.current?.click()}
+                        >
+                          Import tips…
+                        </Button>
+                        <input
+                          ref={brushTipFileRef}
+                          className="sr-only"
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif,.abr"
+                          aria-label="Import image or ABR brush tips"
+                          onChange={(event) =>
+                            void importBrushTips(event.target.files?.[0])
+                          }
+                        />
+                      </div>
+                      <div className="brush-library-filters">
+                        <input
+                          aria-label="Search brush tips"
+                          placeholder="Search brushes…"
+                          value={brushQuery}
+                          onChange={(event) => setBrushQuery(event.target.value)}
+                        />
+                        <select
+                          aria-label="Brush folder"
+                          value={brushFolder}
+                          onChange={(event) => setBrushFolder(event.target.value)}
+                        >
+                          <option value="all">All folders</option>
+                          {brushFolders.map((folder) => (
+                            <option key={folder} value={folder}>
+                              {folder}
+                            </option>
+                          ))}
+                        </select>
+                        <label className="inline-check">
+                          <input
+                            type="checkbox"
+                            checked={brushFavoritesOnly}
+                            onChange={(event) =>
+                              setBrushFavoritesOnly(event.target.checked)
+                            }
+                          />
+                          Favorites
+                        </label>
+                      </div>
+                      <div className="brush-tip-grid" aria-label="Available brush tips">
+                        <button
+                          type="button"
+                          className={!activeBrushTipId ? 'active' : ''}
+                          aria-pressed={!activeBrushTipId}
+                          onClick={() => applyBrushTip()}
+                        >
+                          <span className="round-tip-preview" aria-hidden="true" />
+                          <span>Soft round</span>
+                        </button>
+                        {visibleBrushTips.map((tip) => (
+                          <button
+                            type="button"
+                            key={tip.id}
+                            className={tip.id === activeBrushTipId ? 'active' : ''}
+                            aria-pressed={tip.id === activeBrushTipId}
+                            title={`${tip.name} · ${tip.folder} · ${tip.tags.join(', ')}`}
+                            onClick={() => applyBrushTip(tip)}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={brushTipUrls.current.get(tip.id)}
+                              alt=""
+                            />
+                            <span>{tip.favorite ? '★ ' : ''}{tip.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {activeBrushTip && (
+                        <div className="brush-tip-editor">
+                          <label>
+                            Name
+                            <input
+                              aria-label="Active brush name"
+                              value={activeBrushTip.name}
+                              maxLength={80}
+                              onChange={(event) =>
+                                void updateBrushTip(activeBrushTip.id, {
+                                  name: event.target.value || 'Untitled brush',
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            Folder
+                            <input
+                              aria-label="Active brush folder"
+                              value={activeBrushTip.folder}
+                              maxLength={60}
+                              onChange={(event) => {
+                                const folder = event.target.value || 'Custom';
+                                if (brushFolder !== 'all') setBrushFolder(folder);
+                                void updateBrushTip(activeBrushTip.id, { folder });
+                              }}
+                            />
+                          </label>
+                          <label>
+                            Tags
+                            <input
+                              key={`${activeBrushTip.id}:${activeBrushTip.updated}:tags`}
+                              aria-label="Active brush tags"
+                              defaultValue={activeBrushTip.tags.join(', ')}
+                              placeholder="ink, texture"
+                              onBlur={(event) =>
+                                void updateBrushTip(activeBrushTip.id, {
+                                  tags: normalizeBrushTags(event.target.value),
+                                })
+                              }
+                            />
+                          </label>
+                          <div className="brush-preset-actions">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              aria-pressed={activeBrushTip.favorite}
+                              onClick={() =>
+                                void updateBrushTip(activeBrushTip.id, {
+                                  favorite: !activeBrushTip.favorite,
+                                })
+                              }
+                            >
+                              {activeBrushTip.favorite ? '★ Favorite' : '☆ Favorite'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => void removeBrushTip(activeBrushTip.id)}
+                            >
+                              Remove tip
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </section>
                     <label className="inline-check">
                       <input
                         type="checkbox"
@@ -12404,7 +12969,7 @@ export default function Home() {
                         variant="outline"
                         onClick={() => brushPresetFileRef.current?.click()}
                       >
-                        Import brush
+                        Import preset
                       </Button>
                       <Button
                         size="sm"

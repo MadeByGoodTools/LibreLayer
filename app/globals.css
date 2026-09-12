@@ -3864,6 +3864,106 @@ button {
   grid-template-columns: repeat(4, minmax(110px, 1fr));
 }
 
+.brush-dynamics:has(.brush-library) > div {
+  position: fixed;
+  z-index: 180;
+  top: calc(88px * var(--ui-scale));
+  left: 50%;
+  width: min(86vw, 820px);
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  transform: translateX(-50%);
+}
+.brush-library {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+}
+.brush-library-heading,
+.brush-library-filters,
+.brush-preset-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+.brush-library-heading strong {
+  margin-right: auto;
+}
+.brush-library-filters > input {
+  min-width: 120px;
+  flex: 1;
+}
+.brush-library input,
+.brush-library select,
+.brush-tip-editor input {
+  min-height: 28px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--input);
+  color: var(--foreground);
+  padding: 4px 7px;
+}
+.brush-tip-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(82px, 1fr));
+  gap: 6px;
+  max-height: 174px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.brush-tip-grid::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.brush-tip-grid button {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  justify-items: center;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--foreground);
+}
+.brush-tip-grid button.active {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.brush-tip-grid img,
+.round-tip-preview {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+}
+.round-tip-preview {
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 45%, transparent 72%);
+}
+.brush-tip-grid span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brush-tip-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 7px;
+}
+.brush-tip-editor label {
+  display: grid;
+  align-items: start;
+  gap: 3px;
+}
+.brush-tip-editor .brush-preset-actions {
+  grid-column: 1 / -1;
+}
+
 .professional-geometry-dialog label,
 .selection-repair-dialog label,
 .photo-filter-row label {

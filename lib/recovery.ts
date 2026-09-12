@@ -40,6 +40,29 @@ export type RawAssetRecord = {
   updated: number;
 };
 
+export type BrushTipRecord = {
+  id: string;
+  name: string;
+  folder: string;
+  tags: string[];
+  favorite: boolean;
+  source: 'image' | 'abr';
+  width: number;
+  height: number;
+  blob: Blob;
+  updated: number;
+  settings?: {
+    size?: number;
+    angle?: number;
+    roundness?: number;
+    spacing?: number;
+    sizeJitter?: number;
+    opacityJitter?: number;
+    flowJitter?: number;
+    scatter?: number;
+  };
+};
+
 export type LocalDirectoryHandle = {
   name: string;
   queryPermission: (options: { mode: 'readwrite' }) => Promise<PermissionState>;
@@ -64,7 +87,7 @@ const databaseName = 'pixel-studio-recovery';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 4);
+    const request = indexedDB.open(databaseName, 5);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains('documents'))
         request.result.createObjectStore('documents', { keyPath: 'id' });
@@ -82,9 +105,50 @@ function openDatabase(): Promise<IDBDatabase> {
         request.result.createObjectStore('recent', { keyPath: 'id' });
       if (!request.result.objectStoreNames.contains('raw-assets'))
         request.result.createObjectStore('raw-assets', { keyPath: 'id' });
+      if (!request.result.objectStoreNames.contains('brush-tips'))
+        request.result.createObjectStore('brush-tips', { keyPath: 'id' });
     };
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
+  });
+}
+
+export async function brushTipRecords(): Promise<BrushTipRecord[]> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('brush-tips', 'readonly'),
+      request = tx.objectStore('brush-tips').getAll();
+    tx.oncomplete = () => {
+      db.close();
+      resolve(
+        (request.result as BrushTipRecord[]).sort(
+          (a, b) => Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name),
+        ),
+      );
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+
+export const saveBrushTip = (record: BrushTipRecord) =>
+  writeOne('brush-tips', record);
+
+export async function deleteBrushTip(id: string): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('brush-tips', 'readwrite');
+    tx.objectStore('brush-tips').delete(id);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onabort = tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? new Error('Brush tip deletion failed'));
+    };
   });
 }
 

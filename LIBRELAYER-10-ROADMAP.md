@@ -84,7 +84,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Brush, pencil, eraser, clone, heal, fill, gradient, smoothing, pressure, tilt, scatter, texture, and mixer controls.
 - [ ] GPU subpixel brush renderer with stable low-latency interpolation.
 - [x] Complete angle/roundness shape, opacity/flow transfer, dual-brush, hue/color, wet-edge, airbrush, and buildup dynamics with preset round-trip.
-- [ ] Custom brush tips, ABR import, folders, tags, favorites, and search.
+- [x] Custom brush tips, ABR import, folders, tags, favorites, and search.
 - [x] Mirror/radial symmetry, Pattern Stamp, History Brush, and stylized Art History Brush with real canvas sources.
 - [x] Five-slot Clone Source panel with independent source selection and transformable scale, rotation, flip, offset, alignment, and overlay controls.
 - [x] Healing, Spot Healing, Patch, Content-Aware Move, Red Eye, Dodge, Burn, Sponge, Blur, Sharpen, and Smudge.
