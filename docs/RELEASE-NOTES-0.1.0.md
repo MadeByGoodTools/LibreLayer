@@ -8,6 +8,7 @@ LibreLayer 0.1.0 is the first open release candidate of the browser-local layere
 - High-precision combined adjustments, live histograms, per-channel levels and curves, advanced color controls, 3D LUTs, soft proofing, scopes, and gamut warnings.
 - Advanced selections, Select and Mask, browser-local subject-region assistance, Content-Aware Fill, retouching, clone sources, painting dynamics, symmetry, and history brushes.
 - Batched WebGL2 subpixel painting for standard round Brush and Eraser strokes, with bounded dirty tiles and an automatic Canvas fallback.
+- Dedicated live Liquify, Adaptive Wide Angle, and Vanishing Point workspaces, including freeze/thaw, face controls, reusable meshes, optical correction, and draggable projective planes.
 - PSD/PSB, image, TIFF, PDF, RAW, editable project, encrypted project, and web-export workflows with format-specific limitations documented in the format matrix.
 - Device-local autosave, recovery, preferences, remembered save handles where the browser permits them, configurable history compaction, and large-document reporting.
 

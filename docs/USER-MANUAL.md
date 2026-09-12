@@ -51,6 +51,12 @@ Clone Source provides five reusable source slots with offset, scale, rotation, f
 
 Content-Aware Fill shows a live local preview: green is the sampling coverage and red is the replacement target. Choose Auto, Rectangular, Custom, or All Visible Layers; then tune color, rotation, scale, and mirror adaptation before Apply. A whole-canvas selection has no surrounding source in Auto mode—use a smaller selection or All Visible Layers.
 
+## Distortion workspaces
+
+Choose **Filter > Liquify** for a dedicated live workspace with Forward Warp, Reconstruct, Twirl, Pucker, Bloat, Push Left, Freeze Mask, and Thaw Mask brushes. Brush size and pressure are adjustable, while independent eye, nose, mouth, smile, and jaw controls provide repeatable face-shaped deformations. Export or import a `.json` mesh to reuse the exact deformation on another copy of the same-size document. Apply creates one undoable history state and respects the active selection.
+
+**Filter > Adaptive Wide Angle** corrects radial lens curvature using focal length and crop factor, then adjusts vertical and horizontal perspective, rotation, and scale. **Filter > Vanishing Point** maps the image through a true projective plane: drag its four green corners on the preview and adjust plane-space offset and scale. Both show the result before Apply, preserve the source until confirmed, respect the active selection, and create one undoable history state.
+
 ## History
 
 New history states include a compact visual thumbnail. Choose a state name to restore the whole document, **Layer** to restore only the currently selected layer from that state, **Branch** to open the state as an independent document tab, or **Compare** to open a pixel-accurate change map. A layer-only restore brings back that layer's pixels, mask, editable settings, and supported parent placement, leaves all other layers untouched, and adds a new undoable history state. History remains available while its document tab is open; named version snapshots provide browser-local recovery across sessions.

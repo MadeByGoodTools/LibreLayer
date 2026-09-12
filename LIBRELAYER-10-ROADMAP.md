@@ -97,8 +97,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Color, rotation, scale, and mirror adaptation with live preview.
 - [x] Detail-weighted Content-Aware Scale with active-selection protection, plus Content-Aware Move.
 - [x] Perspective, Puppet, mesh, split, cylindrical, and named Arc, Flag, Fisheye, and Twist preset warps.
-- [ ] Vanishing Point and Adaptive Wide Angle workspaces.
-- [ ] Liquify with forward, reconstruct, twirl, pucker, bloat, push, freeze, thaw, face controls, and reusable meshes.
+- [x] Vanishing Point and Adaptive Wide Angle workspaces.
+- [x] Liquify with forward, reconstruct, twirl, pucker, bloat, push, freeze, thaw, face controls, and reusable meshes.
 
 ## 7. RAW and high bit depth
 

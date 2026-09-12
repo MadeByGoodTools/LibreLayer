@@ -243,6 +243,11 @@ import {
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
 import { SmartObjectTransformControls } from '@/components/smart-object-transform-controls';
+import {
+  DistortionWorkspaceDialog,
+  type DistortionWorkspaceKind,
+  type DistortionWorkspaceResult,
+} from '@/components/distortion-workspace-dialog';
 import { Histogram } from '@/components/histogram';
 import { ColorScopes } from '@/components/color-scopes';
 import { AdjustmentPresets } from '@/components/adjustment-presets';
@@ -311,6 +316,12 @@ import {
 } from '@/lib/content-aware';
 import { contentAwareScale as scaleContentAwarePixels } from '@/lib/content-aware-scale';
 import { warpSourcePoint, type WarpMode } from '@/lib/warp-engine';
+import { renderLiquifyPixels } from '@/lib/liquify-engine';
+import {
+  createVanishingPointMapper,
+  createWideAngleMapper,
+  remapProjectionPixels,
+} from '@/lib/projection-engine';
 import {
   normalizeVersionRetention,
   saveLocationStatus,
@@ -2426,6 +2437,10 @@ export default function Home() {
     [selectionTransformY, setSelectionTransformY] = useState(0),
     [selectionTransformScale, setSelectionTransformScale] = useState(100),
     [geometryOpen, setGeometryOpen] = useState(false),
+    [distortionWorkspace, setDistortionWorkspace] = useState<{
+      kind: DistortionWorkspaceKind;
+      layerId: string;
+    } | null>(null),
     [layerStudioOpen, setLayerStudioOpen] = useState(false),
     [proSuiteOpen, setProSuiteOpen] = useState(false),
     [secureSaveOpen, setSecureSaveOpen] = useState(false),
@@ -12580,7 +12595,97 @@ export default function Home() {
       });
   };
 
+  const applyDistortionWorkspace = (result: DistortionWorkspaceResult) => {
+    const workspace = distortionWorkspace,
+      meta = workspace
+        ? layersRef.current.find((layer) => layer.id === workspace.layerId)
+        : undefined,
+      surface = workspace ? surfacesRef.current.get(workspace.layerId) : undefined;
+    if (
+      !workspace ||
+      !meta ||
+      !surface ||
+      (meta.kind !== undefined && meta.kind !== 'pixel') ||
+      meta.textLayer ||
+      meta.smartObject
+    ) {
+      setStatus('The workspace layer is no longer available');
+      setDistortionWorkspace(null);
+      return;
+    }
+    try {
+      const context = surface.pixels.getContext('2d', {
+          willReadFrequently: true,
+        })!,
+        source = context.getImageData(0, 0, doc.w, doc.h),
+        output =
+          result.kind === 'liquify'
+            ? renderLiquifyPixels(source.data, result.mesh)
+            : remapProjectionPixels(
+                source.data,
+                doc.w,
+                doc.h,
+                result.kind === 'wide-angle'
+                  ? createWideAngleMapper(doc.w, doc.h, result.recipe)
+                  : createVanishingPointMapper(doc.w, doc.h, result.recipe),
+              ),
+        rendered = new ImageData(output, doc.w, doc.h);
+      if (selectionRef.current) {
+        const processed = makeCanvas(doc.w, doc.h),
+          processedContext = processed.getContext('2d')!;
+        processedContext.putImageData(rendered, 0, 0);
+        const mask = selectionMask(doc.w, doc.h, 0, 0);
+        processedContext.globalCompositeOperation = 'destination-in';
+        processedContext.drawImage(mask, 0, 0);
+        context.putImageData(source, 0, 0);
+        context.drawImage(processed, 0, 0);
+        processed.width = processed.height = mask.width = mask.height = 1;
+      } else context.putImageData(rendered, 0, 0);
+      const label =
+        result.kind === 'liquify'
+          ? 'Liquify'
+          : result.kind === 'wide-angle'
+            ? 'Adaptive Wide Angle'
+            : 'Vanishing Point';
+      snapshot(label);
+      render();
+      setStatus(
+        `${label} applied${selectionRef.current ? ' inside the selection' : ''}`,
+      );
+      setDistortionWorkspace(null);
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : 'The distortion could not be applied',
+      );
+    }
+  };
+
   const runProFeature = (feature: SuiteFeature, options: SuiteOptions) => {
+    if (
+      ['liquify', 'wide-angle', 'vanishing-point'].includes(feature.command)
+    ) {
+      const meta = selected();
+      if (
+        !meta ||
+        (meta.kind !== undefined && meta.kind !== 'pixel') ||
+        meta.textLayer ||
+        meta.smartObject ||
+        editing === 'mask'
+      ) {
+        setStatus('Select an unlocked pixel layer first');
+        return;
+      }
+      if (!permit([meta.id])) return;
+      setDistortionWorkspace({
+        kind: feature.command as DistortionWorkspaceKind,
+        layerId: meta.id,
+      });
+      setProSuiteOpen(false);
+      setStatus(`${feature.label} workspace opened`);
+      return;
+    }
     const download = (name: string, blob: Blob) => {
       const url = URL.createObjectURL(blob),
         a = document.createElement('a');
@@ -13324,22 +13429,11 @@ export default function Home() {
         0,
         0,
       );
-    } else if (
-      ['liquify', 'wide-angle', 'vanishing-point', 'distort-filters'].includes(
-        feature.command,
-      )
-    ) {
+    } else if (feature.command === 'distort-filters') {
       remapRaster(canvas, (x, y, w, h) => {
         const nx = x / w - 0.5,
           ny = y / h - 0.5,
           a = (options.amount - 50) / 100;
-        if (feature.command === 'liquify')
-          return [
-            x - Math.sin(ny * Math.PI * 2) * a * w * 0.12,
-            y + Math.sin(nx * Math.PI * 2) * a * h * 0.12,
-          ];
-        if (feature.command === 'displace')
-          return [x + Math.sin(y / 12) * a * 20, y + Math.cos(x / 12) * a * 20];
         const scale = Math.max(0.3, 1 + a * (nx * nx + ny * ny));
         return [(nx / scale + 0.5) * w, (ny / scale + 0.5) * h];
       });
@@ -14128,6 +14222,25 @@ export default function Home() {
               name: 'Professional Studio — 123 tools…',
               action: () => setProSuiteOpen(true),
             },
+            ...[
+              ['liquify', 'Liquify…'],
+              ['wide-angle', 'Adaptive Wide Angle…'],
+              ['vanishing-point', 'Vanishing Point…'],
+            ].map(([command, name]) => ({
+              name,
+              action: () => {
+                const feature = suiteFeatures.find(
+                  (item) => item.command === command,
+                );
+                if (feature)
+                  runProFeature(feature, {
+                    amount: 50,
+                    secondary: 50,
+                    color: '#6d8cff',
+                    text: '',
+                  });
+              },
+            })),
             { name: 'AI Remove Background', action: aiRemoveBackground },
             { separator: true },
             { name: 'Auto enhance', action: () => filter('brightness') },
@@ -20129,6 +20242,19 @@ export default function Home() {
         open={geometryOpen}
         onClose={() => setGeometryOpen(false)}
         onApply={applyGeometry}
+      />
+      <DistortionWorkspaceDialog
+        kind={distortionWorkspace?.kind ?? null}
+        sourceCanvas={
+          distortionWorkspace
+            ? (surfacesRef.current.get(distortionWorkspace.layerId)?.pixels ??
+              null)
+            : null
+        }
+        width={doc.w}
+        height={doc.h}
+        onClose={() => setDistortionWorkspace(null)}
+        onApply={applyDistortionWorkspace}
       />
       <LayerStudioDialog
         open={layerStudioOpen}
