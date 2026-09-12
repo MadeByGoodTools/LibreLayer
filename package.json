@@ -18,6 +18,7 @@
     "test:core": "node --test tests/*.test.ts",
     "test:performance": "node scripts/performance-suite.ts",
     "test:visual": "node scripts/visual-regression.ts",
+    "script:local": "node scripts/librelayer-script.ts",
     "lint": "oxlint",
     "format": "oxfmt"
   },

@@ -4382,6 +4382,113 @@ button {
 .plugin-status {
   min-height: 18px;
 }
+.script-studio {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, #8b7cf6 45%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #8b7cf6 5%, var(--background));
+}
+.script-studio-heading,
+.script-actions,
+.script-help {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.script-studio-heading {
+  justify-content: space-between;
+}
+.script-studio-heading > div:first-child,
+.script-editor-label,
+.script-metadata label {
+  display: grid;
+  gap: 4px;
+}
+.script-studio-heading > div:last-child {
+  display: flex;
+  gap: 6px;
+}
+.script-studio-heading span,
+.script-status,
+.script-editor-label,
+.script-metadata label {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.script-metadata {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr);
+  gap: 8px;
+}
+.script-metadata input,
+.script-editor-label textarea {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--background);
+  color: var(--foreground);
+}
+.script-editor-label textarea {
+  min-height: 104px;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.script-help code,
+.plugin-permissions small {
+  white-space: nowrap;
+}
+.script-help code {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.script-trust {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.script-actions > span {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.script-trace {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  max-height: 132px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.script-trace li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  background: var(--muted);
+  font-size: 11px;
+}
+.script-trace span {
+  color: var(--muted-foreground);
+}
+.script-status {
+  min-height: 18px;
+}
 .local-edit-plan {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -4543,7 +4650,9 @@ button {
     grid-template-columns: 1fr 1fr;
   }
   .plugin-studio-body,
-  .plugin-controls {
+  .plugin-controls,
+  .script-metadata,
+  .script-trace {
     grid-template-columns: 1fr;
   }
 }

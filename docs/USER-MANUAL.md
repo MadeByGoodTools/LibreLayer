@@ -109,6 +109,10 @@ Open **Filter → Professional Studio → Automation & production → Scripts an
 
 JavaScript filter contributions are restricted per-channel expressions, not arbitrary page code. They cannot access the DOM, browser storage, local files, properties, imports, or the network. JavaScript, WebAssembly, and CPU filters run on copied pixels in the filter worker; cancellation, failure, and timeout leave the document unchanged. Successful filters respect the active selection and produce one normal Undo/Redo state. See [PLUGIN-PLATFORM.md](PLUGIN-PLATFORM.md) for the manifest, permissions, size limits, expression language, and exporter contract.
 
+### Trusted local scripts
+
+The Trusted local script console turns reviewed JavaScript command source into a bounded deterministic trace. Changing source or seed removes trust, and an imported script never runs automatically. Select the trust checkbox, compile in the disposable two-second-watchdog worker, inspect the generated steps, then choose **Replay trace**. Each step uses the same real editor handler and Undo/Redo behavior as its Professional Studio button. Scripts and integrity-checked traces persist in this browser profile and can be imported or exported as `.librescript` and `.libretrace` files. See [LOCAL-SCRIPTING.md](LOCAL-SCRIPTING.md) for the supported API, trust boundary, and optional CLI.
+
 ## Saving and export
 
 - **Editable master:** File → Save layered project (`Ctrl/⌘+S`) writes `.librelayer`. Password-protected projects use local AES-256-GCM encryption; losing the password makes the file unrecoverable.

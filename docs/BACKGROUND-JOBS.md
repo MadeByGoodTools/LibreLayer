@@ -16,3 +16,5 @@ Auto-align, Auto-Blend, focus stack, HDR merge, panorama stitching, and statisti
 If the browser or computer exits while a marker is present, the next LibreLayer session explains that the operation did not complete. Normal device-local document recovery then restores the last intact saved state. A job never stores partially processed pixels in the document.
 
 The Cancel control and progress indicator appear in the compact status bar only while a job is active.
+
+Trusted local script compilation uses a separate disposable headless worker. It receives only reviewed source, a deterministic seed, and bounded default options; it never receives document pixels or storage handles. It returns validated registered command records, is cancelable, and is terminated after two seconds. No commands run until the user explicitly replays the verified trace through normal editor handlers.

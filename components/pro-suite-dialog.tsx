@@ -13,6 +13,7 @@ import { Slider } from '@/components/ui/slider';
 import { AutomationStudio } from '@/components/automation-studio';
 import { DataDrivenStudio } from '@/components/data-driven-studio';
 import { PluginStudio } from '@/components/plugin-studio';
+import { ScriptStudio } from '@/components/script-studio';
 import type { FilterPluginManifest } from '@/lib/filter-plugin';
 import type { PluginExporter } from '@/lib/plugin-platform';
 import {
@@ -197,7 +198,7 @@ export function ProSuiteDialog({
                             feature.command === 'variables'
                               ? '.data-driven-studio'
                               : feature.command === 'scripts-plugins'
-                                ? '.plugin-studio'
+                                ? '.script-studio'
                                 : '.automation-studio',
                           )
                           ?.scrollIntoView({ block: 'nearest' });
@@ -205,7 +206,7 @@ export function ProSuiteDialog({
                           feature.command === 'variables'
                             ? 'Use Variables and datasets below to import records and generate editable document variants.'
                             : feature.command === 'scripts-plugins'
-                              ? 'Use Local plug-in studio below to install versioned, permission-gated panels, filters, and exporters.'
+                              ? 'Use the trusted local script console and plug-in studio below for deterministic scripts, permission-gated panels, filters, and exporters.'
                               : feature.command === 'actions'
                                 ? 'Use Actions below to edit, save, import, export, and play action sets.'
                                 : 'Use Image Processor below to run an action across selected local files.',
@@ -248,6 +249,7 @@ export function ProSuiteDialog({
           context={automationContext}
         />
         <DataDrivenStudio options={options} onRun={onRun} />
+        <ScriptStudio defaults={options} onRun={onRun} />
         <PluginStudio
           onApplyFilter={onApplyPluginFilter}
           onExport={onPluginExport}

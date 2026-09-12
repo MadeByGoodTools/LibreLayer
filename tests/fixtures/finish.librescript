@@ -1,0 +1,7 @@
+{
+  "format": "librelayer-script",
+  "version": 1,
+  "name": "Fixture finishing pass",
+  "seed": 2026,
+  "source": "run('auto-contrast', { amount: 62 });\nrun('smart-sharpen', { amount: 38, secondary: 24 });"
+}
