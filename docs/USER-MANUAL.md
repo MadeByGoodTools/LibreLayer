@@ -35,6 +35,8 @@ Brush (`B`), Pencil, Eraser (`E`), Clone (`S`), Healing (`J`), Fill (`G`), and G
 
 Open Brush dynamics to manage the browser-local brush library. **Define from selection** turns the active selection—or the whole document when nothing is selected—into a grayscale tip. **Import tips** accepts ordinary images and ABR v6, v7, v9, and v10 brush packs. All brushes found in an ABR pack are imported together, with supported size, angle, roundness, spacing, scatter, and transfer settings. Rename brushes, move them between folders, add comma-separated tags, mark favorites, and search across names, folders, and tags. Custom tips and the active-tip choice persist on this browser profile.
 
+On supported tablets, the pen tip uses the active painting tool with pressure and tilt. Flip to the eraser end to erase temporarily without changing tools, or hold the barrel button and tap to sample the canvas color. Secondary touch contacts are reserved for viewport gestures, and coarse-pointer devices automatically receive larger controls and roomier tool spacing.
+
 Clone Source provides five reusable source slots with offset, scale, rotation, flips, alignment, and overlay. Sample All Layers can paint healing onto a blank retouch layer. Frequency Separation creates editable Low Frequency, High Frequency, and Retouching layers while retaining the hidden original.
 
 Content-Aware Fill shows a live local preview: green is the sampling coverage and red is the replacement target. Choose Auto, Rectangular, Custom, or All Visible Layers; then tune color, rotation, scale, and mirror adaptation before Apply. A whole-canvas selection has no surrounding source in Auto mode—use a smaller selection or All Visible Layers.

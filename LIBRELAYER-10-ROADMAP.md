@@ -200,7 +200,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Keyboard-oriented desktop workflow and accessible names on core controls.
 - [ ] Complete keyboard and screen-reader operation with consistent focus.
 - [x] High contrast, reduced motion, text scaling, and color-independent states.
-- [ ] Touch, pen buttons, eraser, and tablet layouts.
+- [x] Touch, pen buttons, eraser, and tablet layouts.
 - [ ] Windows, macOS, Linux, ChromeOS, Chrome, Edge, Safari, and Firefox matrix.
 - [ ] International keyboards, localization, RTL, 200% text, and WCAG 2.2 AA audit.
 

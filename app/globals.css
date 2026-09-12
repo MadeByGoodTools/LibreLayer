@@ -1039,6 +1039,29 @@ button {
 .tool-rail::-webkit-scrollbar {
   width: 0;
 }
+@media (pointer: coarse) {
+  .app-bar button,
+  .tool-button,
+  .workspace-tabs button,
+  .panel-tabs button,
+  .document-tabs button {
+    min-width: 38px;
+    min-height: 38px;
+  }
+  .tool-rail {
+    gap: 5px;
+    padding: 7px 5px;
+  }
+  .context-toolbar,
+  .canvas-toolbar {
+    gap: 7px;
+  }
+  input,
+  select,
+  button {
+    touch-action: manipulation;
+  }
+}
 @media (min-width: 701px) and (max-width: 900px) {
   .app-bar {
     gap: 6px;

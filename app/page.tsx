@@ -71,6 +71,7 @@ import {
   type HistorySurface,
   type TiledImage,
 } from '@/lib/tiled-history';
+import { penIntent } from '@/lib/pointer-input';
 import {
   checkDimensions,
   checkFileSize,
@@ -1984,6 +1985,7 @@ export default function Home() {
   const cloneOffset = useRef({ x: 0, y: 0 });
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
   const historyBrushBuffer = useRef<HTMLCanvasElement | null>(null);
+  const gesturePaintTool = useRef<'brush' | 'eraser' | null>(null);
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
@@ -3836,9 +3838,36 @@ export default function Home() {
     };
   };
   const begin = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0) return;
+    const inputIntent = penIntent(e);
+    if (inputIntent === 'ignore') return;
+    if (e.button !== 0 && inputIntent === 'draw') return;
     const p = point(e),
       meta = selected();
+    if (inputIntent === 'sample') {
+      render();
+      const data = displayRef.current
+        ?.getContext('2d', { willReadFrequently: true })
+        ?.getImageData(
+          Math.max(0, Math.min(doc.w - 1, Math.floor(p.x))),
+          Math.max(0, Math.min(doc.h - 1, Math.floor(p.y))),
+          1,
+          1,
+        ).data;
+      if (data) {
+        const sampled = `#${[data[0], data[1], data[2]]
+          .map((value) => value.toString(16).padStart(2, '0'))
+          .join('')}`;
+        setColor(sampled);
+        setStatus(`Pen barrel sampled ${sampled}`);
+      }
+      return;
+    }
+    gesturePaintTool.current =
+      inputIntent === 'erase' && (tool === 'brush' || tool === 'eraser')
+        ? 'eraser'
+        : tool === 'brush' || tool === 'eraser'
+          ? tool
+          : null;
     if (
       (curveTargetChannel || levelsTarget || hueTarget) &&
       meta?.kind === 'adjustment'
@@ -4043,7 +4072,7 @@ export default function Home() {
     }
     start.current = p;
     last.current = p;
-    if (tool === 'brush' || tool === 'eraser')
+    if (gesturePaintTool.current)
       brushDistanceSinceDab.current = Math.max(
         0.25,
         paintMode === 'pencil'
@@ -4187,7 +4216,8 @@ export default function Home() {
       }
       return;
     }
-    if (tool === 'brush' || tool === 'eraser') {
+    const paintTool = gesturePaintTool.current;
+    if (paintTool) {
       const target = targetContext();
       if (!target) return;
       let local = toLayerPoint(target.meta, p);
@@ -4209,10 +4239,10 @@ export default function Home() {
         drawStroke = (ctx: CanvasRenderingContext2D) => {
           const paint =
               editing === 'mask'
-                ? tool === 'eraser'
+                ? paintTool === 'eraser'
                   ? 'white'
                   : maskGray(color)
-                : tool === 'eraser'
+                : paintTool === 'eraser'
                   ? 'white'
                   : color,
             step = Math.max(
@@ -4253,14 +4283,14 @@ export default function Home() {
                 jitterScale = 1 - (sizeJitter / 100) * Math.random() * 0.75,
                 dabSize = Math.max(1, size * pressureScale * jitterScale),
                 jitteredPaint =
-                  editing === 'pixels' && tool === 'brush' && hueJitter
+                  editing === 'pixels' && paintTool === 'brush' && hueJitter
                     ? shiftedHex(
                         color,
                         (Math.random() * 2 - 1) * hueJitter * 1.8,
                       )
                     : paint,
                 dabPaint = (() => {
-                  if (!mixerBrush || editing !== 'pixels' || tool !== 'brush')
+                  if (!mixerBrush || editing !== 'pixels' || paintTool !== 'brush')
                     return jitteredPaint;
                   const sampled = target.ctx.getImageData(
                       Math.max(0, Math.min(doc.w - 1, Math.round(x))),
@@ -4677,6 +4707,8 @@ export default function Home() {
   const end = () => {
     if (!drawing.current) return;
     drawing.current = false;
+    const paintTool = gesturePaintTool.current;
+    gesturePaintTool.current = null;
     if (tool === 'lasso' && lassoMode !== 'polygonal') {
       finishPolygon('lasso');
       render();
@@ -4689,8 +4721,8 @@ export default function Home() {
     }
     if (
       !quickMaskRef.current &&
-      (tool === 'brush' ||
-        tool === 'eraser' ||
+      (paintTool === 'brush' ||
+        paintTool === 'eraser' ||
         tool === 'clone' ||
         tool === 'retouch' ||
         tool === 'move')
@@ -4704,7 +4736,7 @@ export default function Home() {
               ? `${retouchMode[0].toUpperCase()}${retouchMode.slice(1)} retouch`
               : editing === 'mask'
                 ? 'Paint mask'
-                : tool === 'eraser'
+                : paintTool === 'eraser'
                   ? 'Erase'
                   : 'Brush stroke',
       );
