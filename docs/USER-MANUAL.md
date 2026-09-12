@@ -27,6 +27,8 @@ Smart Objects retain embedded or linked source data, transforms, and editable Sm
 
 **New shared Smart Object instance** duplicates the selected Smart Object while keeping its source identity shared; replacing or relinking the source updates every shared instance while their transforms and Smart Filter stacks remain independent. **Make Smart Object independent** embeds the current appearance under a new source identity. LibreLayer records nested source dependencies in the project and refuses cyclic dependency graphs instead of recursively opening or corrupting them.
 
+For an embedded Smart Object, choose **Edit contents** in Layers or **Layer > Edit Smart Object contents**. Its layered source opens in a linked document tab. Each source edit synchronizes back to every shared instance, adds an undoable history state to the parent, and stores the complete source layer tree inside the `.librelayer` project. Opening the same source again switches to its existing tab. Linked-file Smart Objects remain controlled by Refresh, Relink, and Replace so LibreLayer never silently overwrites an external file.
+
 ## Selecting
 
 Use Marquee (`M`), Lasso (`L`), Magic Wand/Quick Selection (`W`), semantic Subject/People/Sky/Hair/Skin/Clothing/Object selections, Color Range, Focus Range, Similar, or luminosity ranges. New/Add/Subtract/Intersect changes how the next selection combines. Selection refinement includes Grow, Expand, Contract, Smooth, Feather, Border, Transform Selection, Quick Mask, saved selections, and Select and Mask.

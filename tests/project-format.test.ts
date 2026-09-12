@@ -25,6 +25,35 @@ void test('a packaged project round-trips with a verified checksum', async () =>
   assert.equal(result.verified, true);
 });
 
+void test('layered embedded Smart Object sources survive project packaging', async () => {
+  const project = {
+      ...fixture,
+      layers: [
+        {
+          id: 'smart-layer',
+          smartObject: {
+            kind: 'embedded',
+            instanceId: 'shared-source',
+            embeddedDocument: {
+              version: 1,
+              width: 2,
+              height: 1,
+              selectedId: 'inside',
+              layers: [{ id: 'inside', name: 'Inside' }],
+              surfaces: [
+                { id: 'inside', pixels: 'data:image/png;base64,AAAA' },
+              ],
+            },
+          },
+        },
+      ],
+    },
+    result = await unpackProject<typeof project>(
+      await (await packProject(project)).text(),
+    );
+  assert.deepEqual(result.project, project);
+});
+
 void test('Pixel Studio package envelopes remain readable after rebranding', async () => {
   const packed = JSON.parse(await (await packProject(fixture)).text());
   packed.format = 'pixel-studio-package';

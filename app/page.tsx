@@ -310,6 +310,10 @@ import {
   type RawLinearImage,
 } from '@/lib/raw-develop';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
+import {
+  validateEmbeddedDocument,
+  type EmbeddedDocumentEnvelope,
+} from '@/lib/embedded-smart-object';
 import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
@@ -387,6 +391,7 @@ type SmartObjectData = {
   linkedStatus?: 'connected' | 'missing';
   instanceId?: string;
   dependencies?: string[];
+  embeddedDocument?: EmbeddedDocumentData;
   raw?: {
     assetId: string;
     width: number;
@@ -396,6 +401,14 @@ type SmartObjectData = {
     lens: string;
     settings: RawDevelopSettings;
   };
+};
+type EmbeddedDocumentData = Omit<
+  EmbeddedDocumentEnvelope,
+  'layers' | 'paths' | 'layerComps'
+> & {
+  layers: LayerMeta[];
+  paths?: SavedPath[];
+  layerComps?: LayerComp[];
 };
 type TextLayerData = {
   content: string;
@@ -527,6 +540,10 @@ type EditorDocument = {
   selectionPath?: Point[] | null;
   paths?: SavedPath[];
   savedSelections?: SavedSelection[];
+  smartObjectSource?: {
+    parentDocumentId: string;
+    instanceId: string;
+  };
 };
 
 type InstallPromptEvent = Event & {
@@ -2216,6 +2233,7 @@ export default function Home() {
   const firstDocumentId = useRef(crypto.randomUUID());
   const activeDocumentRef = useRef(firstDocumentId.current);
   const documentStoreRef = useRef(new Map<string, EditorDocument>());
+  const syncEmbeddedSourceRef = useRef<() => void>(() => {});
   const [activeDocumentId, setActiveDocumentId] = useState(
     firstDocumentId.current,
   );
@@ -2750,6 +2768,7 @@ export default function Home() {
       boundHistory();
       setSaved(false);
       setHistoryVersion((v) => v + 1);
+      setTimeout(() => syncEmbeddedSourceRef.current(), 0);
     },
     [doc, paths, layerComps, view],
   );
@@ -2821,6 +2840,7 @@ export default function Home() {
     setSaved(false);
     setStatus(snap.label);
     setHistoryVersion((v) => v + 1);
+    setTimeout(() => syncEmbeddedSourceRef.current(), 0);
   }, []);
   const restoreSelectedLayerFromSnapshot = (index: number) => {
     const snap = historyRef.current[index],
@@ -3277,7 +3297,139 @@ export default function Home() {
       paths,
       savedSelections,
       feather,
+      smartObjectSource:
+        documentStoreRef.current.get(id)?.smartObjectSource,
     });
+  };
+  const embeddedDataForDocument = (
+    source: EditorDocument,
+  ): EmbeddedDocumentData => ({
+    version: 1,
+    width: source.doc.w,
+    height: source.doc.h,
+    layers: structuredClone(source.layers),
+    surfaces: source.layers.map((layer) => {
+      const surface = source.surfaces.get(layer.id);
+      if (!surface) throw Error('Embedded Smart Object pixels are missing');
+      return {
+        id: layer.id,
+        pixels: surface.pixels.toDataURL('image/png'),
+        mask: surface.mask?.toDataURL('image/png'),
+      };
+    }),
+    selectedId: source.selectedId,
+    selectedIds: [...(source.selectedIds ?? [source.selectedId])],
+    paths: structuredClone(source.paths ?? []),
+    layerComps: structuredClone(source.layerComps ?? []),
+  });
+  const propagateEmbeddedSource = (
+    sourceId: string,
+    visited = new Set<string>(),
+  ) => {
+    if (visited.has(sourceId))
+      throw Error('Cyclic Smart Object document relationship');
+    visited.add(sourceId);
+    const source = documentStoreRef.current.get(sourceId),
+      binding = source?.smartObjectSource;
+    if (!source || !binding) return;
+    const parent = documentStoreRef.current.get(binding.parentDocumentId);
+    if (!parent) {
+      setStatus('The parent document was closed; source edits remain in this tab');
+      return;
+    }
+    const embeddedDocument = embeddedDataForDocument(source);
+    validateEmbeddedDocument(embeddedDocument);
+    const preview = makeCanvas(source.doc.w, source.doc.h);
+    renderLayers(
+      preview.getContext('2d')!,
+      source.layers,
+      source.surfaces,
+      source.doc,
+    );
+    const sourceData = preview.toDataURL('image/png'),
+      matching = parent.layers.filter(
+        (layer) => layer.smartObject?.instanceId === binding.instanceId,
+      );
+    if (!matching.length) {
+      preview.width = preview.height = 1;
+      setStatus('The source object no longer exists in its parent document');
+      return;
+    }
+    parent.layers = parent.layers.map((layer) =>
+      layer.smartObject?.instanceId === binding.instanceId
+        ? {
+            ...layer,
+            smartObject: {
+              ...layer.smartObject,
+              sourceData,
+              embeddedDocument,
+            },
+          }
+        : layer,
+    );
+    for (const layer of matching) {
+      const next = makeCanvas(parent.doc.w, parent.doc.h);
+      next.getContext('2d')!.drawImage(preview, 0, 0);
+      const previous = parent.surfaces.get(layer.id);
+      parent.surfaces.set(layer.id, {
+        pixels: next,
+        mask: previous?.mask,
+      });
+      if (previous) previous.pixels.width = previous.pixels.height = 1;
+    }
+    preview.width = preview.height = 1;
+    const parentSnapshot: Snapshot = {
+      label: 'Update Smart Object contents',
+      w: parent.doc.w,
+      h: parent.doc.h,
+      layers: structuredClone(parent.layers),
+      selectedId: parent.selectedId,
+      selectedIds: [...(parent.selectedIds ?? [parent.selectedId])],
+      paths: structuredClone(parent.paths ?? []),
+      layerComps: structuredClone(parent.layerComps ?? []),
+      view: parent.view ? readView(parent.view) : undefined,
+      surfaces: parent.layers.map((layer) => {
+        const surface = parent.surfaces.get(layer.id)!;
+        return {
+          id: layer.id,
+          pixels: captureTiles(surface.pixels),
+          mask: surface.mask ? captureTiles(surface.mask) : undefined,
+        };
+      }),
+    };
+    parent.history = parent.history.slice(0, parent.historyIndex + 1);
+    parent.history.push(parentSnapshot);
+    parent.historyIndex = parent.history.length - 1;
+    parent.saved = false;
+    source.saved = true;
+    setDocuments((items) =>
+      items.map((item) =>
+        item.id === parent.id
+          ? { ...item, saved: false }
+          : item.id === source.id
+            ? { ...item, saved: true }
+            : item,
+      ),
+    );
+    if (activeDocumentRef.current === source.id) setSaved(true);
+    propagateEmbeddedSource(parent.id, visited);
+    setStatus(
+      `Smart Object source synchronized to ${matching.length} instance${matching.length === 1 ? '' : 's'}`,
+    );
+  };
+  syncEmbeddedSourceRef.current = () => {
+    const active = documentStoreRef.current.get(activeDocumentRef.current);
+    if (!active?.smartObjectSource) return;
+    persistActiveDocument();
+    try {
+      propagateEmbeddedSource(active.id);
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'Smart Object contents could not be synchronized.',
+      );
+    }
   };
   const loadDocument = (next: EditorDocument) => {
     activeDocumentRef.current = next.id;
@@ -6630,35 +6782,118 @@ export default function Home() {
       }
       return;
     }
-    const image = new Image();
-    image.src = smart.sourceData;
-    image.onload = () => {
-      const pixels = makeCanvas(image.naturalWidth, image.naturalHeight);
-      pixels.getContext('2d')!.drawImage(image, 0, 0);
-      const id = crypto.randomUUID();
-      loadImportedDocument(
-        `${smart.sourceName} — Smart Object contents`,
-        pixels.width,
-        pixels.height,
-        [
-          {
-            id,
-            name: smart.sourceName,
-            kind: 'pixel',
-            visible: true,
-            opacity: 100,
-            blend: 'source-over',
-            x: 0,
-            y: 0,
-            hasMask: false,
-            maskEnabled: true,
-          },
-        ],
-        new Map([[id, { pixels }]]),
-        'Open Smart Object contents',
+    if (smart.kind === 'linked') {
+      setStatus('Linked Smart Objects use Refresh, Relink, or Replace contents');
+      return;
+    }
+    const instanceId = smart.instanceId ?? crypto.randomUUID(),
+      parentDocumentId = activeDocumentRef.current,
+      existing = [...documentStoreRef.current.values()].find(
+        (document) =>
+          document.smartObjectSource?.parentDocumentId === parentDocumentId &&
+          document.smartObjectSource.instanceId === instanceId,
       );
-      setStatus('Smart Object contents opened in a separate editable tab');
-    };
+    if (existing) {
+      switchDocument(existing.id);
+      setStatus('Switched to the open Smart Object source document');
+      return;
+    }
+    if (!smart.instanceId && meta)
+      patchLayer(
+        meta.id,
+        { smartObject: { ...smart, instanceId } },
+        'Prepare Smart Object source',
+      );
+    const decode = (uri: string, width: number, height: number) =>
+      new Promise<HTMLCanvasElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+          if (image.naturalWidth !== width || image.naturalHeight !== height) {
+            reject(Error('Embedded Smart Object pixel dimensions do not match'));
+            return;
+          }
+          const pixels = makeCanvas(width, height);
+          pixels.getContext('2d')!.drawImage(image, 0, 0);
+          resolve(pixels);
+        };
+        image.onerror = () => reject(Error('Embedded Smart Object pixels are invalid'));
+        image.src = uri;
+      });
+    try {
+      if (smart.embeddedDocument) {
+        const embedded = validateEmbeddedDocument(
+            smart.embeddedDocument,
+          ) as EmbeddedDocumentData,
+          nextSurfaces = new Map<string, LayerSurface>();
+        for (const record of embedded.surfaces)
+          nextSurfaces.set(record.id, {
+            pixels: await decode(record.pixels, embedded.width, embedded.height),
+            mask: record.mask
+              ? await decode(record.mask, embedded.width, embedded.height)
+              : undefined,
+          });
+        loadImportedDocument(
+          `${smart.sourceName} — Smart Object contents`,
+          embedded.width,
+          embedded.height,
+          structuredClone(embedded.layers),
+          nextSurfaces,
+          'Open layered Smart Object contents',
+          undefined,
+          { parentDocumentId, instanceId },
+        );
+        const opened = documentStoreRef.current.get(activeDocumentRef.current);
+        if (opened) {
+          opened.selectedId = embedded.selectedId;
+          opened.selectedIds = [
+            ...(embedded.selectedIds ?? [embedded.selectedId]),
+          ];
+          opened.paths = structuredClone(embedded.paths ?? []);
+          opened.layerComps = structuredClone(embedded.layerComps ?? []);
+          selectMany(opened.selectedIds, opened.selectedId);
+          setPaths(opened.paths);
+          layerCompsRef.current = opened.layerComps;
+          setLayerComps(opened.layerComps);
+        }
+      } else {
+        const image = new Image();
+        image.src = smart.sourceData;
+        await image.decode();
+        const pixels = makeCanvas(image.naturalWidth, image.naturalHeight);
+        pixels.getContext('2d')!.drawImage(image, 0, 0);
+        const id = crypto.randomUUID();
+        loadImportedDocument(
+          `${smart.sourceName} — Smart Object contents`,
+          pixels.width,
+          pixels.height,
+          [
+            {
+              id,
+              name: smart.sourceName,
+              kind: 'pixel',
+              visible: true,
+              opacity: 100,
+              blend: 'source-over',
+              x: 0,
+              y: 0,
+              hasMask: false,
+              maskEnabled: true,
+            },
+          ],
+          new Map([[id, { pixels }]]),
+          'Open Smart Object contents',
+          undefined,
+          { parentDocumentId, instanceId },
+        );
+      }
+      setStatus('Smart Object contents opened in a linked editable tab');
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'The embedded Smart Object document could not be opened.',
+      );
+    }
   };
   const addSmartFilter = (name: SmartFilter['name']) => {
     const meta = selected();
@@ -8590,6 +8825,7 @@ export default function Home() {
     nextSurfaces: Map<string, LayerSurface>,
     label: string,
     restore?: { id: string; saved: boolean; skipPersist: boolean },
+    smartObjectSource?: EditorDocument['smartObjectSource'],
   ) => {
     nextLayers = treeOrder(nextLayers);
     requireRoom(
@@ -8635,6 +8871,7 @@ export default function Home() {
         zoom: Math.min(100, Math.max(20, Math.round((760 / w) * 100))),
         selection: null,
         paths: [],
+        smartObjectSource,
       };
     documentStoreRef.current.set(documentId, next);
     setDocuments((items) => [
@@ -9109,6 +9346,9 @@ export default function Home() {
           (item: { smartObject?: SmartObjectData }) => item.smartObject ?? {},
         ),
       );
+      for (const item of data.layers as { smartObject?: SmartObjectData }[])
+        if (item.smartObject?.embeddedDocument)
+          validateEmbeddedDocument(item.smartObject.embeddedDocument);
       const decode = (uri: string) =>
         new Promise<HTMLCanvasElement>((resolve, reject) => {
           if (
@@ -15152,6 +15392,22 @@ export default function Home() {
                               </button>
                             </div>
                           )}
+                          {active.smartObject.kind === 'embedded' &&
+                            !active.smartObject.raw && (
+                              <div className="linked-smart-summary">
+                                <div>
+                                  <strong>Embedded source document</strong>
+                                  <small>
+                                    {active.smartObject.embeddedDocument
+                                      ? `${active.smartObject.embeddedDocument.layers.length} editable source layers`
+                                      : 'Open once to create an editable layered source'}
+                                  </small>
+                                </div>
+                                <button onClick={() => void editSmartContents()}>
+                                  Edit contents
+                                </button>
+                              </div>
+                            )}
                           <SmartFilterStack
                             filters={active.smartObject.filters}
                             disabled={isLocked(active.id)}
