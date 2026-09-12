@@ -111,7 +111,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Highlight reconstruction, hot-pixel and banding removal, plus separate browser-local chroma/luma denoise. AI denoise was intentionally removed from scope in favor of a tuned deterministic local engine.
 - [x] Local focal-family lens profiles with metadata matching, distortion, vignette, aberration, defringe, and RAW sharpening.
 - [ ] Scene-referred HDR and supported HDR-display preview.
-- [ ] Portable sidecars, batch development, and full camera fixture matrix.
+- [x] Portable sidecars and sequential local batch development with progress, per-file failure reporting, and safe stopping.
+- [ ] Full camera fixture matrix.
 
 ## 8. File compatibility
 

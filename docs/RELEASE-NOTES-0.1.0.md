@@ -12,6 +12,7 @@ LibreLayer 0.1.0 is the first open release candidate of the browser-local layere
 - Camera Raw detail and optics controls with independent luminance/chroma denoise, hot-pixel and banding repair, metadata-matched local lens profiles, distortion, vignette, chromatic-aberration, defringe, and RAW sharpening.
 - Persisted Camera Raw decode recipes with seven LibRaw interpolation modes, camera/embedded-DNG profile paths, and as-shot, automatic, daylight, or tungsten white-balance sources that reprocess the retained sensor file.
 - Importable and exportable `.libreRAW.json` sidecars that validate every RAW setting before use and never contain image pixels.
+- Sequential local Camera Raw batch development: the current recipe processes one selected source at a time, reports progress and individual failures, and can stop safely between stages.
 - PSD/PSB, image, TIFF, PDF, RAW, editable project, encrypted project, and web-export workflows with format-specific limitations documented in the format matrix.
 - Device-local autosave, recovery, preferences, remembered save handles where the browser permits them, configurable history compaction, and large-document reporting.
 

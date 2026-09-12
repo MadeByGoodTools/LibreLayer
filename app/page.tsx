@@ -361,6 +361,7 @@ import {
   parseRawRecipeSidecar,
   serializeRawRecipeSidecar,
 } from '@/lib/raw-sidecar';
+import { runRawBatch } from '@/lib/raw-batch';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
 import {
   validateEmbeddedDocument,
@@ -2499,6 +2500,7 @@ export default function Home() {
       defaultRawDevelopSettings,
     ),
     [rawDecodeBusy, setRawDecodeBusy] = useState(false),
+    [rawBatchRunning, setRawBatchRunning] = useState(false),
     [rawPreview, setRawPreview] = useState(''),
     [refineRadius, setRefineRadius] = useState(2),
     [refineSmooth, setRefineSmooth] = useState(2),
@@ -2571,6 +2573,8 @@ export default function Home() {
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
   const rawRecipeFileRef = useRef<HTMLInputElement>(null);
+  const rawBatchFileRef = useRef<HTMLInputElement>(null);
+  const rawBatchCancel = useRef(false);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
   const brushTipFileRef = useRef<HTMLInputElement>(null);
   const brushTipCanvases = useRef(new Map<string, HTMLCanvasElement>());
@@ -11596,7 +11600,7 @@ export default function Home() {
           'The original RAW file is required to change demosaic, white balance, or camera profile.',
         );
       const image = await decodeCameraRaw(file, decode);
-      if (revision !== rawDecodeRevision.current) return;
+      if (revision !== rawDecodeRevision.current) return false;
       setRawSettings((current) => replacement ?? { ...current, decode });
       setRawDevelop((current) =>
         current ? { ...current, image, sourceFile: file } : null,
@@ -11604,7 +11608,7 @@ export default function Home() {
       setStatus('RAW decode recipe updated with a fresh live preview');
       return true;
     } catch (error) {
-      if (revision !== rawDecodeRevision.current) return;
+      if (revision !== rawDecodeRevision.current) return false;
       setPsdError(
         error instanceof Error
           ? error.message
@@ -11670,6 +11674,59 @@ export default function Home() {
       );
     } finally {
       if (rawRecipeFileRef.current) rawRecipeFileRef.current.value = '';
+    }
+  };
+  const runRawBatchDevelop = async (files?: FileList | null) => {
+    if (!files?.length || rawDecodeBusy || rawBatchRunning) return;
+    rawBatchCancel.current = false;
+    const sourceFiles = Array.from(files);
+    setRawBatchRunning(true);
+    try {
+      const result = await runRawBatch(
+        sourceFiles.map((file) => ({ name: file.name, source: file })),
+        {
+          shouldCancel: () => rawBatchCancel.current,
+          decode: (file) => decodeCameraRaw(file, rawSettings.decode),
+          render: (image) => {
+            const developed = developRawRgba(image, rawSettings);
+            const canvas = makeCanvas(developed.width, developed.height);
+            canvas
+              .getContext('2d')!
+              .putImageData(
+                new ImageData(developed.data, developed.width, developed.height),
+                0,
+                0,
+              );
+            return canvas;
+          },
+          write: async (canvas, name) => {
+            const blob = await new Promise<Blob>((resolve, reject) =>
+              canvas.toBlob((value) => {
+                if (value) resolve(value);
+                else reject(Error('The developed image could not be encoded.'));
+              }, 'image/png'),
+            );
+            const baseName = name.replace(/\.[^.]+$/, '') || 'developed';
+            downloadBlob(`${baseName}-LibreLayer.png`, blob);
+            canvas.width = canvas.height = 1;
+          },
+          onProgress: (progress) =>
+            setStatus(
+              `RAW batch ${progress.completed}/${progress.total} · ${progress.state} ${progress.name}`,
+            ),
+        },
+      );
+      setStatus(
+        result.cancelled
+          ? `RAW batch stopped after ${result.completed} file${result.completed === 1 ? '' : 's'}`
+          : result.failures.length
+            ? `RAW batch finished: ${result.completed} complete, ${result.failures.length} failed`
+            : `RAW batch finished: ${result.completed} file${result.completed === 1 ? '' : 's'} developed locally`,
+      );
+    } finally {
+      rawBatchCancel.current = false;
+      setRawBatchRunning(false);
+      if (rawBatchFileRef.current) rawBatchFileRef.current.value = '';
     }
   };
   const applyRawDevelop = async () => {
@@ -20002,7 +20059,8 @@ export default function Home() {
           </DialogTitle>
           <DialogDescription>
             Develop the camera sensor data in a scene-linear, wide-gamut
-            workspace. The original RAW file is never changed.
+            workspace. The original RAW file is never changed. Batch develop
+            exports one local PNG at a time using this recipe.
           </DialogDescription>
           {rawDevelop && rawPreview && (
             <img src={rawPreview} alt="Live RAW development preview" />
@@ -20248,15 +20306,34 @@ export default function Home() {
             </div>
           </details>
           <div className="dialog-actions">
+            {rawBatchRunning ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  rawBatchCancel.current = true;
+                  setStatus('RAW batch will stop after the current step');
+                }}
+              >
+                Stop batch
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                disabled={rawDecodeBusy}
+                onClick={() => rawBatchFileRef.current?.click()}
+              >
+                Batch develop
+              </Button>
+            )}
             <Button
               variant="outline"
-              disabled={rawDecodeBusy}
+              disabled={rawDecodeBusy || rawBatchRunning}
               onClick={resetRawDevelop}
             >
               Reset
             </Button>
             <Button
-              disabled={rawDecodeBusy}
+              disabled={rawDecodeBusy || rawBatchRunning}
               onClick={() => void applyRawDevelop()}
             >
               {rawDevelop?.targetLayerId
@@ -20607,6 +20684,14 @@ export default function Home() {
         type="file"
         accept=".libreRAW.json,application/json"
         onChange={(event) => void importRawRecipe(event.target.files?.[0])}
+      />
+      <input
+        ref={rawBatchFileRef}
+        hidden
+        type="file"
+        multiple
+        accept=".arw,.cr2,.cr3,.dng,.nef,.orf,.raf,.rw2"
+        onChange={(event) => void runRawBatchDevelop(event.target.files)}
       />
       <input
         ref={filterPluginFileRef}

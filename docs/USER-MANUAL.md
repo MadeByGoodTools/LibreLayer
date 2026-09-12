@@ -93,6 +93,8 @@ Supported Bayer and X-Trans camera files open in a live scene-linear developer. 
 
 Use **Export recipe** to save a small `.libreRAW.json` sidecar containing the validated development recipe and optional camera/lens description, without copying image pixels. **Import recipe** applies it to the current RAW file. If its demosaic, white-balance source, or camera-profile setting differs, LibreLayer rereads the retained RAW source before showing the updated preview; if the source is no longer available, the recipe is not applied.
 
+Use **Batch develop** to select multiple local RAW files and export developed PNGs sequentially with the current recipe. LibreLayer reports each decode, render, and write stage, continues past an unreadable file, and can stop safely between stages. The browser may ask permission for multiple downloads; the source files remain on the device.
+
 ## Filters
 
 The Filter menu exposes Blur Gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and Noise Reduction directly. The same filters are available in Professional Studio with Amount and Secondary controls. Blur Gallery uses Secondary as the in-focus vertical position; Lens Blur treats image luminance as a depth map and Secondary as the focal depth; Surface Blur uses Secondary as its edge threshold. Noise Reduction is selected below 50% Secondary, while 50% or above intentionally adds noise. Every filter preserves alpha, respects the active selection, and creates a full undo/redo history state.
