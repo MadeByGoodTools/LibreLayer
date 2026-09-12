@@ -2541,6 +2541,26 @@ button {
   border-radius: 5px;
   background: #292a2f;
 }
+.path-file-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.path-file-actions button,
+.path-file-button {
+  display: grid;
+  place-items: center;
+  min-height: 28px;
+  border: 1px solid #484950;
+  border-radius: 4px;
+  background: #34353a;
+  color: #ddd;
+  font-size: 10px;
+  cursor: pointer;
+}
+.path-file-button input {
+  display: none;
+}
 .path-boolean-actions button {
   min-width: 0;
   border: 1px solid #484950;
@@ -2595,9 +2615,29 @@ button {
   display: grid;
   gap: 3px;
 }
+.path-stroke-controls > div {
+  min-width: 350px;
+  right: 0;
+  left: auto;
+}
+.path-stroke-controls input[type='color'] {
+  width: 52px;
+  height: 27px;
+  padding: 2px;
+  border: 1px solid #4a4b52;
+  border-radius: 5px;
+  background: #1e1f23;
+}
 .options-bar:has(.path-direct-controls[open]) {
   z-index: 90;
   overflow: visible;
+}
+.options-bar:has(.path-direct-controls) {
+  gap: 7px;
+  padding-inline: 9px;
+}
+.options-bar:has(.path-direct-controls) .contextual-subject {
+  display: none;
 }
 .group-properties {
   display: grid;

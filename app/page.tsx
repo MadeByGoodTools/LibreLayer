@@ -325,14 +325,20 @@ import {
 } from '@/lib/smart-filter-cache';
 import { traceAlphaContours } from '@/lib/vector-trace';
 import {
+  anchorsToSvgPath,
   anchorsFromPoints,
   combinePathMasks,
   convertAnchorKind,
+  defaultPathStroke,
   moveAnchor,
   moveAnchorHandle,
+  normalizePathStroke,
+  sampleBezierAnchors,
   type BezierAnchor,
   type PathBooleanOperation,
+  type PathStrokeStyle,
 } from '@/lib/path-engine';
+import { parseSvgDocument, serializeSvgDocument } from '@/lib/svg-path';
 import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
@@ -390,6 +396,7 @@ type SavedPath = {
   points: Point[];
   anchors?: BezierAnchor[];
   closed?: boolean;
+  stroke?: PathStrokeStyle;
   curved?: boolean;
   tension?: number;
 };
@@ -446,18 +453,7 @@ const traceSavedPath = (
 };
 
 const savedPathSvgData = (path: SavedPath) => {
-  const anchors = pathAnchors(path);
-  if (anchors.length < 2) return '';
-  let data = `M ${anchors[0].x} ${anchors[0].y}`;
-  const segment = (previous: BezierAnchor, current: BezierAnchor) =>
-    previous.outgoing || current.incoming
-      ? ` C ${previous.outgoing?.x ?? previous.x} ${previous.outgoing?.y ?? previous.y} ${current.incoming?.x ?? current.x} ${current.incoming?.y ?? current.y} ${current.x} ${current.y}`
-      : ` L ${current.x} ${current.y}`;
-  for (let index = 1; index < anchors.length; index++)
-    data += segment(anchors[index - 1], anchors[index]);
-  if (path.closed !== false)
-    data += `${segment(anchors.at(-1)!, anchors[0])} Z`;
-  return data;
+  return anchorsToSvgPath(pathAnchors(path), path.closed !== false);
 };
 type SavedSelection = { id: string; name: string; mask: string };
 type SmartFilter = {
@@ -4061,6 +4057,11 @@ export default function Home() {
         points: clean,
         anchors: anchorsFromPoints(clean, curved, pathTension),
         closed: true,
+        stroke: normalizePathStroke({
+          color,
+          widthStart: size,
+          widthEnd: size,
+        }),
         curved,
         tension: pathTension,
       };
@@ -4150,6 +4151,14 @@ export default function Home() {
       anchor = path && pathAnchors(path)[selectedAnchorIndex];
     if (anchor) moveSelectedPathAnchor(anchor.x + dx, anchor.y + dy);
   };
+  const updatePathStroke = (patch: Partial<PathStrokeStyle>) =>
+    updateSelectedPath('Path stroke updated', (path) => ({
+      ...path,
+      stroke: normalizePathStroke({
+        ...(path.stroke ?? defaultPathStroke()),
+        ...patch,
+      }),
+    }));
   const dragPathControl = (
     pathId: string,
     index: number,
@@ -4183,17 +4192,53 @@ export default function Home() {
     }
     withSelection(target.ctx, target.meta, () => {
       target.ctx.save();
-      traceSavedPath(target.ctx, path, (point) =>
-        toLayerPoint(target.meta, point),
-      );
       target.ctx.globalAlpha = opacity / 100;
       if (fillPath) {
+        traceSavedPath(target.ctx, path, (point) =>
+          toLayerPoint(target.meta, point),
+        );
         target.ctx.fillStyle = color;
         target.ctx.fill();
       } else {
-        target.ctx.strokeStyle = color;
-        target.ctx.lineWidth = size;
-        target.ctx.stroke();
+        const stroke = normalizePathStroke(
+          path.stroke ?? {
+            color,
+            widthStart: size,
+            widthEnd: size,
+          },
+        );
+        target.ctx.strokeStyle = stroke.color;
+        target.ctx.lineCap = stroke.cap;
+        target.ctx.lineJoin = stroke.join;
+        target.ctx.setLineDash(stroke.dash);
+        if (Math.abs(stroke.widthStart - stroke.widthEnd) < 0.01) {
+          traceSavedPath(target.ctx, path, (point) =>
+            toLayerPoint(target.meta, point),
+          );
+          target.ctx.lineWidth = stroke.widthStart;
+          target.ctx.stroke();
+        } else {
+          const samples = sampleBezierAnchors(
+            pathAnchors(path),
+            path.closed !== false,
+          ).map((point) => toLayerPoint(target.meta, point));
+          let traveled = 0;
+          for (let index = 1; index < samples.length; index++) {
+            target.ctx.beginPath();
+            target.ctx.moveTo(samples[index - 1].x, samples[index - 1].y);
+            target.ctx.lineTo(samples[index].x, samples[index].y);
+            target.ctx.lineDashOffset = -traveled;
+            target.ctx.lineWidth =
+              stroke.widthStart +
+              ((stroke.widthEnd - stroke.widthStart) * index) /
+                (samples.length - 1);
+            target.ctx.stroke();
+            traveled += Math.hypot(
+              samples[index].x - samples[index - 1].x,
+              samples[index].y - samples[index - 1].y,
+            );
+          }
+        }
       }
       target.ctx.restore();
     });
@@ -6157,6 +6202,7 @@ export default function Home() {
         points,
         anchors: anchorsFromPoints(points, false),
         closed: true,
+        stroke: defaultPathStroke(),
         curved: false,
       }));
     if (!created.length) {
@@ -6195,6 +6241,59 @@ export default function Home() {
     setPaths((items) => items.filter((item) => item.id !== id));
     setSelectedPathIds((items) => items.filter((item) => item !== id));
     setTimeout(() => snapshot('Delete path'), 0);
+  };
+  const importSvgPaths = async (file: File) => {
+    try {
+      checkFileSize(file.size);
+      const imported = parseSvgDocument(await file.text()).map<SavedPath>(
+        (path) => ({
+          id: crypto.randomUUID(),
+          name: path.name,
+          points: path.anchors.map(({ x, y }) => ({ x, y })),
+          anchors: path.anchors,
+          closed: path.closed,
+          curved: path.anchors.some((anchor) => anchor.kind === 'smooth'),
+          stroke: path.stroke,
+        }),
+      );
+      setPaths((items) => [...imported, ...items]);
+      setSelectedPathIds(imported.slice(0, 2).map((path) => path.id));
+      setSelectedAnchorIndex(0);
+      setTimeout(() => snapshot('Import SVG paths'), 0);
+      setStatus(
+        `Imported ${imported.length} editable SVG path${imported.length === 1 ? '' : 's'}`,
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : 'SVG import failed safely',
+      );
+    }
+  };
+  const exportSvgPaths = () => {
+    const chosen = selectedPathIds.length
+      ? paths.filter((path) => selectedPathIds.includes(path.id))
+      : paths;
+    if (!chosen.length) {
+      setStatus('Select or create a path before SVG export');
+      return;
+    }
+    const svg = serializeSvgDocument(
+      chosen.map((path) => ({
+        name: path.name,
+        anchors: pathAnchors(path),
+        closed: path.closed !== false,
+        stroke: normalizePathStroke(path.stroke),
+      })),
+      doc.w,
+      doc.h,
+    );
+    downloadBlob(
+      `${fileName.replace(/\.[^.]+$/, '') || 'LibreLayer paths'}.svg`,
+      new Blob([svg], { type: 'image/svg+xml' }),
+    );
+    setStatus(
+      `Exported ${chosen.length} vector path${chosen.length === 1 ? '' : 's'} as SVG`,
+    );
   };
   const duplicate = () => {
     const roots = selectedRoots(),
@@ -10081,6 +10180,7 @@ export default function Home() {
               closed: path.closed !== false,
               curved: path.curved === true,
               tension: Number.isFinite(path.tension) ? path.tension : 50,
+              stroke: normalizePathStroke(path.stroke),
             }))
         : [];
       loadImportedDocument(
@@ -12759,7 +12859,8 @@ export default function Home() {
 
   const activePath = paths.find((path) => path.id === selectedPathIds[0]),
     activePathAnchors = activePath ? pathAnchors(activePath) : [],
-    activePathAnchor = activePathAnchors[selectedAnchorIndex];
+    activePathAnchor = activePathAnchors[selectedAnchorIndex],
+    activePathStroke = normalizePathStroke(activePath?.stroke);
 
   return (
     <main
@@ -14559,20 +14660,129 @@ export default function Home() {
                     </Button>
                   </div>
                 </details>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => fillStrokePath(true)}
-                >
-                  Fill path
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => fillStrokePath(false)}
-                >
-                  Stroke path
-                </Button>
+                <details className="path-direct-controls path-stroke-controls">
+                  <summary>Stroke</summary>
+                  <div>
+                    <label>
+                      Colour
+                      <input
+                        aria-label="Path stroke color"
+                        type="color"
+                        value={activePathStroke.color}
+                        disabled={!activePath}
+                        onChange={(event) =>
+                          updatePathStroke({ color: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Start width
+                      <input
+                        aria-label="Path stroke start width"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0.1"
+                        max="1000"
+                        step="0.5"
+                        value={activePathStroke.widthStart}
+                        disabled={!activePath}
+                        onChange={(event) =>
+                          updatePathStroke({
+                            widthStart: +event.target.value || 0.1,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      End width
+                      <input
+                        aria-label="Path stroke end width"
+                        className="number-option compact-number"
+                        type="number"
+                        min="0.1"
+                        max="1000"
+                        step="0.5"
+                        value={activePathStroke.widthEnd}
+                        disabled={!activePath}
+                        onChange={(event) =>
+                          updatePathStroke({
+                            widthEnd: +event.target.value || 0.1,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Cap
+                      <select
+                        aria-label="Path stroke cap"
+                        value={activePathStroke.cap}
+                        disabled={!activePath}
+                        onChange={(event) =>
+                          updatePathStroke({
+                            cap: event.target.value as CanvasLineCap,
+                          })
+                        }
+                      >
+                        <option value="butt">Butt</option>
+                        <option value="round">Round</option>
+                        <option value="square">Square</option>
+                      </select>
+                    </label>
+                    <label>
+                      Join
+                      <select
+                        aria-label="Path stroke join"
+                        value={activePathStroke.join}
+                        disabled={!activePath}
+                        onChange={(event) =>
+                          updatePathStroke({
+                            join: event.target.value as CanvasLineJoin,
+                          })
+                        }
+                      >
+                        <option value="miter">Miter</option>
+                        <option value="round">Round</option>
+                        <option value="bevel">Bevel</option>
+                      </select>
+                    </label>
+                    <label>
+                      Dash
+                      <select
+                        aria-label="Path stroke dash"
+                        value={activePathStroke.dash.join(',')}
+                        disabled={!activePath}
+                        onChange={(event) =>
+                          updatePathStroke({
+                            dash: event.target.value
+                              ? event.target.value.split(',').map(Number)
+                              : [],
+                          })
+                        }
+                      >
+                        <option value="">Solid</option>
+                        <option value="12,8">Dashed</option>
+                        <option value="2,6">Dotted</option>
+                        <option value="18,6,3,6">Dash dot</option>
+                      </select>
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activePath}
+                      onClick={() => fillStrokePath(false)}
+                    >
+                      Paint stroke
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activePath}
+                      onClick={() => fillStrokePath(true)}
+                    >
+                      Fill path
+                    </Button>
+                  </div>
+                </details>
               </>
             )}
           </>
@@ -17836,6 +18046,21 @@ export default function Home() {
                         <PenTool />
                         Draw work path
                       </Button>
+                      <section className="path-file-actions">
+                        <label className="path-file-button">
+                          Import SVG
+                          <input
+                            type="file"
+                            accept="image/svg+xml,.svg"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) void importSvgPaths(file);
+                              event.currentTarget.value = '';
+                            }}
+                          />
+                        </label>
+                        <button onClick={exportSvgPaths}>Export SVG</button>
+                      </section>
                       <section
                         className="path-boolean-actions"
                         aria-label="Boolean path operations"

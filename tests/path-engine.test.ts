@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   anchorsFromPoints,
+  anchorsToSvgPath,
   combinePathMasks,
   convertAnchorKind,
   moveAnchor,
   moveAnchorHandle,
+  normalizePathStroke,
+  sampleBezierAnchors,
 } from '../lib/path-engine.ts';
 
 void test('curvature anchors receive mirrored editable handles', () => {
@@ -24,6 +27,43 @@ void test('curvature anchors receive mirrored editable handles', () => {
     anchors[1].incoming!.x - anchors[1].x,
     -(anchors[1].outgoing!.x - anchors[1].x),
   );
+});
+
+void test('professional stroke recipes clamp values and retain dash patterns', () => {
+  assert.deepEqual(
+    normalizePathStroke({
+      color: '#12abef',
+      widthStart: 0,
+      widthEnd: 2000,
+      cap: 'square',
+      join: 'bevel',
+      dash: [12, -1, 8],
+    }),
+    {
+      color: '#12abef',
+      widthStart: 0.1,
+      widthEnd: 1000,
+      cap: 'square',
+      join: 'bevel',
+      dash: [12, 8],
+    },
+  );
+});
+
+void test('cubic paths serialize as vectors and sample their curved geometry', () => {
+  const anchors = anchorsFromPoints(
+      [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 20 },
+      ],
+      true,
+    ),
+    svgPath = anchorsToSvgPath(anchors, true),
+    samples = sampleBezierAnchors(anchors, true, 8);
+  assert.match(svgPath, /^M .+ C .+ Z$/);
+  assert.ok(samples.length > anchors.length);
+  assert.deepEqual(samples.at(-1), { x: 0, y: 0 });
 });
 
 void test('dragging a smooth Bézier handle mirrors its opposite control', () => {

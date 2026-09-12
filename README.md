@@ -72,6 +72,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Editable point and paragraph type with local font loading, variable weight/width controls, OpenType options, bidirectional shaping, language selection, missing-font warnings, and paragraph spacing
 - Text placed along real saved-path distance and tangents or fitted inside closed paths, six editable warp styles, shrink/fill box fitting, and per-glyph alpha-contour conversion to editable paths
 - Cubic Bézier and Curvature Pen paths with visible draggable anchors and mirrored handles, corner/smooth conversion, numeric direct selection, and Unite/Subtract/Intersect/Exclude operations
+- Persisted vector stroke recipes with caps, joins, dash styles, tapered start/end widths, pixel painting, and editable SVG import/export that round-trips LibreLayer width metadata
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 
 Projects remain on the user's device unless they explicitly export or share a file.

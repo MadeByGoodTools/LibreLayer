@@ -9,6 +9,46 @@ export type PathBooleanOperation =
   | 'subtract'
   | 'intersect'
   | 'exclude';
+export type PathStrokeStyle = {
+  color: string;
+  widthStart: number;
+  widthEnd: number;
+  cap: CanvasLineCap;
+  join: CanvasLineJoin;
+  dash: number[];
+};
+
+export const defaultPathStroke = (): PathStrokeStyle => ({
+  color: '#ffffff',
+  widthStart: 4,
+  widthEnd: 4,
+  cap: 'round',
+  join: 'round',
+  dash: [],
+});
+
+export const normalizePathStroke = (
+  value?: Partial<PathStrokeStyle>,
+): PathStrokeStyle => ({
+  color:
+    typeof value?.color === 'string' && /^#[0-9a-f]{6}$/i.test(value.color)
+      ? value.color
+      : '#ffffff',
+  widthStart: Math.max(0.1, Math.min(1000, value?.widthStart ?? 4)),
+  widthEnd: Math.max(0.1, Math.min(1000, value?.widthEnd ?? 4)),
+  cap: ['butt', 'round', 'square'].includes(value?.cap ?? '')
+    ? value!.cap!
+    : 'round',
+  join: ['round', 'bevel', 'miter'].includes(value?.join ?? '')
+    ? value!.join!
+    : 'round',
+  dash: Array.isArray(value?.dash)
+    ? value.dash
+        .filter((item) => Number.isFinite(item) && item > 0)
+        .slice(0, 12)
+        .map((item) => Math.min(1000, item))
+    : [],
+});
 
 export const anchorsFromPoints = (
   points: VectorPoint[],
@@ -29,6 +69,58 @@ export const anchorsFromPoints = (
       outgoing: { x: point.x + dx, y: point.y + dy },
     };
   });
+};
+
+export const anchorsToSvgPath = (anchors: BezierAnchor[], closed = true) => {
+  if (anchors.length < 2) return '';
+  let data = `M ${anchors[0].x} ${anchors[0].y}`;
+  const segment = (previous: BezierAnchor, current: BezierAnchor) =>
+    previous.outgoing || current.incoming
+      ? ` C ${previous.outgoing?.x ?? previous.x} ${previous.outgoing?.y ?? previous.y} ${current.incoming?.x ?? current.x} ${current.incoming?.y ?? current.y} ${current.x} ${current.y}`
+      : ` L ${current.x} ${current.y}`;
+  for (let index = 1; index < anchors.length; index++)
+    data += segment(anchors[index - 1], anchors[index]);
+  if (closed) data += `${segment(anchors.at(-1)!, anchors[0])} Z`;
+  return data;
+};
+
+export const sampleBezierAnchors = (
+  anchors: BezierAnchor[],
+  closed = true,
+  stepsPerCurve = 16,
+) => {
+  if (anchors.length < 2) return [];
+  const count = closed ? anchors.length : anchors.length - 1,
+    points: VectorPoint[] = [{ x: anchors[0].x, y: anchors[0].y }];
+  for (let segmentIndex = 0; segmentIndex < count; segmentIndex++) {
+    const first = anchors[segmentIndex],
+      second = anchors[(segmentIndex + 1) % anchors.length],
+      firstHandle = first.outgoing ?? first,
+      secondHandle = second.incoming ?? second,
+      curved = Boolean(first.outgoing || second.incoming),
+      steps = curved ? Math.max(2, Math.min(64, stepsPerCurve)) : 1;
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps,
+        inverse = 1 - t;
+      points.push(
+        curved
+          ? {
+              x:
+                inverse ** 3 * first.x +
+                3 * inverse ** 2 * t * firstHandle.x +
+                3 * inverse * t ** 2 * secondHandle.x +
+                t ** 3 * second.x,
+              y:
+                inverse ** 3 * first.y +
+                3 * inverse ** 2 * t * firstHandle.y +
+                3 * inverse * t ** 2 * secondHandle.y +
+                t ** 3 * second.y,
+            }
+          : { x: second.x, y: second.y },
+      );
+    }
+  }
+  return points;
 };
 
 export const convertAnchorKind = (

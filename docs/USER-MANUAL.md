@@ -61,6 +61,8 @@ Path placement follows a chosen saved path using its actual segment distances an
 
 Use the Pen tool in Straight, Curvature, or Freeform mode and close the draft to save a work path. The selected path appears on the canvas with its real cubic curve, anchors, direction handles, and control lines. Drag an anchor or either Bézier handle directly; smooth handles remain mirrored. The Direct Selection menu also provides exact anchor selection, numeric X/Y positioning, one-pixel nudging, point insertion/deletion, and corner/smooth conversion. In the Paths panel, select exactly two paths and choose Unite, Subtract, Intersect, or Exclude to create new editable result contours. Path edits, conversions, and Boolean results are preserved in project files and undo history.
 
+The Stroke menu stores a path colour, separate start and end widths, butt/round/square caps, miter/round/bevel joins, and solid, dashed, dotted, or dash-dot patterns. **Paint stroke** renders the saved recipe onto the selected unlocked pixel layer, including tapered width. **Import SVG** converts supported `M`, `L`, `H`, `V`, `C`, `Q`, and `Z` path data into editable LibreLayer anchors. **Export SVG** keeps cubic curves and stroke attributes as vector data; LibreLayer's start/end width metadata is included so a later import restores the tapered recipe.
+
 Load local font accepts WOFF2, WOFF, TTF, and OTF files without uploading them. Locally loaded fonts last for the current editing session. When a project references a font that is not installed, LibreLayer displays a missing-font warning and uses a visible system fallback until the font is loaded.
 
 ## Color and adjustments
