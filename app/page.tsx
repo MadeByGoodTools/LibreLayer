@@ -117,6 +117,7 @@ import {
   loadWorkspaceState,
   recentFiles,
   recoveryRecords,
+  recoverInterruptedRecoveryTransactions,
   rememberRecentFile,
   saveRecovery,
   saveRawAsset,
@@ -2203,6 +2204,16 @@ export default function Home() {
     }
   };
   useEffect(() => {
+    void recoverInterruptedRecoveryTransactions()
+      .then((count) => {
+        if (count)
+          setRecoveryStatus(
+            `${count} interrupted recovery ${count === 1 ? 'transaction was' : 'transactions were'} safely rolled back`,
+          );
+      })
+      .catch(() =>
+        setRecoveryStatus('The local recovery journal could not be checked'),
+      );
     void getDefaultSaveDirectory()
       .then((handle) => setSaveLocationName(handle?.name ?? 'Downloads'))
       .catch(() => setSaveLocationName('Downloads'));

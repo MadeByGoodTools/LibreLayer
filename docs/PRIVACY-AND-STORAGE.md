@@ -6,6 +6,8 @@ The web host receives ordinary page requests. The editor does not send open docu
 
 Browser-profile storage includes preferences, open-workspace recovery, dated versions, recent-file handles, retained RAW source assets, and saved default-directory handles. The browser may revoke file-system permission or clear local data. “Protect local working storage” requests persistent storage but cannot replace backups.
 
+Recovery writes are incremental by changed document. Pixel and mask PNGs are stored once by their SHA-256 content identity and shared by matching recovery/version records; compact manifests are gzip-compressed when supported. Each write uses an IndexedDB transaction journal and commits the manifest, new assets, and journal removal atomically. On startup, LibreLayer clears interrupted journal entries and removes pixel assets no longer referenced by a document or version. Legacy recovery records remain readable.
+
 Large local filter jobs can stage a temporary input buffer in private Origin Private File System storage. Workspace settings can instead use the remembered save folder, including a connected external drive, and enforce a 128 MB–8 GB scratch quota. LibreLayer removes completed and cancelled job buffers automatically; **Clean scratch** removes only LibreLayer-prefixed temporary files. If scratch storage is unavailable, the operation continues safely in memory and reports the fallback.
 
 Default save folders and recent external-drive files use the browser’s File System Access permission when supported. A remembered handle is not unrestricted disk access: the browser can prompt again, and LibreLayer cannot use a disconnected drive. Unsupported browsers fall back to Downloads and file pickers.

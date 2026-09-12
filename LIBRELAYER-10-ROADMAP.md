@@ -149,7 +149,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
 - [x] Memory-pressure adaptation and preview/final quality scheduling.
 - [x] OPFS scratch storage with selectable locations and quotas.
-- [ ] Incremental saving, pixel deduplication, compressed history, and transaction journal.
+- [x] Incremental saving, pixel deduplication, compressed history, and transaction journal.
 - [x] Cancelable jobs, watchdogs, and crash recovery.
 - [ ] 12–100+ MP and hundreds-of-layers performance suite.
 
