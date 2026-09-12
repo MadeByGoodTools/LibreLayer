@@ -14,8 +14,22 @@ const valid = () => ({
 });
 
 void test('layered embedded documents retain their editable envelope', () => {
-  const data = valid();
+  const data = {
+    ...valid(),
+    artboards: [{ id: 'board', name: 'Hero', x: 0, y: 0, w: 24, h: 16 }],
+  };
   assert.equal(validateEmbeddedDocument(data), data);
+});
+
+void test('embedded documents bound their artboard collection', () => {
+  assert.throws(
+    () =>
+      validateEmbeddedDocument({
+        ...valid(),
+        artboards: Array.from({ length: 257 }, (_, id) => ({ id })),
+      }),
+    /Invalid embedded Smart Object artboards/,
+  );
 });
 
 void test('embedded documents reject missing pixels and foreign selections', () => {

@@ -339,6 +339,14 @@ import {
   type PathStrokeStyle,
 } from '@/lib/path-engine';
 import { parseSvgDocument, serializeSvgDocument } from '@/lib/svg-path';
+import {
+  multiScaleExportPlan,
+  normalizeArtboard,
+  normalizeFrame,
+  smartSpacingMoves,
+  type Artboard,
+  type FrameRecipe,
+} from '@/lib/layout-engine';
 import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
@@ -489,11 +497,12 @@ type SmartObjectData = {
 };
 type EmbeddedDocumentData = Omit<
   EmbeddedDocumentEnvelope,
-  'layers' | 'paths' | 'layerComps'
+  'layers' | 'paths' | 'layerComps' | 'artboards'
 > & {
   layers: LayerMeta[];
   paths?: SavedPath[];
   layerComps?: LayerComp[];
+  artboards?: Artboard[];
 };
 type TextLayerData = {
   content: string;
@@ -571,6 +580,7 @@ type LayerMeta = {
   colorGrade?: ColorGrade;
   precisionAdjustment?: HighDepthAdjustments;
   fillLayer?: FillLayerRecipe;
+  frame?: FrameRecipe;
 };
 type LayerSurface = { pixels: HTMLCanvasElement; mask?: HTMLCanvasElement };
 type LayerComp = {
@@ -607,6 +617,7 @@ type Snapshot = {
   selectionBounds?: Rect | null;
   selectionPath?: Point[] | null;
   paths?: SavedPath[];
+  artboards?: Artboard[];
   layerComps?: LayerComp[];
   view?: EditorView;
   thumbnail?: string;
@@ -629,6 +640,7 @@ type EditorDocument = {
   feather?: number;
   selectionPath?: Point[] | null;
   paths?: SavedPath[];
+  artboards?: Artboard[];
   savedSelections?: SavedSelection[];
   smartObjectSource?: {
     parentDocumentId: string;
@@ -1492,6 +1504,34 @@ const drawLayer = (
       ? nativeFillCanvas(layer.fillLayer, w, h)
       : surface.pixels;
   const masks: HTMLCanvasElement[] = [];
+  if (layer.frame) {
+    const recipe = normalizeFrame(layer.frame, w, h),
+      frame = makeCanvas(w, h),
+      frameContext = frame.getContext('2d')!;
+    frameContext.fillStyle = 'white';
+    frameContext.beginPath();
+    if (recipe.shape === 'ellipse')
+      frameContext.ellipse(
+        recipe.x + recipe.w / 2,
+        recipe.y + recipe.h / 2,
+        recipe.w / 2,
+        recipe.h / 2,
+        0,
+        0,
+        Math.PI * 2,
+      );
+    else if (recipe.radius > 0)
+      frameContext.roundRect(
+        recipe.x,
+        recipe.y,
+        recipe.w,
+        recipe.h,
+        Math.min(recipe.radius, recipe.w / 2, recipe.h / 2),
+      );
+    else frameContext.rect(recipe.x, recipe.y, recipe.w, recipe.h);
+    frameContext.fill();
+    masks.push(frame);
+  }
   if (layer.vectorMask?.length && layer.vectorMask.length > 2) {
     const vector = makeCanvas(w, h),
       vc = vector.getContext('2d')!;
@@ -2337,6 +2377,10 @@ export default function Home() {
     if (next.guides !== view.guides) setSaved(false);
   };
   const [doc, setDoc] = useState({ w: 1200, h: 800 });
+  const [artboards, setArtboards] = useState<Artboard[]>([]),
+    [activeArtboardId, setActiveArtboardId] = useState(''),
+    [showArtboards, setShowArtboards] = useState(true),
+    [assetScales, setAssetScales] = useState([1, 2, 3]);
   const [layers, setLayers] = useState<LayerMeta[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const selectedRef = useRef('');
@@ -3016,6 +3060,7 @@ export default function Home() {
           : null,
         selectionPath: selectionPathRef.current?.map((p) => ({ ...p })) ?? null,
         paths: paths.map((path) => structuredClone(path)),
+        artboards: artboards.map((artboard) => ({ ...artboard })),
         layerComps: layerComps.map((c) => ({
           ...c,
           states: c.states.map((s) => ({ ...s })),
@@ -3062,7 +3107,7 @@ export default function Home() {
       setHistoryVersion((v) => v + 1);
       setTimeout(() => syncEmbeddedSourceRef.current(), 0);
     },
-    [doc, paths, layerComps, view],
+    [doc, paths, artboards, layerComps, view],
   );
   const restoreSnapshot = useCallback((index: number) => {
     const snap = historyRef.current[index];
@@ -3113,6 +3158,7 @@ export default function Home() {
     selectionPathRef.current =
       snap.selectionPath?.map((p) => ({ ...p })) ?? null;
     if (snap.paths) setPaths(snap.paths.map((path) => structuredClone(path)));
+    setArtboards((snap.artboards ?? []).map((artboard) => ({ ...artboard })));
     if (snap.layerComps) {
       const comps = snap.layerComps.map((c) => ({
         ...c,
@@ -3239,6 +3285,7 @@ export default function Home() {
         selection: snap.selectionBounds ? { ...snap.selectionBounds } : null,
         selectionPath: snap.selectionPath?.map((point) => ({ ...point })),
         paths: snap.paths?.map((path) => structuredClone(path)),
+        artboards: snap.artboards?.map((artboard) => ({ ...artboard })),
         layerComps: snap.layerComps?.map((comp) => ({
           ...comp,
           states: comp.states.map((state) => ({ ...state })),
@@ -3578,6 +3625,7 @@ export default function Home() {
       selection: selectionRef.current,
       selectionPath: selectionPathRef.current,
       paths,
+      artboards,
       savedSelections,
       feather,
       smartObjectSource: documentStoreRef.current.get(id)?.smartObjectSource,
@@ -3603,6 +3651,7 @@ export default function Home() {
     selectedIds: [...(source.selectedIds ?? [source.selectedId])],
     paths: structuredClone(source.paths ?? []),
     layerComps: structuredClone(source.layerComps ?? []),
+    artboards: structuredClone(source.artboards ?? []),
   });
   const propagateEmbeddedSource = (
     sourceId: string,
@@ -3737,6 +3786,8 @@ export default function Home() {
     setSelectionPath(next.selectionPath ?? null);
     selectionPathRef.current = next.selectionPath ?? null;
     setPaths(next.paths ?? []);
+    setArtboards(next.artboards ?? []);
+    setActiveArtboardId(next.artboards?.[0]?.id ?? '');
     setSavedSelections(next.savedSelections ?? []);
     layerCompsRef.current = next.layerComps ?? [];
     setLayerComps(layerCompsRef.current);
@@ -7397,10 +7448,13 @@ export default function Home() {
           ];
           opened.paths = structuredClone(embedded.paths ?? []);
           opened.layerComps = structuredClone(embedded.layerComps ?? []);
+          opened.artboards = structuredClone(embedded.artboards ?? []);
           selectMany(opened.selectedIds, opened.selectedId);
           setPaths(opened.paths);
           layerCompsRef.current = opened.layerComps;
           setLayerComps(opened.layerComps);
+          setArtboards(opened.artboards);
+          setActiveArtboardId(opened.artboards[0]?.id ?? '');
         }
       } else {
         const image = new Image();
@@ -9811,6 +9865,7 @@ export default function Home() {
         view,
         layers: savedLayers,
         paths,
+        artboards,
         savedSelections,
         selection: selectionRef.current,
         selectionPath: selectionPathRef.current,
@@ -10183,6 +10238,14 @@ export default function Home() {
               stroke: normalizePathStroke(path.stroke),
             }))
         : [];
+      const importedArtboards = Array.isArray(data.artboards)
+        ? data.artboards
+            .filter((item: unknown) => item && typeof item === 'object')
+            .slice(0, 256)
+            .map((item: Partial<Artboard>) =>
+              normalizeArtboard(item, data.width, data.height),
+            )
+        : [];
       loadImportedDocument(
         typeof data.name === 'string' ? data.name : file.name,
         data.width,
@@ -10193,6 +10256,8 @@ export default function Home() {
         restore,
       );
       setPaths(importedPaths);
+      setArtboards(importedArtboards);
+      setActiveArtboardId(importedArtboards[0]?.id ?? '');
       setSavedSelections(
         Array.isArray(data.savedSelections)
           ? data.savedSelections.filter(
@@ -10516,6 +10581,150 @@ export default function Home() {
       top: Math.min(...points.map((p) => p.y)),
       bottom: Math.max(...points.map((p) => p.y)),
     };
+  };
+  const addArtboard = (fromSelection = false) => {
+    const bounds = fromSelection ? selectionRef.current : null,
+      next = normalizeArtboard(
+        {
+          id: crypto.randomUUID(),
+          name: `Artboard ${artboards.length + 1}`,
+          x: bounds?.x ?? 0,
+          y: bounds?.y ?? 0,
+          w: bounds?.w ?? doc.w,
+          h: bounds?.h ?? doc.h,
+          background: '#ffffff',
+          exportEnabled: true,
+        },
+        doc.w,
+        doc.h,
+      );
+    setArtboards((items) => [...items, next]);
+    setActiveArtboardId(next.id);
+    setShowArtboards(true);
+    setTimeout(() => snapshot('Add artboard'), 0);
+    setStatus(
+      `${next.name} created${bounds ? ' from the active selection' : ' from the canvas'}`,
+    );
+  };
+  const updateArtboard = (id: string, patch: Partial<Artboard>) => {
+    setArtboards((items) =>
+      items.map((artboard) =>
+        artboard.id === id
+          ? normalizeArtboard({ ...artboard, ...patch }, doc.w, doc.h)
+          : artboard,
+      ),
+    );
+    setTimeout(() => snapshot('Edit artboard'), 0);
+    setSaved(false);
+  };
+  const removeArtboard = (id: string) => {
+    setArtboards((items) => items.filter((artboard) => artboard.id !== id));
+    if (activeArtboardId === id) setActiveArtboardId('');
+    setTimeout(() => snapshot('Delete artboard'), 0);
+    setStatus('Artboard deleted');
+  };
+  const addFrameToSelected = (shape: FrameRecipe['shape']) => {
+    const layer = selected(),
+      bounds = selectionRef.current ?? {
+        x: Math.round(doc.w * 0.1),
+        y: Math.round(doc.h * 0.1),
+        w: Math.round(doc.w * 0.8),
+        h: Math.round(doc.h * 0.8),
+      };
+    if (
+      !layer ||
+      layer.kind === 'group' ||
+      layer.kind === 'adjustment' ||
+      isLocked(layer.id)
+    ) {
+      setStatus('Select an unlocked visual layer before adding a frame');
+      return;
+    }
+    patchLayer(
+      layer.id,
+      { frame: normalizeFrame({ ...bounds, shape, radius: 24 }, doc.w, doc.h) },
+      'Add frame',
+    );
+    setStatus(
+      `${shape === 'ellipse' ? 'Elliptical' : 'Rectangular'} frame clips ${layer.name} nondestructively`,
+    );
+  };
+  const smartSpaceSelected = (axis: 'horizontal' | 'vertical') => {
+    const items = selectedRoots()
+      .filter((layer) => layer.kind !== 'group' && layer.kind !== 'adjustment')
+      .map((layer) => ({ layer, bounds: layerBounds(layer) }))
+      .filter((item) => item.bounds) as {
+      layer: LayerMeta;
+      bounds: NonNullable<ReturnType<typeof layerBounds>>;
+    }[];
+    if (items.length < 3 || !permit(items.map((item) => item.layer.id))) {
+      setStatus(
+        'Select at least three unlocked visual layers for smart spacing',
+      );
+      return;
+    }
+    const moves = smartSpacingMoves(
+        items.map((item) => ({ id: item.layer.id, bounds: item.bounds })),
+        axis,
+      ),
+      key = axis === 'horizontal' ? 'x' : 'y';
+    syncLayers(
+      layersRef.current.map((layer) =>
+        moves.has(layer.id)
+          ? { ...layer, [key]: layer[key] + moves.get(layer.id)! }
+          : layer,
+      ),
+    );
+    snapshot('Smart space layers');
+    render();
+    setStatus(
+      `Selected layer edge gaps spaced evenly ${axis === 'horizontal' ? 'horizontally' : 'vertically'}`,
+    );
+  };
+  const exportArtboardAssets = async () => {
+    const plan = multiScaleExportPlan(artboards, assetScales);
+    if (!plan.length) {
+      setStatus('Enable an artboard and at least one export scale first');
+      return;
+    }
+    const source = makeCanvas(doc.w, doc.h);
+    renderLayers(source.getContext('2d')!);
+    setStatus(`Preparing ${plan.length} artboard assets locally…`);
+    for (const item of plan) {
+      const artboard = artboards.find(
+        (candidate) => candidate.id === item.artboardId,
+      )!;
+      const output = makeCanvas(item.width, item.height),
+        context = output.getContext('2d')!;
+      context.fillStyle = artboard.background;
+      context.fillRect(0, 0, output.width, output.height);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(
+        source,
+        artboard.x,
+        artboard.y,
+        artboard.w,
+        artboard.h,
+        0,
+        0,
+        output.width,
+        output.height,
+      );
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        output.toBlob(
+          (value) =>
+            value ? resolve(value) : reject(Error('Asset encoding failed')),
+          'image/png',
+        ),
+      );
+      downloadBlob(item.name, blob);
+      output.width = output.height = 1;
+    }
+    source.width = source.height = 1;
+    setStatus(
+      `Exported ${plan.length} artboard assets at ${assetScales.join('×, ')}×`,
+    );
   };
   const alignSelected = (
     mode: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom',
@@ -11790,6 +11999,7 @@ export default function Home() {
           view: d.view,
           layers: savedLayers,
           paths: d.paths ?? [],
+          artboards: d.artboards ?? [],
           savedSelections: d.savedSelections ?? [],
           selection: d.selection,
           selectionPath: d.selectionPath ?? null,
@@ -11916,8 +12126,12 @@ export default function Home() {
     };
     if (feature.kind === 'shape') {
       if (feature.command === 'artboards') {
-        openComposite(options.text.trim() || 'Artboard');
-        setStatus('Artboard opened as a separate editable document tab');
+        addArtboard(options.secondary >= 50 && Boolean(selectionRef.current));
+        setStatus('Editable artboard added to the current document');
+        return;
+      }
+      if (feature.command === 'frame') {
+        addFrameToSelected(options.secondary >= 50 ? 'ellipse' : 'rectangle');
         return;
       }
       if (
@@ -15791,6 +16005,56 @@ export default function Home() {
               <div className="selection-box" style={selectionStyle} />
             )}{' '}
             {dragRect && <div className="drag-box" style={dragStyle} />}{' '}
+            {showArtboards && artboards.length > 0 && (
+              <svg
+                className="artboard-overlay"
+                viewBox={`0 0 ${doc.w} ${doc.h}`}
+                preserveAspectRatio="none"
+                aria-label={`${artboards.length} artboard bounds`}
+              >
+                {artboards.map((artboard) => (
+                  <Fragment key={artboard.id}>
+                    <rect
+                      className={
+                        activeArtboardId === artboard.id ? 'active' : ''
+                      }
+                      x={artboard.x}
+                      y={artboard.y}
+                      width={artboard.w}
+                      height={artboard.h}
+                    />
+                    <text x={artboard.x + 5} y={Math.max(14, artboard.y + 14)}>
+                      {artboard.name}
+                    </text>
+                  </Fragment>
+                ))}
+              </svg>
+            )}
+            {active?.frame && (
+              <svg
+                className="frame-overlay"
+                viewBox={`0 0 ${doc.w} ${doc.h}`}
+                preserveAspectRatio="none"
+                aria-label={`Frame clipping ${active.name}`}
+              >
+                {active.frame.shape === 'ellipse' ? (
+                  <ellipse
+                    cx={active.frame.x + active.frame.w / 2}
+                    cy={active.frame.y + active.frame.h / 2}
+                    rx={active.frame.w / 2}
+                    ry={active.frame.h / 2}
+                  />
+                ) : (
+                  <rect
+                    x={active.frame.x}
+                    y={active.frame.y}
+                    width={active.frame.w}
+                    height={active.frame.h}
+                    rx={active.frame.radius}
+                  />
+                )}
+              </svg>
+            )}
             {tool === 'path' && activePath && (
               <svg
                 className="saved-path-overlay"
@@ -16575,7 +16839,184 @@ export default function Home() {
                             ))
                           )}
                         </details>
+                        <details className="layout-tools">
+                          <summary>
+                            Artboards &amp; layout · {artboards.length}
+                          </summary>
+                          <div className="layout-action-grid">
+                            <button onClick={() => addArtboard(false)}>
+                              Canvas artboard
+                            </button>
+                            <button
+                              disabled={!selection}
+                              onClick={() => addArtboard(true)}
+                            >
+                              From selection
+                            </button>
+                            <label className="inline-check">
+                              <input
+                                type="checkbox"
+                                checked={showArtboards}
+                                onChange={(event) =>
+                                  setShowArtboards(event.target.checked)
+                                }
+                              />
+                              Show bounds
+                            </label>
+                            <span className="asset-scale-options">
+                              {[1, 2, 3].map((scale) => (
+                                <label key={scale}>
+                                  <input
+                                    type="checkbox"
+                                    checked={assetScales.includes(scale)}
+                                    onChange={(event) =>
+                                      setAssetScales((items) =>
+                                        event.target.checked
+                                          ? [
+                                              ...new Set([...items, scale]),
+                                            ].sort(
+                                              (first, second) => first - second,
+                                            )
+                                          : items.filter(
+                                              (item) => item !== scale,
+                                            ),
+                                      )
+                                    }
+                                  />
+                                  {scale}×
+                                </label>
+                              ))}
+                            </span>
+                            <button
+                              disabled={!artboards.length}
+                              onClick={() => void exportArtboardAssets()}
+                            >
+                              Export assets
+                            </button>
+                          </div>
+                          <div className="artboard-list">
+                            {artboards.map((artboard) => (
+                              <article
+                                key={artboard.id}
+                                className={
+                                  activeArtboardId === artboard.id
+                                    ? 'active'
+                                    : ''
+                                }
+                              >
+                                <button
+                                  className="artboard-select"
+                                  onClick={() =>
+                                    setActiveArtboardId(artboard.id)
+                                  }
+                                >
+                                  {artboard.name}
+                                </button>
+                                <label>
+                                  Name
+                                  <input
+                                    aria-label={`${artboard.name} name`}
+                                    value={artboard.name}
+                                    onChange={(event) =>
+                                      updateArtboard(artboard.id, {
+                                        name: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </label>
+                                {(['x', 'y', 'w', 'h'] as const).map((key) => (
+                                  <label key={key}>
+                                    {key.toUpperCase()}
+                                    <input
+                                      aria-label={`${artboard.name} ${key}`}
+                                      type="number"
+                                      min={key === 'w' || key === 'h' ? 1 : 0}
+                                      value={Math.round(artboard[key])}
+                                      onChange={(event) =>
+                                        updateArtboard(artboard.id, {
+                                          [key]: +event.target.value || 0,
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                ))}
+                                <label>
+                                  Background
+                                  <input
+                                    aria-label={`${artboard.name} background`}
+                                    type="color"
+                                    value={artboard.background}
+                                    onChange={(event) =>
+                                      updateArtboard(artboard.id, {
+                                        background: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </label>
+                                <label className="inline-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={artboard.exportEnabled}
+                                    onChange={(event) =>
+                                      updateArtboard(artboard.id, {
+                                        exportEnabled: event.target.checked,
+                                      })
+                                    }
+                                  />
+                                  Export
+                                </label>
+                                <button
+                                  aria-label={`Delete ${artboard.name}`}
+                                  onClick={() => removeArtboard(artboard.id)}
+                                >
+                                  Delete
+                                </button>
+                              </article>
+                            ))}
+                          </div>
+                          {active &&
+                            active.kind !== 'group' &&
+                            active.kind !== 'adjustment' && (
+                              <section className="frame-controls">
+                                <strong>Frame clipping</strong>
+                                <button
+                                  onClick={() =>
+                                    addFrameToSelected('rectangle')
+                                  }
+                                >
+                                  Rectangle
+                                </button>
+                                <button
+                                  onClick={() => addFrameToSelected('ellipse')}
+                                >
+                                  Ellipse
+                                </button>
+                                <button
+                                  disabled={!active.frame}
+                                  onClick={() =>
+                                    patchLayer(
+                                      active.id,
+                                      { frame: undefined },
+                                      'Remove frame',
+                                    )
+                                  }
+                                >
+                                  Remove
+                                </button>
+                                {active.frame && (
+                                  <small>
+                                    {active.frame.w} × {active.frame.h} at{' '}
+                                    {active.frame.x}, {active.frame.y} ·{' '}
+                                    {active.frame.shape}
+                                  </small>
+                                )}
+                              </section>
+                            )}
+                        </details>
                         <div className="property-buttons alignment-buttons">
+                          <span className="alignment-key">
+                            Key object: {active?.name ?? 'none'}
+                          </span>
                           <button onClick={() => alignSelected('left')}>
                             Align L
                           </button>
@@ -16605,6 +17046,16 @@ export default function Home() {
                             Distribute V
                           </button>
                           <button onClick={autoAlign}>Auto-align</button>
+                          <button
+                            onClick={() => smartSpaceSelected('horizontal')}
+                          >
+                            Space gaps H
+                          </button>
+                          <button
+                            onClick={() => smartSpaceSelected('vertical')}
+                          >
+                            Space gaps V
+                          </button>
                         </div>
                         {active?.hasMask && (
                           <div className="mask-controls">

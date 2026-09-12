@@ -22,6 +22,7 @@ export type EmbeddedDocumentEnvelope = {
   selectedIds?: string[];
   paths?: unknown[];
   layerComps?: unknown[];
+  artboards?: unknown[];
 };
 
 const PNG_PREFIX = 'data:image/png;base64,';
@@ -71,6 +72,11 @@ export const validateEmbeddedDocument = (
       data.selectedIds.some((id) => typeof id !== 'string' || !ids.has(id)))
   )
     throw Error('Invalid embedded Smart Object selection');
+  if (
+    data.artboards !== undefined &&
+    (!Array.isArray(data.artboards) || data.artboards.length > 256)
+  )
+    throw Error('Invalid embedded Smart Object artboards');
 
   const surfaceIds = new Set<string>();
   for (const surface of data.surfaces) {

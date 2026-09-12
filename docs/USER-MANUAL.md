@@ -63,6 +63,12 @@ Use the Pen tool in Straight, Curvature, or Freeform mode and close the draft to
 
 The Stroke menu stores a path colour, separate start and end widths, butt/round/square caps, miter/round/bevel joins, and solid, dashed, dotted, or dash-dot patterns. **Paint stroke** renders the saved recipe onto the selected unlocked pixel layer, including tapered width. **Import SVG** converts supported `M`, `L`, `H`, `V`, `C`, `Q`, and `Z` path data into editable LibreLayer anchors. **Export SVG** keeps cubic curves and stroke attributes as vector data; LibreLayer's start/end width metadata is included so a later import restores the tapered recipe.
 
+## Artboards and layout
+
+Open **Artboards & layout** in the Layers panel to create a full-canvas artboard or one from the current selection. Every artboard has an editable name, position, size, background, and export toggle; its bounds can remain visible over the canvas. Choose any combination of 1×, 2×, and 3×, then use **Export assets** to create correctly named PNGs locally.
+
+Rectangle and Ellipse under **Frame clipping** constrain the active visual layer without deleting pixels. The frame travels with the layer and is retained in project files, browser recovery, history, and embedded Smart Object documents. Multi-layer alignment uses the active layer shown beside **Key object** as its anchor. **Space gaps H/V** preserves the two outside layers while equalizing the gaps between all selected visual layers.
+
 Load local font accepts WOFF2, WOFF, TTF, and OTF files without uploading them. Locally loaded fonts last for the current editing session. When a project references a font that is not installed, LibreLayer displays a missing-font warning and uses a visible system fallback until the font is loaded.
 
 ## Color and adjustments
