@@ -346,6 +346,11 @@ import {
 } from '@/lib/filter-gallery';
 import { applyDistortFilter, type DistortFilter } from '@/lib/distort-filter';
 import {
+  applyRenderFilter,
+  parseConvolutionKernel,
+  type RenderFilter,
+} from '@/lib/render-filter';
+import {
   multiScaleExportPlan,
   normalizeArtboard,
   normalizeFrame,
@@ -12763,6 +12768,48 @@ export default function Home() {
         0,
       );
     } else if (
+      [
+        'oil-paint',
+        'lighting',
+        'clouds',
+        'fibers',
+        'filter-gallery',
+        'custom-convolution',
+      ].includes(feature.command)
+    ) {
+      const context = canvas.getContext('2d', { willReadFrequently: true })!,
+        image = context.getImageData(0, 0, canvas.width, canvas.height),
+        tint = [1, 3, 5].map((index) =>
+          parseInt(options.color.slice(index, index + 2), 16),
+        ) as [number, number, number];
+      let kernel: number[];
+      try {
+        kernel = parseConvolutionKernel(options.text);
+      } catch (error) {
+        original.width = original.height = 1;
+        setStatus(
+          error instanceof Error
+            ? error.message
+            : 'The convolution kernel is invalid',
+        );
+        return;
+      }
+      const pixels = applyRenderFilter(
+        image.data,
+        image.width,
+        image.height,
+        feature.command as RenderFilter,
+        options.amount,
+        options.secondary,
+        tint,
+        kernel,
+      );
+      context.putImageData(
+        new ImageData(pixels, image.width, image.height),
+        0,
+        0,
+      );
+    } else if (
       ['liquify', 'wide-angle', 'vanishing-point', 'distort-filters'].includes(
         feature.command,
       )
@@ -13552,7 +13599,7 @@ export default function Home() {
             { name: 'New adjustment layer', action: createAdjustment },
             { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
             {
-              name: 'Professional Studio — 119 tools…',
+              name: 'Professional Studio — 123 tools…',
               action: () => setProSuiteOpen(true),
             },
             { name: 'AI Remove Background', action: aiRemoveBackground },

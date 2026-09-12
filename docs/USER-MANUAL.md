@@ -85,6 +85,8 @@ The Filter menu exposes Blur Gallery, Lens Blur, Surface Blur, Smart Sharpen, Hi
 
 Professional Studio's Specialty Filters include Lens Correction, Displacement Maps, Polar Coordinates, Wave, Ripple, Spherize, Pixelate, and Halftone. Amount controls correction strength or cell size; Secondary controls wave frequency. Distortion filters use bilinear sampling, preserve transparent pixels, respect the current selection, and can be undone or replayed in an exported local workflow.
 
+Creative filters include Oil Paint, Lighting Effects, Clouds, Fibers, Filter Gallery, and Custom Convolution. Lighting uses the working color and Secondary positions its light horizontally. Clouds and Fibers are seeded by Secondary, so the same settings reproduce the same pixels. For Custom Convolution, enter nine comma- or space-separated coefficients in **Prompt / name**; an empty or invalid-length entry uses a standard sharpen kernel, while unsafe kernel strengths are rejected without changing the layer.
+
 ## Saving and export
 
 - **Editable master:** File → Save layered project (`Ctrl/⌘+S`) writes `.librelayer`. Password-protected projects use local AES-256-GCM encryption; losing the password makes the file unrecoverable.

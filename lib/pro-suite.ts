@@ -177,6 +177,10 @@ export const suiteFeatures: SuiteFeature[] = [
     [289, 'metadata', 'File metadata and copyright'],
   ]),
   ...group('Specialty filters', 'pixel', [
+    [191, 'lighting', 'Lighting Effects'],
+    [244, 'clouds', 'Clouds'],
+    [245, 'fibers', 'Fibers'],
+    [247, 'custom-convolution', 'Custom Convolution'],
     [201, 'polar', 'Polar Coordinates'],
     [202, 'wave', 'Wave'],
     [221, 'ripple', 'Ripple'],
@@ -339,10 +343,10 @@ export function runSuiteSelfTest() {
   const ids = new Set(suiteFeatures.map((x) => x.id));
   const commands = new Set(suiteFeatures.map((x) => x.command));
   const failures: string[] = [];
-  if (suiteFeatures.length !== 119)
-    failures.push(`Expected 119 features, found ${suiteFeatures.length}`);
-  if (ids.size !== 119) failures.push('Feature IDs are not unique');
-  if (commands.size !== 119) failures.push('Feature commands are not unique');
+  if (suiteFeatures.length !== 123)
+    failures.push(`Expected 123 features, found ${suiteFeatures.length}`);
+  if (ids.size !== 123) failures.push('Feature IDs are not unique');
+  if (commands.size !== 123) failures.push('Feature commands are not unique');
   for (const feature of suiteFeatures) {
     if (
       !feature.label ||
