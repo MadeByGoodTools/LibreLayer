@@ -177,7 +177,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] ICC v2/v4 engine with Assign/Convert Profile, intents, and black-point compensation.
 - [ ] RGB, CMYK, Lab, grayscale, spot, duotone, tritone, and quadtone working modes.
 - [ ] Exact proof profiles, paper/ink simulation, ink limits, and separations.
-- [ ] Printer/paper profiles, sizing, placement, bleed, trim, marks, contact sheets, and metadata.
+- [x] Printer/paper profiles, sizing, placement, bleed, trim, marks, contact sheets, and metadata.
 
 ## 15. Automation and extensibility
 

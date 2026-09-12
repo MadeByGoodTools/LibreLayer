@@ -28,6 +28,7 @@ const functionalOverrides = new Set([
   'focus-stack',
   'auto-blend',
   'contact-sheet',
+  'print',
   'image-stack',
 ]);
 

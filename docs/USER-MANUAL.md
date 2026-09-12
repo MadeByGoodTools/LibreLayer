@@ -122,6 +122,12 @@ The Trusted local script console turns reviewed JavaScript command source into a
 - **Images:** Export supports PNG, JPEG, WebP, TIFF, and PDF. TIFF can include supported ICC profiles and print resolution. A true 16-bit TIFF master is available from retained high-precision RAW data.
 - **PSD/PSB:** layered export is limited to compatible raster structure. The export dialog blocks or warns rather than silently baking unsupported editable features. Flattened export preserves appearance but not editability.
 
+### Print Studio
+
+Open **File → Print Studio…** or press `Ctrl/⌘+P`. The live preview uses real paper measurements and remembers its settings on this browser profile. Choose a standard or custom paper size, portrait or landscape orientation, margins, bleed, fit/fill/actual/custom image sizing, centered/top-left/custom placement, and optional trim marks, registration marks, color bars, captions, profile metadata, and job notes. Contact-sheet mode lays out every open document with a configurable column count and gap.
+
+**Export proof PNG** creates a measured raster proof. **Print…** opens a dedicated sheet with the selected physical page size and then invokes the browser print dialog. The browser and operating-system printer driver perform the final device conversion. The selected profile, rendering intent, and black-point-compensation choice are recorded on the proof, but LibreLayer does not yet claim exact imported-printer-ICC conversion. See [PRINTING.md](PRINTING.md).
+
 ## History and performance
 
 Undo/redo use `Ctrl/⌘+Z` and `Ctrl/⌘+Shift+Z`. The History panel can restore a state, name a snapshot, branch a state into a new tab, or create a change map. Performance settings configure 5–100 undo states and a 128–2,048 MB combined history budget. Oldest states are compacted when either limit is exceeded.

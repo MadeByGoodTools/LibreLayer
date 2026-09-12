@@ -256,6 +256,8 @@ import { ToneCurve } from '@/components/tone-curve';
 import { LutControl } from '@/components/lut-control';
 import { AdvancedColorControls } from '@/components/advanced-color-controls';
 import { SoftProofOverlay } from '@/components/soft-proof-overlay';
+import { PrintStudioDialog } from '@/components/print-studio-dialog';
+import type { PrintCanvasSource } from '@/lib/print-render';
 import {
   defaultFillLayerRecipe,
   normalizeFillLayerRecipe,
@@ -2485,6 +2487,8 @@ export default function Home() {
     } | null>(null),
     [layerStudioOpen, setLayerStudioOpen] = useState(false),
     [proSuiteOpen, setProSuiteOpen] = useState(false),
+    [printStudioOpen, setPrintStudioOpen] = useState(false),
+    [printSources, setPrintSources] = useState<PrintCanvasSource[]>([]),
     [secureSaveOpen, setSecureSaveOpen] = useState(false),
     [secureSavePassword, setSecureSavePassword] = useState(''),
     [secureSaveConfirmation, setSecureSaveConfirmation] = useState(''),
@@ -12962,6 +12966,45 @@ export default function Home() {
     }
   };
 
+  const openPrintStudio = () => {
+    persistActiveDocument();
+    const documents = [...documentStoreRef.current.values()].sort((a, b) =>
+        a.id === activeDocumentRef.current
+          ? -1
+          : b.id === activeDocumentRef.current
+            ? 1
+            : 0,
+      ),
+      nextSources = documents.map((document) => {
+        const full = makeCanvas(document.doc.w, document.doc.h);
+        renderLayers(
+          full.getContext('2d')!,
+          document.layers,
+          document.surfaces,
+          document.doc,
+        );
+        const scale = Math.min(1, 4096 / Math.max(full.width, full.height)),
+          output =
+            scale === 1
+              ? full
+              : makeCanvas(
+                  Math.max(1, Math.round(full.width * scale)),
+                  Math.max(1, Math.round(full.height * scale)),
+                );
+        if (output !== full) {
+          output
+            .getContext('2d')!
+            .drawImage(full, 0, 0, output.width, output.height);
+          full.width = full.height = 1;
+        }
+        return { name: document.name, canvas: output };
+      });
+    setPrintSources(nextSources);
+    setPrintStudioOpen(true);
+    setProSuiteOpen(false);
+    setStatus('Print Studio opened with measured paper preview');
+  };
+
   const runProFeature = async (
     feature: SuiteFeature,
     options: SuiteOptions,
@@ -13653,8 +13696,7 @@ export default function Home() {
         return;
       }
       if (feature.command === 'print') {
-        window.print();
-        setStatus('Print dialog opened with current browser color handling');
+        openPrintStudio();
         return;
       }
     }
@@ -14729,6 +14771,8 @@ export default function Home() {
               name: 'Export WebP',
               action: () => exportImage('image/webp', 'webp'),
             },
+            { separator: true },
+            { name: 'Print Studio…', action: openPrintStudio, shortcut: '⌘P' },
           ])}
           {menu('Edit', [
             { name: 'Undo', action: undo, shortcut: '⌘Z' },
@@ -21352,6 +21396,17 @@ export default function Home() {
                 : active?.kind === 'fill'
                   ? 'fill'
                   : 'pixel',
+        }}
+      />
+      <PrintStudioDialog
+        open={printStudioOpen}
+        sources={printSources}
+        onClose={() => {
+          setPrintStudioOpen(false);
+          printSources.forEach((source) => {
+            source.canvas.width = source.canvas.height = 1;
+          });
+          setPrintSources([]);
         }}
       />
       <input

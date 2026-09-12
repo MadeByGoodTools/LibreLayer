@@ -86,6 +86,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Installable browser-local `.librefilter` plug-ins with an isolated WebAssembly pixel ABI, strict manifests, size limits, and deterministic CPU-kernel fallback
 - A versioned `.libreplugin` platform with explicit permissions, generated local panels, restricted JavaScript channel expressions, worker-isolated WebAssembly/CPU filters, safe upgrades, and built-in PNG/JPEG/WebP exporter recipes
 - An explicit-trust local script console with a disposable headless worker, deterministic seeded traces, integrity-checked replay, portable `.librescript`/`.libretrace` files, and a matching optional local CLI
+- A persistent Print Studio with measured paper presets, custom sizing, placement, bleed and trim marks, contact sheets, captions, proof metadata, and an explicit browser-driver color handoff
 - Background filter workers keep the interface responsive, report progress, support immediate cancellation, stop after a safety timeout, and commit pixels only after successful completion
 - Live WebGL2-versus-CPU reference-pixel checks for filter math, with exact maximum-channel-delta reporting and a CPU-only browser fallback
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
@@ -115,7 +116,7 @@ pnpm lint
 
 See [PSD-COMPATIBILITY.md](PSD-COMPATIBILITY.md) for the current PSD and PSB compatibility notes. Third-party decoder and renderer notices are included in [public/editor-import-licenses.txt](public/editor-import-licenses.txt).
 
-The [user manual](docs/USER-MANUAL.md), [local scripting guide](docs/LOCAL-SCRIPTING.md), [plug-in platform specification](docs/PLUGIN-PLATFORM.md), [filter plug-in specification](docs/FILTER-PLUGINS.md), [background-job safety model](docs/BACKGROUND-JOBS.md), [format matrix](docs/FORMAT-MATRIX.md), [privacy and storage model](docs/PRIVACY-AND-STORAGE.md), [migration policy](docs/MIGRATION-POLICY.md), [security policy](SECURITY.md), and [0.1.0 release-candidate notes](docs/RELEASE-NOTES-0.1.0.md) document the current verified scope and limits.
+The [user manual](docs/USER-MANUAL.md), [printing guide](docs/PRINTING.md), [local scripting guide](docs/LOCAL-SCRIPTING.md), [plug-in platform specification](docs/PLUGIN-PLATFORM.md), [filter plug-in specification](docs/FILTER-PLUGINS.md), [background-job safety model](docs/BACKGROUND-JOBS.md), [format matrix](docs/FORMAT-MATRIX.md), [privacy and storage model](docs/PRIVACY-AND-STORAGE.md), [migration policy](docs/MIGRATION-POLICY.md), [security policy](SECURITY.md), and [0.1.0 release-candidate notes](docs/RELEASE-NOTES-0.1.0.md) document the current verified scope and limits.
 
 ## Contributing
 

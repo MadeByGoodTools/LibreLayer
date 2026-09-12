@@ -4489,6 +4489,122 @@ button {
 .script-status {
   min-height: 18px;
 }
+.print-studio-dialog {
+  width: min(1120px, 96vw);
+  max-width: 1120px;
+  max-height: 92vh;
+  overflow: hidden;
+}
+.print-studio-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(390px, 1.1fr);
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(92vh - 150px);
+}
+.print-preview-wrap {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 320px;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #151719;
+}
+.print-preview-wrap canvas {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 225px);
+  border: 1px solid #555;
+  background: white;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.4);
+}
+.print-preview-wrap span,
+.print-controls small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.print-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.print-controls fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.print-controls fieldset:last-child {
+  grid-column: 1 / -1;
+}
+.print-controls legend {
+  padding: 0 4px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+.print-controls label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.print-controls fieldset:first-child label:first-of-type {
+  grid-column: 1 / -1;
+}
+.print-controls input:not([type='checkbox']),
+.print-controls select {
+  min-width: 0;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+}
+.print-controls .print-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.print-controls small {
+  grid-column: 1 / -1;
+}
+.print-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.print-actions output {
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .local-edit-plan {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -4654,6 +4770,22 @@ button {
   .script-metadata,
   .script-trace {
     grid-template-columns: 1fr;
+  }
+  .print-studio-dialog {
+    overflow-y: auto;
+  }
+  .print-studio-layout {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+  .print-preview-wrap {
+    min-height: 240px;
+  }
+  .print-preview-wrap canvas {
+    max-height: 42vh;
+  }
+  .print-controls {
+    overflow: visible;
   }
 }
 
