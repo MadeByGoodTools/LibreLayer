@@ -87,6 +87,10 @@ Use nondestructive adjustment layers whenever an edit may need revisiting. Avail
 
 Built-in and imported `.cube` LUTs preview live. Histograms, waveform, RGB parade, and vectorscope help evaluate tone and color. CMYK and grayscale proof modes are previews only; they do not convert the document profile.
 
+## Camera Raw
+
+Supported Bayer and X-Trans camera files open in a live scene-linear developer. Alongside exposure, white balance, highlight recovery, and color controls, **Detail & noise** provides independent luminance noise, color noise, hot-pixel, and row-banding correction. **Optics** can match a local focal-family profile from the embedded lens name or use a manually selected profile, with separate distortion, vignette, chromatic-aberration, purple-fringe, and RAW-sharpening controls. All settings are stored in the editable RAW recipe; the original sensor data remains unchanged.
+
 ## Filters
 
 The Filter menu exposes Blur Gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and Noise Reduction directly. The same filters are available in Professional Studio with Amount and Secondary controls. Blur Gallery uses Secondary as the in-focus vertical position; Lens Blur treats image luminance as a depth map and Secondary as the focal depth; Surface Blur uses Secondary as its edge threshold. Noise Reduction is selected below 50% Secondary, while 50% or above intentionally adds noise. Every filter preserves alpha, respects the active selection, and creates a full undo/redo history state.

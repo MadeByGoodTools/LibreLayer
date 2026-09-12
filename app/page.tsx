@@ -345,6 +345,14 @@ import {
   type RawDevelopSettings,
   type RawLinearImage,
 } from '@/lib/raw-develop';
+import {
+  defaultRawLensCorrection,
+  defaultRawNoiseCorrection,
+  rawLensProfiles,
+  resolveRawLensProfile,
+  type RawLensCorrection,
+  type RawNoiseCorrection,
+} from '@/lib/raw-corrections';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
 import {
   validateEmbeddedDocument,
@@ -19924,6 +19932,119 @@ export default function Home() {
               </label>
             ))}
           </div>
+          <details className="raw-advanced-controls" open>
+            <summary>Detail &amp; noise</summary>
+            <div className="raw-develop-controls">
+              {(
+                [
+                  ['Luminance denoise', 'luminance'],
+                  ['Color denoise', 'chroma'],
+                  ['Hot pixel removal', 'hotPixels'],
+                  ['Banding removal', 'banding'],
+                ] as const
+              ).map(([label, key]) => (
+                <label key={key}>
+                  <span>{label}</span>
+                  <Slider
+                    aria-label={`RAW ${label.toLowerCase()}`}
+                    min={0}
+                    max={100}
+                    value={
+                      rawSettings.noise?.[key] ??
+                      defaultRawNoiseCorrection()[key]
+                    }
+                    onValueChange={(next) =>
+                      setRawSettings((current) => ({
+                        ...current,
+                        noise: {
+                          ...defaultRawNoiseCorrection(),
+                          ...current.noise,
+                          [key]: sliderNumber(next),
+                        } as RawNoiseCorrection,
+                      }))
+                    }
+                  />
+                  <strong>
+                    {rawSettings.noise?.[key] ??
+                      defaultRawNoiseCorrection()[key]}
+                    %
+                  </strong>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="raw-advanced-controls" open>
+            <summary>Optics</summary>
+            <label className="raw-profile-select">
+              <span>Lens profile</span>
+              <select
+                aria-label="RAW lens profile"
+                value={rawSettings.lensCorrection?.profileId ?? 'auto'}
+                onChange={(event) =>
+                  setRawSettings((current) => ({
+                    ...current,
+                    lensCorrection: {
+                      ...defaultRawLensCorrection(),
+                      ...current.lensCorrection,
+                      profileId: event.target.value,
+                    },
+                  }))
+                }
+              >
+                <option value="auto">Auto from lens metadata</option>
+                <option value="none">No profile</option>
+                {rawLensProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+              <small>
+                {resolveRawLensProfile(
+                  rawSettings.lensCorrection?.profileId ?? 'auto',
+                  rawDevelop?.image.lens ?? '',
+                )?.name ?? 'No matching local profile'}
+              </small>
+            </label>
+            <div className="raw-develop-controls">
+              {(
+                [
+                  ['Distortion', 'distortion', -100, 100],
+                  ['Vignette', 'vignette', -100, 100],
+                  ['Chromatic aberration', 'aberration', 0, 100],
+                  ['Defringe', 'defringe', 0, 100],
+                  ['RAW sharpening', 'sharpening', 0, 100],
+                ] as const
+              ).map(([label, key, min, max]) => (
+                <label key={key}>
+                  <span>{label}</span>
+                  <Slider
+                    aria-label={`RAW ${label.toLowerCase()}`}
+                    min={min}
+                    max={max}
+                    value={
+                      rawSettings.lensCorrection?.[key] ??
+                      defaultRawLensCorrection()[key]
+                    }
+                    onValueChange={(next) =>
+                      setRawSettings((current) => ({
+                        ...current,
+                        lensCorrection: {
+                          ...defaultRawLensCorrection(),
+                          ...current.lensCorrection,
+                          [key]: sliderNumber(next),
+                        } as RawLensCorrection,
+                      }))
+                    }
+                  />
+                  <strong>
+                    {rawSettings.lensCorrection?.[key] ??
+                      defaultRawLensCorrection()[key]}
+                  </strong>
+                </label>
+              ))}
+            </div>
+          </details>
           <div className="dialog-actions">
             <Button
               variant="outline"

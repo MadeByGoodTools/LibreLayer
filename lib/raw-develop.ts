@@ -19,6 +19,8 @@ export type RawDevelopSettings = {
   vibrance: number;
   saturation: number;
   highlightRecovery: number;
+  noise?: RawNoiseCorrection;
+  lensCorrection?: RawLensCorrection;
 };
 
 export type RawOutputColorSpace =
@@ -39,6 +41,8 @@ export const defaultRawDevelopSettings: RawDevelopSettings = {
   vibrance: 0,
   saturation: 0,
   highlightRecovery: 35,
+  noise: defaultRawNoiseCorrection(),
+  lensCorrection: defaultRawLensCorrection(),
 };
 
 export function isRawDevelopSettings(
@@ -46,7 +50,7 @@ export function isRawDevelopSettings(
 ): value is RawDevelopSettings {
   if (!value || typeof value !== 'object') return false;
   const settings = value as Record<string, unknown>;
-  const ranges: Record<keyof RawDevelopSettings, [number, number]> = {
+  const ranges: Record<string, [number, number]> = {
     exposure: [-5, 5],
     contrast: [-100, 100],
     highlights: [-100, 100],
@@ -59,14 +63,41 @@ export function isRawDevelopSettings(
     saturation: [-100, 100],
     highlightRecovery: [0, 100],
   };
-  return (
-    Object.entries(ranges) as [keyof RawDevelopSettings, [number, number]][]
-  ).every(
+  const coreValid = Object.entries(ranges).every(
     ([key, [minimum, maximum]]) =>
       Number.isFinite(settings[key]) &&
       Number(settings[key]) >= minimum &&
       Number(settings[key]) <= maximum,
   );
+  if (!coreValid) return false;
+  if (settings.noise !== undefined) {
+    if (!settings.noise || typeof settings.noise !== 'object') return false;
+    const noise = settings.noise as Record<string, unknown>;
+    const normalized = normalizeRawNoiseCorrection(
+      settings.noise as Partial<RawNoiseCorrection>,
+    );
+    if (
+      !Object.entries(normalized).every(
+        ([key, expected]) => noise[key] === expected,
+      )
+    )
+      return false;
+  }
+  if (settings.lensCorrection !== undefined) {
+    if (!settings.lensCorrection || typeof settings.lensCorrection !== 'object')
+      return false;
+    const lensCorrection = settings.lensCorrection as Record<string, unknown>;
+    const normalized = normalizeRawLensCorrection(
+      settings.lensCorrection as Partial<RawLensCorrection>,
+    );
+    if (
+      !Object.entries(normalized).every(
+        ([key, expected]) => lensCorrection[key] === expected,
+      )
+    )
+      return false;
+  }
+  return true;
 }
 
 const clamp = (value: number, low = 0, high = 1) =>
@@ -196,6 +227,42 @@ function bilinear(
   return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
 }
 
+const prepareRawImage = (
+  image: RawLinearImage,
+  settings: RawDevelopSettings,
+  maximumEdge = 0,
+) => {
+  const scale = maximumEdge
+      ? Math.min(1, maximumEdge / Math.max(image.width, image.height))
+      : 1,
+    width = Math.max(1, Math.round(image.width * scale)),
+    height = Math.max(1, Math.round(image.height * scale));
+  let data: Float32Array;
+  if (width === image.width && height === image.height)
+    data = new Float32Array(image.data);
+  else {
+    data = new Float32Array(width * height * 3);
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++)
+        for (let channel = 0; channel < 3; channel++)
+          data[(y * width + x) * 3 + channel] = bilinear(
+            image,
+            ((x + 0.5) / width) * image.width - 0.5,
+            ((y + 0.5) / height) * image.height - 0.5,
+            channel,
+          );
+  }
+  data = correctRawNoise(data, width, height, settings.noise);
+  data = correctRawLens(
+    data,
+    width,
+    height,
+    settings.lensCorrection,
+    image.lens,
+  );
+  return { ...image, width, height, data };
+};
+
 function adjustRawPixel(rgb: number[], settings: RawDevelopSettings) {
   const gain = 2 ** settings.exposure;
   const warmth = settings.temperature / 300;
@@ -252,20 +319,17 @@ export function developRawRgba(
   settings: RawDevelopSettings,
   maximumEdge = 0,
 ) {
-  const scale = maximumEdge
-    ? Math.min(1, maximumEdge / Math.max(image.width, image.height))
-    : 1;
-  const width = Math.max(1, Math.round(image.width * scale));
-  const height = Math.max(1, Math.round(image.height * scale));
+  const prepared = prepareRawImage(image, settings, maximumEdge),
+    width = prepared.width,
+    height = prepared.height;
   const data = new Uint8ClampedArray(width * height * 4);
   for (let y = 0; y < height; y++) {
-    const sourceY = ((y + 0.5) / height) * image.height - 0.5;
     for (let x = 0; x < width; x++) {
-      const sourceX = ((x + 0.5) / width) * image.width - 0.5;
+      const sourceX = x;
       const rgb = encodeProPhotoPixel(
         adjustRawPixel(
           [0, 1, 2].map((channel) =>
-            bilinear(image, sourceX, sourceY, channel),
+            bilinear(prepared, sourceX, y, channel),
           ),
           settings,
         ),
@@ -287,13 +351,18 @@ export function developRawRgb16(
   settings: RawDevelopSettings,
   colorSpace: RawOutputColorSpace,
 ) {
-  const data = new Uint8Array(image.width * image.height * 6);
+  const prepared = prepareRawImage(image, settings),
+    data = new Uint8Array(prepared.width * prepared.height * 6);
   const view = new DataView(data.buffer);
-  for (let pixel = 0; pixel < image.width * image.height; pixel++) {
+  for (let pixel = 0; pixel < prepared.width * prepared.height; pixel++) {
     const source = pixel * 3;
     const encoded = encodeProPhotoPixel(
       adjustRawPixel(
-        [image.data[source], image.data[source + 1], image.data[source + 2]],
+        [
+          prepared.data[source],
+          prepared.data[source + 1],
+          prepared.data[source + 2],
+        ],
         settings,
       ),
       colorSpace,
@@ -303,5 +372,15 @@ export function developRawRgb16(
     view.setUint16(target + 2, Math.round(clamp(encoded[1]) * 65535), true);
     view.setUint16(target + 4, Math.round(clamp(encoded[2]) * 65535), true);
   }
-  return { width: image.width, height: image.height, data };
+  return { width: prepared.width, height: prepared.height, data };
 }
+import {
+  correctRawLens,
+  correctRawNoise,
+  defaultRawLensCorrection,
+  defaultRawNoiseCorrection,
+  normalizeRawLensCorrection,
+  normalizeRawNoiseCorrection,
+  type RawLensCorrection,
+  type RawNoiseCorrection,
+} from './raw-corrections.ts';

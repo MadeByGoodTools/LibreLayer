@@ -75,7 +75,36 @@ void test('16-bit RAW development preserves precision beyond 8-bit expansion', (
 void test('saved Camera Raw recipes require every bounded adjustment', () => {
   assert.equal(isRawDevelopSettings(defaultRawDevelopSettings), true);
   assert.equal(
+    isRawDevelopSettings({
+      ...defaultRawDevelopSettings,
+      noise: {
+        hotPixels: 25,
+        chroma: 30,
+        banding: 10,
+        luminance: 20,
+      },
+    }),
+    true,
+  );
+  assert.equal(
     isRawDevelopSettings({ ...defaultRawDevelopSettings, exposure: 8 }),
+    false,
+  );
+  assert.equal(
+    isRawDevelopSettings({
+      ...defaultRawDevelopSettings,
+      lensCorrection: {
+        ...defaultRawDevelopSettings.lensCorrection,
+        profileId: 'missing-profile',
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    isRawDevelopSettings({
+      ...defaultRawDevelopSettings,
+      noise: { luminance: 101 },
+    }),
     false,
   );
   assert.equal(isRawDevelopSettings({ exposure: 0, contrast: 0 }), false);

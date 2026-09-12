@@ -4537,6 +4537,42 @@ button {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.raw-advanced-controls {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.raw-advanced-controls > summary {
+  cursor: pointer;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+.raw-advanced-controls[open] > summary {
+  margin-bottom: 10px;
+}
+.raw-profile-select {
+  display: grid;
+  grid-template-columns: 122px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+  margin-bottom: 10px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.raw-profile-select select {
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--input);
+  color: var(--foreground);
+  padding: 4px 7px;
+}
+.raw-profile-select small {
+  grid-column: 2;
+  color: var(--muted-foreground);
+}
 .raw-source-info {
   margin: 0;
   color: var(--muted-foreground);

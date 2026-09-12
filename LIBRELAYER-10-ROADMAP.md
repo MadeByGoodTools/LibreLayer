@@ -108,8 +108,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] Float render textures and no forced 8-bit intermediate canvas.
 - [ ] Camera/DNG profiles, dual illuminants, and calibrated white balance.
 - [ ] Multiple high-quality Bayer and X-Trans demosaic modes.
-- [ ] Highlight reconstruction, hot pixels, banding, chroma/luma noise, and local AI denoise.
-- [ ] Lens database, distortion, vignette, aberration, defringe, and RAW sharpening.
+- [x] Highlight reconstruction, hot-pixel and banding removal, plus separate browser-local chroma/luma denoise. AI denoise was intentionally removed from scope in favor of a tuned deterministic local engine.
+- [x] Local focal-family lens profiles with metadata matching, distortion, vignette, aberration, defringe, and RAW sharpening.
 - [ ] Scene-referred HDR and supported HDR-display preview.
 - [ ] Portable sidecars, batch development, and full camera fixture matrix.
 
