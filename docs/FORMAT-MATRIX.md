@@ -18,4 +18,6 @@
 | `.libreflow` | Yes | Yes | Validated command workflow; unknown commands and unsafe values are rejected. No arbitrary code execution. |
 | SVG, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, EXR | Not guaranteed | No dedicated exporter | These formats remain roadmap items. A browser may decode some as a flattened image, but LibreLayer does not claim portable support. |
 
+Smart Objects in `.librelayer` projects retain embedded layered, vector, nested, and Camera RAW source content. Linked objects package an embedded fallback. Scale, rotation, skew, distortion, perspective, mesh, split, cylindrical, Puppet, perspective warp, and named warp recipes remain editable after reopening; rasterizing is an explicit command. Embedded documents are bounded to 100 layers and 20 nesting levels, and cyclic object relationships are rejected.
+
 Global import limits: 256 MiB file size, 16,384 pixels per side, 64 megapixels per document, 96 million expanded layer/mask pixels across open documents, 100 layers, and 20 nested groups. Files are never silently resized to fit.

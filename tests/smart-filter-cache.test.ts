@@ -52,6 +52,28 @@ void test('filter graph keys separate preview, final, source, and parameter vers
       ],
     }),
   );
+  assert.notEqual(
+    graph(),
+    filterGraphKey({
+      instanceId: 'source-1',
+      sourceVersion: 2,
+      width: 100,
+      height: 80,
+      quality: 'final',
+      transform: { mode: 'skew', horizontal: 12, vertical: 0 },
+      filters: [
+        {
+          id: 'blur',
+          version: 3,
+          name: 'Blur',
+          amount: 4,
+          opacity: 100,
+          blend: 'source-over',
+          enabled: true,
+        },
+      ],
+    }),
+  );
 });
 
 void test('render cache is least-recently-used and enforces its budget', () => {

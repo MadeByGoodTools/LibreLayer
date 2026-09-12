@@ -17,6 +17,7 @@ export const filterGraphKey = ({
   height,
   quality,
   filters,
+  transform,
 }: {
   instanceId: string;
   sourceVersion: number;
@@ -24,6 +25,7 @@ export const filterGraphKey = ({
   height: number;
   quality: FilterGraphQuality;
   filters: VersionedFilterNode[];
+  transform?: unknown;
 }) =>
   JSON.stringify([
     instanceId,
@@ -31,6 +33,7 @@ export const filterGraphKey = ({
     width,
     height,
     quality,
+    transform ?? null,
     filters.map((filter) => [
       filter.id,
       Math.max(1, Math.floor(filter.version ?? 1)),

@@ -239,6 +239,7 @@ import {
 } from '@/lib/layer-compositing';
 import { BlendIfControls } from '@/components/blend-if-controls';
 import { SmartFilterStack } from '@/components/smart-filter-stack';
+import { SmartObjectTransformControls } from '@/components/smart-object-transform-controls';
 import { Histogram } from '@/components/histogram';
 import { ColorScopes } from '@/components/color-scopes';
 import { AdjustmentPresets } from '@/components/adjustment-presets';
@@ -303,6 +304,12 @@ import {
 } from '@/lib/content-aware';
 import { contentAwareScale as scaleContentAwarePixels } from '@/lib/content-aware-scale';
 import { warpSourcePoint, type WarpMode } from '@/lib/warp-engine';
+import {
+  hasSmartObjectTransform,
+  isSmartObjectTransform,
+  normalizeSmartObjectTransform,
+  type SmartObjectTransform,
+} from '@/lib/smart-object-transform';
 import {
   historyExceedsPolicy,
   normalizeHistoryPolicy,
@@ -521,6 +528,7 @@ type SmartObjectData = {
   dependencies?: string[];
   sourceVersion?: number;
   embeddedDocument?: EmbeddedDocumentData;
+  transform?: SmartObjectTransform;
   raw?: {
     assetId: string;
     width: number;
@@ -1622,7 +1630,21 @@ const drawLayer = (
     source = temp;
   }
   const smartObject = layer.smartObject,
-    activeSmartFilters =
+    smartTransform = normalizeSmartObjectTransform(smartObject?.transform);
+  if (hasSmartObjectTransform(smartTransform)) {
+    const warped = makeCanvas(w, h);
+    warped.getContext('2d')!.drawImage(source, 0, 0);
+    transformRasterPixels(
+      warped,
+      smartTransform.mode,
+      smartTransform.horizontal,
+      smartTransform.vertical,
+      smartTransform.preset,
+    );
+    if (source !== surface.pixels) source.width = source.height = 1;
+    source = warped;
+  }
+  const activeSmartFilters =
       smartObject?.filters.filter((filter) => filter.enabled) ?? [],
     cacheable =
       !!smartObject &&
@@ -1636,6 +1658,7 @@ const drawLayer = (
           width: w,
           height: h,
           quality,
+          transform: smartObject?.transform,
           filters: smartObject.filters,
         })
       : '',
@@ -8463,8 +8486,38 @@ export default function Home() {
   };
   const applyGeometry = (operation: GeometryOperation) => {
     if (operation.kind === 'transform') {
-      const target = targetContext(),
-        meta = selected();
+      const meta = selected();
+      if (
+        meta?.smartObject &&
+        editing !== 'mask' &&
+        operation.mode !== 'content-aware-scale'
+      ) {
+        if (isLocked(meta.id)) {
+          setStatus('Unlock the Smart Object before transforming it');
+          return;
+        }
+        patchLayer(
+          meta.id,
+          {
+            smartObject: {
+              ...meta.smartObject,
+              transform: normalizeSmartObjectTransform({
+                mode: operation.mode,
+                horizontal: operation.x,
+                vertical: operation.y,
+                preset: operation.preset,
+              }),
+            },
+          },
+          `${operation.mode
+            .split('-')
+            .map((part) => part[0].toUpperCase() + part.slice(1))
+            .join(' ')} Smart Object`,
+        );
+        setStatus('Editable Smart Object transform applied');
+        return;
+      }
+      const target = targetContext();
       if (!target || !meta || editing === 'mask') {
         setStatus('Select an unlocked pixel layer first');
         return;
@@ -10355,6 +10408,11 @@ export default function Home() {
           )
             throw Error('Invalid Camera Raw Smart Object');
         }
+        if (
+          item.smartObject?.transform !== undefined &&
+          !isSmartObjectTransform(item.smartObject.transform)
+        )
+          throw Error('Invalid Smart Object transform');
         const { pixels, mask, ...rawMeta } = item,
           meta: LayerMeta = {
             ...rawMeta,
@@ -10365,6 +10423,11 @@ export default function Home() {
                     rawMeta.smartObject.instanceId ?? crypto.randomUUID(),
                   sourceVersion: rawMeta.smartObject.sourceVersion ?? 1,
                   dependencies: rawMeta.smartObject.dependencies ?? [],
+                  transform: rawMeta.smartObject.transform
+                    ? normalizeSmartObjectTransform(
+                        rawMeta.smartObject.transform,
+                      )
+                    : undefined,
                   filters: (rawMeta.smartObject.filters ?? []).map(
                     (filter: SmartFilter) => ({
                       ...filter,
@@ -18215,6 +18278,20 @@ export default function Home() {
                                     Rotate 90°
                                   </button>
                                 </div>
+                                {active?.smartObject && (
+                                  <SmartObjectTransformControls
+                                    value={active.smartObject.transform}
+                                    onPreview={(transform) =>
+                                      patchLayer(active.id, {
+                                        smartObject: {
+                                          ...active.smartObject!,
+                                          transform,
+                                        },
+                                      })
+                                    }
+                                    onCommit={snapshot}
+                                  />
+                                )}
                               </>
                             )}
                             <div className="property-heading">

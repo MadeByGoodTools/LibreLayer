@@ -129,7 +129,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] True embedded source documents editable in their own tabs.
 - [x] Persistent linked-file handles, refresh, missing-link repair, relinking, and packaging.
 - [x] Shared and independent instances with a dependency graph and cycle protection.
-- [ ] Nondestructive skew, perspective, warp, vector, RAW, and nested object content.
+- [x] Nondestructive skew, perspective, warp, vector, RAW, and nested object content.
 - [x] Cached preview/final filter graph with versioned parameters.
 
 ## 10. Filters and effects
