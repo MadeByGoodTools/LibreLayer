@@ -191,7 +191,7 @@ This is the release ledger for closing the remaining gap with a professional des
 
 - [x] Undo/redo, history panel, named snapshots, branching, local autosave, recovery, versions, encryption, and saved locations.
 - [x] Configurable history depth and memory-aware compaction.
-- [ ] Persistent history thumbnails and per-layer restoration.
+- [x] Persistent history thumbnails and per-layer restoration.
 - [ ] Atomic incremental saves, corruption repair, and crash transaction journal.
 - [ ] External-drive disconnect handling, packaging, storage health, and retention controls.
 

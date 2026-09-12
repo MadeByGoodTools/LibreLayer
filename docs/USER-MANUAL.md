@@ -39,6 +39,10 @@ Clone Source provides five reusable source slots with offset, scale, rotation, f
 
 Content-Aware Fill shows a live local preview: green is the sampling coverage and red is the replacement target. Choose Auto, Rectangular, Custom, or All Visible Layers; then tune color, rotation, scale, and mirror adaptation before Apply. A whole-canvas selection has no surrounding source in Auto mode—use a smaller selection or All Visible Layers.
 
+## History
+
+New history states include a compact visual thumbnail. Choose a state name to restore the whole document, **Layer** to restore only the currently selected layer from that state, **Branch** to open the state as an independent document tab, or **Compare** to open a pixel-accurate change map. A layer-only restore brings back that layer's pixels, mask, editable settings, and supported parent placement, leaves all other layers untouched, and adds a new undoable history state. History remains available while its document tab is open; named version snapshots provide browser-local recovery across sessions.
+
 ## Typography
 
 Choose Text (`T`), enter point or paragraph copy, and click the canvas. Character & paragraph controls cover font, continuous variable weight, width, style, size, tracking, kerning, leading, baseline shift, alignment, first-line indent, paragraph spacing, underline, strikethrough, small caps, and ligatures. Automatic or explicit left-to-right/right-to-left direction and a language setting preserve native browser shaping for Arabic, Hebrew, Indic, CJK, accented text, emoji, and other complex runs.

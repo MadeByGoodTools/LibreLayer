@@ -59,6 +59,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Detail-weighted Content-Aware Scale with active-selection protection and linear-time processing for large browser documents
 - Skew, corner distortion, perspective, mesh, split, cylindrical, Puppet, perspective, Arc, Flag, Fisheye, and Twist warp fields with mask-aware undo
 - Persisted undo-history depth and memory budgets with automatic oldest-state compaction under either limit
+- Compact visual thumbnails for new history states, plus one-layer restoration that leaves the rest of the document untouched and creates a new undoable state
 - Sample-all-layers healing on blank retouch layers, targeted red-eye correction, and one-click frequency separation with editable Low, High, and Retouching layers while preserving the original
 - Five reusable Clone Source slots with aligned/unaligned painting, live source overlay, offset, scale, rotation, and horizontal/vertical flipping
 - Vertical, horizontal, and radial symmetry painting plus Pattern Stamp, History Brush, and stylized Art History Brush modes backed by real canvas sources

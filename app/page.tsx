@@ -497,6 +497,7 @@ type Snapshot = {
   paths?: SavedPath[];
   layerComps?: LayerComp[];
   view?: EditorView;
+  thumbnail?: string;
 };
 type EditorDocument = {
   selectedIds?: string[];
@@ -2704,6 +2705,21 @@ export default function Home() {
           rulerOrigin: { ...view.rulerOrigin },
           guides: view.guides.map((g) => ({ ...g })),
         },
+        thumbnail: (() => {
+          const source = displayRef.current;
+          if (!source?.width || !source.height) return undefined;
+          const scale = Math.min(1, 96 / source.width, 64 / source.height),
+            thumbnail = makeCanvas(
+              Math.max(1, Math.round(source.width * scale)),
+              Math.max(1, Math.round(source.height * scale)),
+            );
+          thumbnail
+            .getContext('2d')!
+            .drawImage(source, 0, 0, thumbnail.width, thumbnail.height);
+          const data = thumbnail.toDataURL('image/webp', 0.72);
+          thumbnail.width = thumbnail.height = 1;
+          return data;
+        })(),
         surfaces: layersRef.current.map((meta) => {
           const s = surfacesRef.current.get(meta.id)!,
             old = previous?.surfaces.find((x) => x.id === meta.id);
@@ -2796,6 +2812,50 @@ export default function Home() {
     setStatus(snap.label);
     setHistoryVersion((v) => v + 1);
   }, []);
+  const restoreSelectedLayerFromSnapshot = (index: number) => {
+    const snap = historyRef.current[index],
+      id = selectedRef.current,
+      currentMeta = layersRef.current.find((layer) => layer.id === id),
+      historicMeta = snap?.layers.find((layer) => layer.id === id),
+      historicSurface = snap?.surfaces.find((surface) => surface.id === id);
+    if (!snap || !currentMeta || !historicMeta || !historicSurface) {
+      setStatus('The selected layer does not exist in that history state');
+      return;
+    }
+    if (locked(layersRef.current, id)) {
+      setStatus('Unlock the selected layer before restoring it');
+      return;
+    }
+    const previousSurface = surfacesRef.current.get(id),
+      nextSurface = {
+        pixels: restoreTiles(historicSurface.pixels),
+        mask: historicSurface.mask
+          ? restoreTiles(historicSurface.mask)
+          : undefined,
+      },
+      parentId = historicMeta.parentId
+        ? layersRef.current.some((layer) => layer.id === historicMeta.parentId)
+          ? historicMeta.parentId
+          : currentMeta.parentId
+        : undefined;
+    surfacesRef.current.set(id, nextSurface);
+    syncLayers(
+      layersRef.current.map((layer) =>
+        layer.id === id ? { ...historicMeta, parentId } : layer,
+      ),
+    );
+    render();
+    setTimeout(
+      () => snapshot(`Restore ${historicMeta.name} from ${snap.label}`),
+      0,
+    );
+    if (previousSurface) {
+      previousSurface.pixels.width = previousSurface.pixels.height = 1;
+      if (previousSurface.mask)
+        previousSurface.mask.width = previousSurface.mask.height = 1;
+    }
+    setStatus(`${historicMeta.name} restored from ${snap.label}`);
+  };
   const createHistorySnapshot = () => {
     setSnapshotName(
       `Snapshot ${historyRef.current.filter((x) => x.named).length + 1}`,
@@ -16429,6 +16489,15 @@ export default function Home() {
                     <div className="panel-content history-list">
                       {historyRef.current.map((x, i) => (
                         <div className="history-entry" key={`${x.label}-${i}`}>
+                          {x.thumbnail ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={x.thumbnail} alt="" />
+                          ) : (
+                            <span
+                              className="history-thumbnail-placeholder"
+                              aria-hidden="true"
+                            />
+                          )}
                           <button
                             className={
                               i === historyIndex.current ? 'current' : ''
@@ -16436,6 +16505,18 @@ export default function Home() {
                             onClick={() => restoreSnapshot(i)}
                           >
                             {x.label}
+                          </button>
+                          <button
+                            className="history-utility"
+                            aria-label={`Restore the selected layer from ${x.label}`}
+                            title="Restore only the selected layer from this state"
+                            disabled={
+                              !selectedId ||
+                              !x.layers.some((layer) => layer.id === selectedId)
+                            }
+                            onClick={() => restoreSelectedLayerFromSnapshot(i)}
+                          >
+                            Layer
                           </button>
                           <button
                             className="history-utility"

@@ -1001,15 +1001,24 @@ button {
 }
 .history-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 3px;
 }
-.history-entry > button:first-child {
+.history-entry > button:nth-child(2) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.history-entry > img,
+.history-thumbnail-placeholder {
+  width: 40px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: repeating-conic-gradient(#303238 0 25%, #24262b 0 50%) 50% / 8px 8px;
+  object-fit: cover;
 }
 .history-list .history-utility {
   padding: 5px 6px;
