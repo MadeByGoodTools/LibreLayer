@@ -356,6 +356,11 @@ import {
   type RawLensCorrection,
   type RawNoiseCorrection,
 } from '@/lib/raw-corrections';
+import {
+  createRawRecipeSidecar,
+  parseRawRecipeSidecar,
+  serializeRawRecipeSidecar,
+} from '@/lib/raw-sidecar';
 import type { HighPrecisionRawSource } from '@/lib/image-export';
 import {
   validateEmbeddedDocument,
@@ -2565,6 +2570,7 @@ export default function Home() {
   const brushRenderer = useRef<GpuBrushRenderer | null>(null);
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
+  const rawRecipeFileRef = useRef<HTMLInputElement>(null);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
   const brushTipFileRef = useRef<HTMLInputElement>(null);
   const brushTipCanvases = useRef(new Map<string, HTMLCanvasElement>());
@@ -11577,7 +11583,7 @@ export default function Home() {
     decode: RawDecodeSettings,
     replacement?: RawDevelopSettings,
   ) => {
-    if (!rawDevelop || rawDecodeBusy) return;
+    if (!rawDevelop || rawDecodeBusy) return false;
     const revision = ++rawDecodeRevision.current;
     setRawDecodeBusy(true);
     setStatus('Reprocessing the retained RAW sensor data…');
@@ -11596,6 +11602,7 @@ export default function Home() {
         current ? { ...current, image, sourceFile: file } : null,
       );
       setStatus('RAW decode recipe updated with a fresh live preview');
+      return true;
     } catch (error) {
       if (revision !== rawDecodeRevision.current) return;
       setPsdError(
@@ -11606,6 +11613,7 @@ export default function Home() {
     } finally {
       if (revision === rawDecodeRevision.current) setRawDecodeBusy(false);
     }
+    return false;
   };
   const resetRawDevelop = () => {
     const next = {
@@ -11620,6 +11628,49 @@ export default function Home() {
       return;
     }
     setRawSettings(next);
+  };
+  const exportRawRecipe = () => {
+    if (!rawDevelop) return;
+    const baseName = rawDevelop.name.replace(/\.[^.]+$/, '') || 'camera-raw';
+    downloadBlob(
+      `${baseName}.libreRAW.json`,
+      new Blob(
+        [
+          serializeRawRecipeSidecar(
+            createRawRecipeSidecar(rawSettings, {
+              camera: rawDevelop.image.camera,
+              lens: rawDevelop.image.lens,
+            }),
+          ),
+        ],
+        { type: 'application/json' },
+      ),
+    );
+    setStatus('Portable Camera Raw recipe downloaded');
+  };
+  const importRawRecipe = async (file?: File) => {
+    if (!file || !rawDevelop || rawDecodeBusy) return;
+    try {
+      const recipe = parseRawRecipeSidecar(await file.text());
+      const decode =
+        recipe.settings.decode ?? defaultRawDevelopSettings.decode!;
+      const sourceDecode =
+        rawSettings.decode ?? defaultRawDevelopSettings.decode!;
+      const changedDecode =
+        JSON.stringify(decode) !== JSON.stringify(sourceDecode);
+      if (changedDecode) {
+        void redecodeRaw(decode, recipe.settings);
+        return;
+      }
+      setRawSettings(recipe.settings);
+      setStatus('Portable Camera Raw recipe applied');
+    } catch (error) {
+      setPsdError(
+        error instanceof Error ? error.message : 'The RAW recipe could not be imported.',
+      );
+    } finally {
+      if (rawRecipeFileRef.current) rawRecipeFileRef.current.value = '';
+    }
   };
   const applyRawDevelop = async () => {
     if (!rawDevelop) return;
@@ -19782,6 +19833,20 @@ export default function Home() {
           <div className="dialog-actions">
             <Button
               variant="outline"
+              disabled={rawDecodeBusy}
+              onClick={exportRawRecipe}
+            >
+              Export recipe
+            </Button>
+            <Button
+              variant="outline"
+              disabled={rawDecodeBusy}
+              onClick={() => rawRecipeFileRef.current?.click()}
+            >
+              Import recipe
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => setEncryptedProjectFile(null)}
             >
               Cancel
@@ -20535,6 +20600,13 @@ export default function Home() {
         type="file"
         accept="image/png,image/jpeg,image/webp"
         onChange={(event) => void applySmartFile(event.target.files?.[0])}
+      />
+      <input
+        ref={rawRecipeFileRef}
+        hidden
+        type="file"
+        accept=".libreRAW.json,application/json"
+        onChange={(event) => void importRawRecipe(event.target.files?.[0])}
       />
       <input
         ref={filterPluginFileRef}
