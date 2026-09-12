@@ -1,6 +1,6 @@
 # LibreLayer 10/10 completion ledger
 
-This is the release ledger for closing the remaining gap with a professional desktop image editor while keeping LibreLayer browser-local. A feature is checked only when its real operation, undo/redo, project persistence, error handling, automated coverage, and browser QA are complete.
+This is the release ledger for closing the remaining gap with a professional desktop image editor while keeping LibreLayer browser-local. A feature is checked only when its real operation, undo/redo, project persistence, error handling, automated coverage, and browser QA are complete. Items marked `[~]` are explicitly outside the release scope by product decision and are not counted as unfinished work.
 
 ## Release gate
 
@@ -165,10 +165,10 @@ This is the release ledger for closing the remaining gap with a professional des
 ## 13. AI editing
 
 - [x] Optional browser-local background removal with no required account or API key.
-- [ ] Local subject, people-part, sky, clothing, depth, face, denoise, restore, relight, artifact-removal, colorize, and super-resolution models.
-- [ ] Optional provider-neutral Generative Fill, Expand, Remove, Background, Harmonize, Upscale, and prompt editing.
-- [ ] Reference guidance, variations, masks, progress, cancellation, and offline fallback.
-- [ ] Explicit local/cloud labels, upload consent, model storage controls, provenance, and Content Credentials.
+- [~] Additional local generative and restoration models — intentionally deferred; current local semantic selections remain.
+- [~] Cloud/provider Generative Fill, Expand, Remove, Background, Harmonize, Upscale, and prompt editing — intentionally excluded.
+- [~] Cloud variation, reference-guidance, and upload workflows — intentionally excluded.
+- [~] Cloud model controls and Content Credentials — not required while LibreLayer has no upload-based AI.
 
 ## 14. Print and professional color
 

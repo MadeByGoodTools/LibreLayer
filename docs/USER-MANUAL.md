@@ -2,6 +2,8 @@
 
 LibreLayer is a local-first layered image editor for current desktop browsers. Editing, autosave, AI-assisted selections, and recovery happen on the device. Keep an exported `.librelayer` project for important work.
 
+The optional background-removal model is downloaded by the browser on first use and reused by Remove Background and Select Subject for the rest of the session. LibreLayer does not include cloud generative editing or upload the active image to an AI provider.
+
 ## Start and restore
 
 - **New document:** File → New or `Ctrl/⌘+N`. Pick a photo, print, screen, social, or custom preset.

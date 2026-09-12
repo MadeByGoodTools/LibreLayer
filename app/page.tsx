@@ -1331,6 +1331,27 @@ const rawImageCanvas = (output: {
   return canvas;
 };
 
+type BackgroundRemovalRunner = (
+  input: string,
+) => Promise<{ data: Uint8Array; width: number; height: number }>;
+let backgroundRemovalPromise: Promise<BackgroundRemovalRunner> | null = null;
+const backgroundRemovalModel = () => {
+  if (!backgroundRemovalPromise)
+    backgroundRemovalPromise = import('@huggingface/transformers')
+      .then(async (hf) => {
+        const runner = await hf.pipeline(
+          'background-removal',
+          'onnx-community/BEN2-ONNX',
+        );
+        return runner as unknown as BackgroundRemovalRunner;
+      })
+      .catch((error) => {
+        backgroundRemovalPromise = null;
+        throw error;
+      });
+  return backgroundRemovalPromise;
+};
+
 const maskToAlpha = (mask: HTMLCanvasElement, density = 100, feather = 0) => {
   const out = makeCanvas(mask.width, mask.height),
     ctx = out.getContext('2d')!,
@@ -11495,15 +11516,9 @@ export default function Home() {
     setAiBusy(true);
     setStatus('Loading free background-removal model…');
     try {
-      const hf = await import('@huggingface/transformers');
-      const remover = await hf.pipeline(
-        'background-removal',
-        'onnx-community/BEN2-ONNX',
-      );
+      const remover = await backgroundRemovalModel();
       setStatus('AI is isolating the subject…');
-      const output = (await remover(
-        surface.pixels.toDataURL('image/png'),
-      )) as unknown as { data: Uint8Array; width: number; height: number };
+      const output = await remover(surface.pixels.toDataURL('image/png'));
       if (!output?.data) throw new Error('No image returned');
       if (
         activeDocumentRef.current !== aiDocument ||
@@ -11558,14 +11573,8 @@ export default function Home() {
     setAiBusy(true);
     setStatus('Loading the free on-device subject model…');
     try {
-      const hf = await import('@huggingface/transformers'),
-        selector = await hf.pipeline(
-          'background-removal',
-          'onnx-community/BEN2-ONNX',
-        ),
-        output = (await selector(
-          surface.pixels.toDataURL('image/png'),
-        )) as unknown as { data: Uint8Array; width: number; height: number };
+      const selector = await backgroundRemovalModel(),
+        output = await selector(surface.pixels.toDataURL('image/png'));
       if (!output?.data) throw Error('No subject mask');
       const result = rawImageCanvas(output);
       const local = makeCanvas(doc.w, doc.h),
