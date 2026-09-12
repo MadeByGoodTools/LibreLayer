@@ -70,6 +70,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Vertical, horizontal, and radial symmetry painting plus Pattern Stamp, History Brush, and stylized Art History Brush modes backed by real canvas sources
 - Browser-local Match Color, HDR toning, perceptual vibrance, and lift/gamma/gain grading wheels
 - Editable point and paragraph type with local font loading, variable weight/width controls, OpenType options, bidirectional shaping, language selection, missing-font warnings, and paragraph spacing
+- Text placed along real saved-path distance and tangents or fitted inside closed paths, six editable warp styles, shrink/fill box fitting, and per-glyph alpha-contour conversion to editable paths
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 
 Projects remain on the user's device unless they explicitly export or share a file.

@@ -55,6 +55,8 @@ New history states include a compact visual thumbnail. Choose a state name to re
 
 Choose Text (`T`), enter point or paragraph copy, and click the canvas. Character & paragraph controls cover font, continuous variable weight, width, style, size, tracking, kerning, leading, baseline shift, alignment, first-line indent, paragraph spacing, underline, strikethrough, small caps, and ligatures. Automatic or explicit left-to-right/right-to-left direction and a language setting preserve native browser shaping for Arabic, Hebrew, Indic, CJK, accented text, emoji, and other complex runs.
 
+Path placement follows a chosen saved path using its actual segment distances and tangents, or flows paragraph text inside a closed saved path with clipping. Warp Text provides Arc, Arch, Flag, Wave, Bulge, and Fish recipes with an editable bend value. Paragraph text can remain at its authored size, shrink until it fits, or expand to fill a bounded text box. **Convert to shapes** preserves the rendered appearance and traces visible glyph alpha into separate editable outline paths, including disconnected contours, instead of substituting a bounding rectangle.
+
 Load local font accepts WOFF2, WOFF, TTF, and OTF files without uploading them. Locally loaded fonts last for the current editing session. When a project references a font that is not installed, LibreLayer displays a missing-font warning and uses a visible system fallback until the font is loaded.
 
 ## Color and adjustments

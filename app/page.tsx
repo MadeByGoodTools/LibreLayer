@@ -90,11 +90,15 @@ import {
   canvasFontStretch,
   canvasVariableFont,
   graphemes,
+  fitTextSize,
+  layoutGlyphsOnPath,
   languageOptions,
   resolveTextDirection,
   shouldDrawShapedRun,
+  textWarpTransform,
   type TextDirection,
   type TextStyle,
+  type TextWarpStyle,
 } from '@/lib/text-engine';
 import {
   commandKey,
@@ -319,6 +323,7 @@ import {
   VersionedRenderCache,
   type FilterGraphQuality,
 } from '@/lib/smart-filter-cache';
+import { traceAlphaContours } from '@/lib/vector-trace';
 import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
@@ -435,7 +440,12 @@ type TextLayerData = {
   baseline: number;
   align: 'left' | 'center' | 'right' | 'justify';
   onPath: boolean;
+  pathMode?: 'none' | 'along' | 'inside';
+  pathId?: string;
   warp: number;
+  warpStyle?: TextWarpStyle;
+  fit?: 'none' | 'shrink' | 'fill';
+  boxHeight?: number;
   smallCaps: boolean;
   ligatures: boolean;
   direction: TextDirection;
@@ -948,9 +958,91 @@ const rotateCanvasPixels = (source: HTMLCanvasElement, degrees: number) => {
   ctx.drawImage(source, -source.width / 2, -source.height / 2);
   return output;
 };
-const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
+const drawEditableText = (
+  canvas: HTMLCanvasElement,
+  input: TextLayerData,
+  pathPoints?: Point[],
+) => {
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const pathMode = input.pathMode ?? (input.onPath ? 'along' : 'none'),
+    usablePath = pathPoints && pathPoints.length > 1 ? pathPoints : undefined,
+    bounds = usablePath
+      ? {
+          left: Math.min(...usablePath.map((point) => point.x)),
+          right: Math.max(...usablePath.map((point) => point.x)),
+          top: Math.min(...usablePath.map((point) => point.y)),
+          bottom: Math.max(...usablePath.map((point) => point.y)),
+        }
+      : undefined;
+  let value = { ...input };
+  if (pathMode === 'inside' && usablePath && bounds) {
+    value = {
+      ...value,
+      paragraph: true,
+      originX: bounds.left + 8,
+      originY: bounds.top + input.size + 8,
+      width: Math.max(20, bounds.right - bounds.left - 16),
+      boxHeight: Math.max(20, bounds.bottom - bounds.top - 16),
+      onPath: false,
+    };
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(usablePath[0].x, usablePath[0].y);
+    usablePath.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    ctx.clip();
+  }
+  if (value.paragraph && (value.fit ?? 'none') !== 'none') {
+    const fit = value.fit ?? 'none',
+      fitted = fitTextSize({
+        preferred: fit === 'fill' ? 0 : value.size,
+        min: 8,
+        max: fit === 'fill' ? 300 : value.size,
+        fits: (candidateSize) => {
+          ctx.font = canvasFont({
+            family: value.family,
+            size: candidateSize,
+            weight: value.weight,
+            style: value.style,
+          });
+          let lineCount = 0,
+            widest = 0;
+          for (const paragraph of value.content.split('\n')) {
+            let line = '';
+            for (const word of paragraph.split(/\s+/)) {
+              const candidate = line ? `${line} ${word}` : word,
+                measured =
+                  ctx.measureText(candidate).width +
+                  Math.max(0, candidate.length - 1) * value.tracking;
+              if (line && measured > value.width) {
+                widest = Math.max(
+                  widest,
+                  ctx.measureText(line).width +
+                    Math.max(0, line.length - 1) * value.tracking,
+                );
+                lineCount++;
+                line = word;
+              } else line = candidate;
+            }
+            widest = Math.max(
+              widest,
+              ctx.measureText(line).width +
+                Math.max(0, line.length - 1) * value.tracking,
+            );
+            lineCount++;
+          }
+          return (
+            widest <= value.width &&
+            lineCount * candidateSize * value.leading <=
+              (value.boxHeight ?? canvas.height - value.originY)
+          );
+        },
+      });
+    value.size = fitted;
+    if (pathMode === 'inside' && bounds)
+      value.originY = bounds.top + fitted + 8;
+  }
   ctx.fillStyle = value.color;
   const fontOptions = {
     family: value.family,
@@ -991,6 +1083,32 @@ const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
       lines.push(line);
     }
   } else lines.push(...content.split('\n'));
+  if (pathMode === 'along' && usablePath) {
+    const clusters = graphemes(
+        content.replaceAll('\n', ' '),
+        value.language ?? 'en',
+      ),
+      advances = clusters.map(
+        (character) => ctx.measureText(character).width + value.tracking,
+      ),
+      positions = layoutGlyphsOnPath(advances, usablePath);
+    clusters.forEach((character, index) => {
+      const position = positions[index];
+      if (!position?.visible) return;
+      const warp = textWarpTransform(
+        value.warpStyle ?? (value.warp ? 'wave' : 'none'),
+        index / Math.max(1, clusters.length - 1),
+        value.warp,
+      );
+      ctx.save();
+      ctx.translate(position.x, position.y + value.baseline + warp.y);
+      ctx.rotate(position.angle + warp.rotation);
+      ctx.scale(1, warp.scaleY);
+      ctx.fillText(character, -advances[index] / 2, 0);
+      ctx.restore();
+    });
+    return;
+  }
   lines.forEach((line, lineIndex) => {
     const lineIndent = lineIndex === 0 ? (value.indent ?? 0) : 0,
       width =
@@ -1028,12 +1146,18 @@ const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
       const clusters = graphemes(line, value.language ?? 'en');
       for (let index = 0; index < clusters.length; index++) {
         const character = clusters[index],
-        progress = index / Math.max(1, clusters.length - 1),
-        pathOffset = value.onPath
-          ? -Math.sin(progress * Math.PI) * value.size * 0.45
-          : 0,
-        warpOffset = Math.sin(progress * Math.PI * 2) * value.warp;
-        ctx.fillText(character, cursor, y + pathOffset + warpOffset);
+          progress = index / Math.max(1, clusters.length - 1),
+          warp = textWarpTransform(
+            value.warpStyle ?? (value.warp ? 'wave' : 'none'),
+            progress,
+            value.warp,
+          );
+        ctx.save();
+        ctx.translate(cursor, y + warp.y);
+        ctx.rotate(warp.rotation);
+        ctx.scale(1, warp.scaleY);
+        ctx.fillText(character, 0, 0);
+        ctx.restore();
         cursor +=
           ctx.measureText(character).width +
           value.tracking +
@@ -1058,6 +1182,7 @@ const drawEditableText = (canvas: HTMLCanvasElement, value: TextLayerData) => {
     }
     ctx.restore();
   });
+  if (pathMode === 'inside' && usablePath) ctx.restore();
 };
 const rawImageCanvas = (output: {
   data: Uint8Array;
@@ -2275,8 +2400,14 @@ export default function Home() {
     [textAlign, setTextAlign] = useState<
       'left' | 'center' | 'right' | 'justify'
     >('left'),
-    [textOnPath, setTextOnPath] = useState(false),
+    [textPathMode, setTextPathMode] = useState<'none' | 'along' | 'inside'>(
+      'none',
+    ),
+    [textPathId, setTextPathId] = useState(''),
     [textWarp, setTextWarp] = useState(0),
+    [textWarpStyle, setTextWarpStyle] = useState<TextWarpStyle>('none'),
+    [textFit, setTextFit] = useState<'none' | 'shrink' | 'fill'>('none'),
+    [textBoxHeight, setTextBoxHeight] = useState(280),
     [textSmallCaps, setTextSmallCaps] = useState(false),
     [textLigatures, setTextLigatures] = useState(true),
     [textDirection, setTextDirection] = useState<TextDirection>('auto'),
@@ -5207,8 +5338,13 @@ export default function Home() {
       leading: textLeading,
       baseline: textBaseline,
       align: textAlign,
-      onPath: textOnPath,
+      onPath: textPathMode === 'along',
+      pathMode: textPathMode,
+      pathId: textPathMode === 'none' ? undefined : textPathId || paths[0]?.id,
       warp: textWarp,
+      warpStyle: textWarpStyle,
+      fit: textFit,
+      boxHeight: textBoxHeight,
       smallCaps: textSmallCaps,
       ligatures: textLigatures,
       direction: textDirection,
@@ -5219,7 +5355,11 @@ export default function Home() {
       spaceBefore: textSpaceBefore,
       spaceAfter: textSpaceAfter,
     };
-    drawEditableText(surface.pixels, textLayer);
+    drawEditableText(
+      surface.pixels,
+      textLayer,
+      paths.find((path) => path.id === textLayer.pathId)?.points,
+    );
     patchLayer(id, { textLayer }, 'Create editable text layer');
     snapshot('Create editable text layer');
     render();
@@ -5248,8 +5388,13 @@ export default function Home() {
       leading: textLeading,
       baseline: textBaseline,
       align: textAlign,
-      onPath: textOnPath,
+      onPath: textPathMode === 'along',
+      pathMode: textPathMode,
+      pathId: textPathMode === 'none' ? undefined : textPathId || paths[0]?.id,
       warp: textWarp,
+      warpStyle: textWarpStyle,
+      fit: textFit,
+      boxHeight: textBoxHeight,
       smallCaps: textSmallCaps,
       ligatures: textLigatures,
       direction: textDirection,
@@ -5260,33 +5405,58 @@ export default function Home() {
       spaceBefore: textSpaceBefore,
       spaceAfter: textSpaceAfter,
     };
-    drawEditableText(surface.pixels, textLayer);
+    drawEditableText(
+      surface.pixels,
+      textLayer,
+      paths.find((path) => path.id === textLayer.pathId)?.points,
+    );
     patchLayer(meta.id, { textLayer }, 'Edit text layer');
     render();
     setStatus('Text layer updated');
   };
   const convertTextToShapes = () => {
-    const meta = selected();
-    if (!meta?.textLayer) return;
-    const t = meta.textLayer,
-      width = Math.min(
-        doc.w - t.originX,
-        Math.max(20, t.content.length * (t.size * 0.62 + t.tracking)),
-      ),
-      path: SavedPath = {
+    const meta = selected(),
+      surface = meta && surfacesRef.current.get(meta.id);
+    if (!meta?.textLayer || !surface || isLocked(meta.id)) {
+      setStatus('Select an unlocked editable text layer first');
+      return;
+    }
+    const image = surface.pixels
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, surface.pixels.width, surface.pixels.height),
+      contours = traceAlphaContours(
+        image.data,
+        image.width,
+        image.height,
+      );
+    if (!contours.length) {
+      setStatus('The text has no visible glyph outlines to convert');
+      return;
+    }
+    const cx = doc.w / 2,
+      cy = doc.h / 2,
+      angle = ((meta.rotation ?? 0) * Math.PI) / 180,
+      cos = Math.cos(angle),
+      sin = Math.sin(angle),
+      toDocumentPoint = (point: Point) => {
+        const dx = (point.x - cx) * (meta.scaleX ?? 1),
+          dy = (point.y - cy) * (meta.scaleY ?? 1);
+        return {
+          x: cx + meta.x + dx * cos - dy * sin,
+          y: cy + meta.y + dx * sin + dy * cos,
+        };
+      },
+      outlines: SavedPath[] = contours.map((points, index) => ({
         id: crypto.randomUUID(),
-        name: `${meta.name} outline`,
+        name: `${meta.name} outline ${index + 1}`,
         curved: false,
-        points: [
-          { x: t.originX, y: t.originY - t.size },
-          { x: t.originX + width, y: t.originY - t.size },
-          { x: t.originX + width, y: t.originY + t.size * t.leading },
-          { x: t.originX, y: t.originY + t.size * t.leading },
-        ],
-      };
-    setPaths((items) => [path, ...items]);
+        points: points.map(toDocumentPoint),
+      }));
+    setPaths((items) => [...outlines, ...items]);
     patchLayer(meta.id, { textLayer: undefined }, 'Convert text to shape');
-    setStatus('Text converted to an editable outline path');
+    setStatus(
+      `Text converted to ${outlines.length} editable glyph outline${outlines.length === 1 ? '' : 's'}; appearance preserved`,
+    );
   };
   const magneticPoint = (p: Point) => {
     const surface = surfacesRef.current.get(selectedRef.current),
@@ -5673,8 +5843,16 @@ export default function Home() {
       setTextLeading(textValue.leading);
       setTextBaseline(textValue.baseline);
       setTextAlign(textValue.align);
-      setTextOnPath(textValue.onPath);
+      setTextPathMode(
+        textValue.pathMode ?? (textValue.onPath ? 'along' : 'none'),
+      );
+      setTextPathId(textValue.pathId ?? '');
       setTextWarp(textValue.warp);
+      setTextWarpStyle(
+        textValue.warpStyle ?? (textValue.warp ? 'wave' : 'none'),
+      );
+      setTextFit(textValue.fit ?? 'none');
+      setTextBoxHeight(textValue.boxHeight ?? 280);
       setTextSmallCaps(textValue.smallCaps);
       setTextLigatures(textValue.ligatures);
       setTextDirection(textValue.direction ?? 'auto');
@@ -11706,7 +11884,11 @@ export default function Home() {
           ...meta.textLayer,
           content: options.text || meta.textLayer.content,
         };
-        drawEditableText(surfacesRef.current.get(meta.id)!.pixels, next);
+        drawEditableText(
+          surfacesRef.current.get(meta.id)!.pixels,
+          next,
+          paths.find((path) => path.id === next.pathId)?.points,
+        );
         patchLayer(meta.id, { textLayer: next }, 'Apply text variable');
         render();
         setStatus('Data variable applied to the selected text layer');
@@ -14341,7 +14523,25 @@ export default function Home() {
                   </>
                 )}
                 <label>
-                  Warp
+                  Warp style
+                  <select
+                    aria-label="Text warp style"
+                    value={textWarpStyle}
+                    onChange={(event) =>
+                      setTextWarpStyle(event.target.value as TextWarpStyle)
+                    }
+                  >
+                    <option value="none">None</option>
+                    <option value="arc">Arc</option>
+                    <option value="arch">Arch</option>
+                    <option value="flag">Flag</option>
+                    <option value="wave">Wave</option>
+                    <option value="bulge">Bulge</option>
+                    <option value="fish">Fish</option>
+                  </select>
+                </label>
+                <label>
+                  Warp bend
                   <input
                     aria-label="Text warp"
                     type="number"
@@ -14351,6 +14551,79 @@ export default function Home() {
                     onChange={(event) => setTextWarp(+event.target.value || 0)}
                   />
                 </label>
+                <label>
+                  Path placement
+                  <select
+                    aria-label="Text path placement"
+                    value={textPathMode}
+                    onChange={(event) => {
+                      const mode = event.target.value as typeof textPathMode;
+                      setTextPathMode(mode);
+                      if (mode !== 'none' && !textPathId && paths[0])
+                        setTextPathId(paths[0].id);
+                    }}
+                  >
+                    <option value="none">No path</option>
+                    <option value="along" disabled={!paths.length}>
+                      Along saved path
+                    </option>
+                    <option value="inside" disabled={!paths.length}>
+                      Inside saved path
+                    </option>
+                  </select>
+                </label>
+                {textPathMode !== 'none' && (
+                  <label>
+                    Saved path
+                    <select
+                      aria-label="Text path"
+                      value={textPathId}
+                      onChange={(event) => setTextPathId(event.target.value)}
+                    >
+                      {paths.map((path) => (
+                        <option key={path.id} value={path.id}>
+                          {path.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {textParagraph && (
+                  <>
+                    <label>
+                      Auto fit
+                      <select
+                        aria-label="Text auto fit"
+                        value={textFit}
+                        onChange={(event) =>
+                          setTextFit(event.target.value as typeof textFit)
+                        }
+                      >
+                        <option value="none">Off</option>
+                        <option value="shrink">Shrink to fit</option>
+                        <option value="fill">Fill box</option>
+                      </select>
+                    </label>
+                    <label>
+                      Text box height
+                      <input
+                        aria-label="Text box height"
+                        type="number"
+                        min="20"
+                        max={doc.h}
+                        value={textBoxHeight}
+                        onChange={(event) =>
+                          setTextBoxHeight(
+                            Math.max(
+                              20,
+                              Math.min(doc.h, +event.target.value || 20),
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  </>
+                )}
                 <label className="inline-check">
                   <input
                     type="checkbox"
@@ -14358,14 +14631,6 @@ export default function Home() {
                     onChange={(event) => setTextKerning(event.target.checked)}
                   />
                   Kerning
-                </label>
-                <label className="inline-check">
-                  <input
-                    type="checkbox"
-                    checked={textOnPath}
-                    onChange={(event) => setTextOnPath(event.target.checked)}
-                  />
-                  Text on path
                 </label>
                 <label className="inline-check">
                   <input
