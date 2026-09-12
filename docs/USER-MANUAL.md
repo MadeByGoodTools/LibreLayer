@@ -89,7 +89,7 @@ Built-in and imported `.cube` LUTs preview live. Histograms, waveform, RGB parad
 
 ## Camera Raw
 
-Supported Bayer and X-Trans camera files open in a live scene-linear developer. Alongside exposure, white balance, highlight recovery, and color controls, **Detail & noise** provides independent luminance noise, color noise, hot-pixel, and row-banding correction. **Optics** can match a local focal-family profile from the embedded lens name or use a manually selected profile, with separate distortion, vignette, chromatic-aberration, purple-fringe, and RAW-sharpening controls. All settings are stored in the editable RAW recipe; the original sensor data remains unchanged.
+Supported Bayer and X-Trans camera files open in a live scene-linear developer. **Decode & color profile** offers Linear, VNG, PPG, AHD, DCB, DHT, and modified-AHD LibRaw interpolation recipes; as-shot, automatic, calibrated daylight, and calibrated tungsten white-balance sources; and camera-matrix or embedded DNG/ICC profile processing. Changing any decode option reprocesses the retained sensor file rather than filtering its preview. Alongside exposure, temperature/tint, highlight recovery, and color controls, **Detail & noise** provides independent luminance noise, color noise, hot-pixel, and row-banding correction. **Optics** can match a local focal-family profile from the embedded lens name or use a manually selected profile, with separate distortion, vignette, chromatic-aberration, purple-fringe, and RAW-sharpening controls. All settings are stored in the editable RAW recipe; the original sensor data remains unchanged.
 
 ## Filters
 

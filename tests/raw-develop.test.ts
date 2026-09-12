@@ -5,6 +5,8 @@ import {
   developRawRgba,
   developRawRgb16,
   isRawDevelopSettings,
+  normalizeRawDecodeSettings,
+  rawDecodeOptions,
   type RawLinearImage,
 } from '../lib/raw-develop.ts';
 
@@ -72,11 +74,42 @@ void test('16-bit RAW development preserves precision beyond 8-bit expansion', (
   assert.ok(samples.some((sample) => sample % 257 !== 0));
 });
 
+void test('RAW demosaic modes map to distinct LibRaw interpolation recipes', () => {
+  assert.equal(rawDecodeOptions({ demosaic: 'linear' }).userQual, 0);
+  assert.equal(rawDecodeOptions({ demosaic: 'ahd' }).userQual, 3);
+  assert.equal(rawDecodeOptions({ demosaic: 'dcb' }).userQual, 4);
+  assert.equal(rawDecodeOptions({ demosaic: 'dcb' }).dcbIterations, 2);
+  assert.equal(rawDecodeOptions({ demosaic: 'dht' }).userQual, 11);
+  assert.equal(rawDecodeOptions({ demosaic: 'modified-ahd' }).userQual, 12);
+});
+
+void test('RAW white balance and embedded profiles produce explicit decode options', () => {
+  assert.equal(rawDecodeOptions({ whiteBalance: 'camera' }).useCameraWb, true);
+  assert.equal(rawDecodeOptions({ whiteBalance: 'auto' }).useAutoWb, true);
+  assert.deepEqual(rawDecodeOptions({ whiteBalance: 'daylight' }).userMul, [
+    2.15, 1, 1.45, 1,
+  ]);
+  assert.equal(
+    rawDecodeOptions({ cameraProfile: 'embedded-dng' }).cameraProfile,
+    'embed',
+  );
+  assert.deepEqual(normalizeRawDecodeSettings({ demosaic: 'invalid' as never }), {
+    demosaic: 'dht',
+    whiteBalance: 'camera',
+    cameraProfile: 'camera-matrix',
+  });
+});
+
 void test('saved Camera Raw recipes require every bounded adjustment', () => {
   assert.equal(isRawDevelopSettings(defaultRawDevelopSettings), true);
   assert.equal(
     isRawDevelopSettings({
       ...defaultRawDevelopSettings,
+      decode: {
+        cameraProfile: 'embedded-dng',
+        whiteBalance: 'daylight',
+        demosaic: 'dcb',
+      },
       noise: {
         hotPixels: 25,
         chroma: 30,
@@ -88,6 +121,16 @@ void test('saved Camera Raw recipes require every bounded adjustment', () => {
   );
   assert.equal(
     isRawDevelopSettings({ ...defaultRawDevelopSettings, exposure: 8 }),
+    false,
+  );
+  assert.equal(
+    isRawDevelopSettings({
+      ...defaultRawDevelopSettings,
+      decode: {
+        ...defaultRawDevelopSettings.decode,
+        demosaic: 'unknown',
+      },
+    }),
     false,
   );
   assert.equal(

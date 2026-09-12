@@ -106,8 +106,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Floating-point combined adjustment processing before display quantization.
 - [ ] True 16-bit integer, half-float, and 32-bit float working documents.
 - [ ] Float render textures and no forced 8-bit intermediate canvas.
-- [ ] Camera/DNG profiles, dual illuminants, and calibrated white balance.
-- [ ] Multiple high-quality Bayer and X-Trans demosaic modes.
+- [x] Camera/DNG color-matrix and embedded-profile paths, dual-illuminant DNG handling through LibRaw, plus as-shot, automatic, daylight, and tungsten white balance sources.
+- [x] Seven selectable LibRaw demosaic recipes, including AHD, DCB, DHT, and modified AHD, verified by reopening real Bayer DNG and Fujifilm X-Trans sensor files.
 - [x] Highlight reconstruction, hot-pixel and banding removal, plus separate browser-local chroma/luma denoise. AI denoise was intentionally removed from scope in favor of a tuned deterministic local engine.
 - [x] Local focal-family lens profiles with metadata matching, distortion, vignette, aberration, defringe, and RAW sharpening.
 - [ ] Scene-referred HDR and supported HDR-display preview.

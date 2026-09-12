@@ -4573,6 +4573,36 @@ button {
   grid-column: 2;
   color: var(--muted-foreground);
 }
+.raw-decode-grid {
+  display: grid;
+  gap: 8px;
+}
+.raw-decode-grid label {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.raw-decode-grid select {
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--input);
+  color: var(--foreground);
+  padding: 4px 7px;
+}
+.raw-decode-grid select:disabled {
+  opacity: 0.62;
+}
+.raw-decode-note {
+  display: block;
+  margin: 9px 0 0 160px;
+  color: var(--muted-foreground);
+  line-height: 1.35;
+}
 .raw-source-info {
   margin: 0;
   color: var(--muted-foreground);
@@ -4582,6 +4612,13 @@ button {
 @media (max-width: 720px) {
   .raw-develop-controls {
     grid-template-columns: 1fr;
+  }
+  .raw-decode-grid label {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .raw-decode-note {
+    margin-left: 0;
   }
 }
 .select-mask-dialog > .inline-check {

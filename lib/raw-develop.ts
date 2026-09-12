@@ -7,6 +7,92 @@ export type RawLinearImage = {
   lens: string;
 };
 
+export type RawDemosaicMode =
+  | 'linear'
+  | 'vng'
+  | 'ppg'
+  | 'ahd'
+  | 'dcb'
+  | 'dht'
+  | 'modified-ahd';
+export type RawWhiteBalanceMode = 'camera' | 'auto' | 'daylight' | 'tungsten';
+export type RawCameraProfileMode = 'camera-matrix' | 'embedded-dng';
+export type RawDecodeSettings = {
+  demosaic: RawDemosaicMode;
+  whiteBalance: RawWhiteBalanceMode;
+  cameraProfile: RawCameraProfileMode;
+};
+
+export const rawDemosaicModes: ReadonlyArray<{
+  id: RawDemosaicMode;
+  name: string;
+}> = [
+  { id: 'linear', name: 'Linear · fastest' },
+  { id: 'vng', name: 'VNG · smooth' },
+  { id: 'ppg', name: 'PPG · balanced' },
+  { id: 'ahd', name: 'AHD · detailed' },
+  { id: 'dcb', name: 'DCB · high detail' },
+  { id: 'dht', name: 'DHT · fine texture' },
+  { id: 'modified-ahd', name: 'Modified AHD · artifact control' },
+];
+
+export const defaultRawDecodeSettings = (): RawDecodeSettings => ({
+  demosaic: 'dht',
+  whiteBalance: 'camera',
+  cameraProfile: 'camera-matrix',
+});
+
+export const normalizeRawDecodeSettings = (
+  value?: Partial<RawDecodeSettings>,
+): RawDecodeSettings => {
+  const defaults = defaultRawDecodeSettings();
+  return {
+    demosaic: rawDemosaicModes.some((mode) => mode.id === value?.demosaic)
+      ? value!.demosaic!
+      : defaults.demosaic,
+    whiteBalance: ['camera', 'auto', 'daylight', 'tungsten'].includes(
+      value?.whiteBalance ?? '',
+    )
+      ? value!.whiteBalance!
+      : defaults.whiteBalance,
+    cameraProfile: ['camera-matrix', 'embedded-dng'].includes(
+      value?.cameraProfile ?? '',
+    )
+      ? value!.cameraProfile!
+      : defaults.cameraProfile,
+  };
+};
+
+export const rawDecodeOptions = (value?: Partial<RawDecodeSettings>) => {
+  const settings = normalizeRawDecodeSettings(value);
+  const qualities: Record<RawDemosaicMode, number> = {
+    linear: 0,
+    vng: 1,
+    ppg: 2,
+    ahd: 3,
+    dcb: 4,
+    dht: 11,
+    'modified-ahd': 12,
+  };
+  const daylight = settings.whiteBalance === 'daylight';
+  const tungsten = settings.whiteBalance === 'tungsten';
+  return {
+    useCameraWb: settings.whiteBalance === 'camera',
+    useAutoWb: settings.whiteBalance === 'auto',
+    userMul: daylight
+      ? ([2.15, 1, 1.45, 1] as [number, number, number, number])
+      : tungsten
+        ? ([1.35, 1, 2.55, 1] as [number, number, number, number])
+        : null,
+    useCameraMatrix: 3,
+    cameraProfile:
+      settings.cameraProfile === 'embedded-dng' ? 'embed' : null,
+    userQual: qualities[settings.demosaic],
+    dcbIterations: settings.demosaic === 'dcb' ? 2 : -1,
+    dcbEnhanceFl: settings.demosaic === 'dcb',
+  };
+};
+
 export type RawDevelopSettings = {
   exposure: number;
   contrast: number;
@@ -19,6 +105,7 @@ export type RawDevelopSettings = {
   vibrance: number;
   saturation: number;
   highlightRecovery: number;
+  decode?: RawDecodeSettings;
   noise?: RawNoiseCorrection;
   lensCorrection?: RawLensCorrection;
 };
@@ -41,6 +128,7 @@ export const defaultRawDevelopSettings: RawDevelopSettings = {
   vibrance: 0,
   saturation: 0,
   highlightRecovery: 35,
+  decode: defaultRawDecodeSettings(),
   noise: defaultRawNoiseCorrection(),
   lensCorrection: defaultRawLensCorrection(),
 };
@@ -70,6 +158,19 @@ export function isRawDevelopSettings(
       Number(settings[key]) <= maximum,
   );
   if (!coreValid) return false;
+  if (settings.decode !== undefined) {
+    if (!settings.decode || typeof settings.decode !== 'object') return false;
+    const decode = settings.decode as Record<string, unknown>;
+    const normalized = normalizeRawDecodeSettings(
+      settings.decode as Partial<RawDecodeSettings>,
+    );
+    if (
+      !Object.entries(normalized).every(
+        ([key, expected]) => decode[key] === expected,
+      )
+    )
+      return false;
+  }
   if (settings.noise !== undefined) {
     if (!settings.noise || typeof settings.noise !== 'object') return false;
     const noise = settings.noise as Record<string, unknown>;
@@ -158,16 +259,17 @@ function encodeProPhotoPixel(
   );
 }
 
-export async function decodeCameraRaw(file: Blob): Promise<RawLinearImage> {
+export async function decodeCameraRaw(
+  file: Blob,
+  decodeSettings?: Partial<RawDecodeSettings>,
+): Promise<RawLinearImage> {
   const { default: LibRaw } = await import('libraw-wasm');
   const decoder = new LibRaw();
   try {
     await decoder.open(new Uint8Array(await file.arrayBuffer()), {
-      useCameraWb: true,
-      useCameraMatrix: 3,
+      ...rawDecodeOptions(decodeSettings),
       outputBps: 16,
       outputColor: 4,
-      userQual: 11,
       highlight: 5,
       greenMatching: true,
       fbddNoiserd: 1,

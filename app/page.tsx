@@ -339,9 +339,12 @@ import {
 } from '@/lib/history-policy';
 import {
   decodeCameraRaw,
+  defaultRawDecodeSettings,
   defaultRawDevelopSettings,
   developRawRgba,
   isRawDevelopSettings,
+  rawDemosaicModes,
+  type RawDecodeSettings,
   type RawDevelopSettings,
   type RawLinearImage,
 } from '@/lib/raw-develop';
@@ -2490,6 +2493,7 @@ export default function Home() {
     [rawSettings, setRawSettings] = useState<RawDevelopSettings>(
       defaultRawDevelopSettings,
     ),
+    [rawDecodeBusy, setRawDecodeBusy] = useState(false),
     [rawPreview, setRawPreview] = useState(''),
     [refineRadius, setRefineRadius] = useState(2),
     [refineSmooth, setRefineSmooth] = useState(2),
@@ -2498,6 +2502,7 @@ export default function Home() {
     [decontaminate, setDecontaminate] = useState(true),
     [decontaminateAmount, setDecontaminateAmount] = useState(50),
     [semanticSensitivity, setSemanticSensitivity] = useState(55);
+  const rawDecodeRevision = useRef(0);
   useEffect(() => {
     if (!rawDevelop) {
       setRawPreview('');
@@ -7673,7 +7678,7 @@ export default function Home() {
       throw Error(
         'The original RAW source is not stored on this computer. The embedded preview is still available.',
       );
-    const image = await decodeCameraRaw(file);
+    const image = await decodeCameraRaw(file, raw.settings.decode);
     if (image.width !== raw.width || image.height !== raw.height)
       throw Error(
         'The stored RAW source dimensions no longer match this Smart Object.',
@@ -11544,7 +11549,10 @@ export default function Home() {
     setStatus('Developing the camera sensor data…');
     try {
       checkFileSize(file.size);
-      const image = await decodeCameraRaw(file);
+      const image = await decodeCameraRaw(
+        file,
+        defaultRawDevelopSettings.decode,
+      );
       requireRoom(image.width, image.height, image.width * image.height);
       setRawSettings({ ...defaultRawDevelopSettings });
       setRawDevelop({
@@ -11564,6 +11572,54 @@ export default function Home() {
       setPsdBusy(false);
       if (fileRef.current) fileRef.current.value = '';
     }
+  };
+  const redecodeRaw = async (
+    decode: RawDecodeSettings,
+    replacement?: RawDevelopSettings,
+  ) => {
+    if (!rawDevelop || rawDecodeBusy) return;
+    const revision = ++rawDecodeRevision.current;
+    setRawDecodeBusy(true);
+    setStatus('Reprocessing the retained RAW sensor data…');
+    try {
+      const file =
+        rawDevelop.sourceFile ??
+        (rawDevelop.assetId ? await loadRawAsset(rawDevelop.assetId) : null);
+      if (!file)
+        throw Error(
+          'The original RAW file is required to change demosaic, white balance, or camera profile.',
+        );
+      const image = await decodeCameraRaw(file, decode);
+      if (revision !== rawDecodeRevision.current) return;
+      setRawSettings((current) => replacement ?? { ...current, decode });
+      setRawDevelop((current) =>
+        current ? { ...current, image, sourceFile: file } : null,
+      );
+      setStatus('RAW decode recipe updated with a fresh live preview');
+    } catch (error) {
+      if (revision !== rawDecodeRevision.current) return;
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'The RAW sensor data could not be reprocessed.',
+      );
+    } finally {
+      if (revision === rawDecodeRevision.current) setRawDecodeBusy(false);
+    }
+  };
+  const resetRawDevelop = () => {
+    const next = {
+      ...defaultRawDevelopSettings,
+      decode: defaultRawDecodeSettings(),
+    };
+    if (
+      JSON.stringify(rawSettings.decode ?? defaultRawDecodeSettings()) !==
+      JSON.stringify(next.decode)
+    ) {
+      void redecodeRaw(next.decode, next);
+      return;
+    }
+    setRawSettings(next);
   };
   const applyRawDevelop = async () => {
     if (!rawDevelop) return;
@@ -19933,6 +19989,87 @@ export default function Home() {
             ))}
           </div>
           <details className="raw-advanced-controls" open>
+            <summary>Decode &amp; color profile</summary>
+            <div className="raw-decode-grid">
+              <label>
+                <span>Demosaic</span>
+                <select
+                  aria-label="RAW demosaic quality"
+                  disabled={rawDecodeBusy}
+                  value={
+                    rawSettings.decode?.demosaic ??
+                    defaultRawDecodeSettings().demosaic
+                  }
+                  onChange={(event) =>
+                    void redecodeRaw({
+                      ...defaultRawDecodeSettings(),
+                      ...rawSettings.decode,
+                      demosaic: event.target
+                        .value as RawDecodeSettings['demosaic'],
+                    })
+                  }
+                >
+                  {rawDemosaicModes.map((mode) => (
+                    <option key={mode.id} value={mode.id}>
+                      {mode.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>White balance source</span>
+                <select
+                  aria-label="RAW white balance source"
+                  disabled={rawDecodeBusy}
+                  value={
+                    rawSettings.decode?.whiteBalance ??
+                    defaultRawDecodeSettings().whiteBalance
+                  }
+                  onChange={(event) =>
+                    void redecodeRaw({
+                      ...defaultRawDecodeSettings(),
+                      ...rawSettings.decode,
+                      whiteBalance: event.target
+                        .value as RawDecodeSettings['whiteBalance'],
+                    })
+                  }
+                >
+                  <option value="camera">As shot · camera metadata</option>
+                  <option value="auto">Auto · full image</option>
+                  <option value="daylight">Calibrated daylight</option>
+                  <option value="tungsten">Calibrated tungsten</option>
+                </select>
+              </label>
+              <label>
+                <span>Camera profile</span>
+                <select
+                  aria-label="RAW camera profile"
+                  disabled={rawDecodeBusy}
+                  value={
+                    rawSettings.decode?.cameraProfile ??
+                    defaultRawDecodeSettings().cameraProfile
+                  }
+                  onChange={(event) =>
+                    void redecodeRaw({
+                      ...defaultRawDecodeSettings(),
+                      ...rawSettings.decode,
+                      cameraProfile: event.target
+                        .value as RawDecodeSettings['cameraProfile'],
+                    })
+                  }
+                >
+                  <option value="camera-matrix">Camera color matrix</option>
+                  <option value="embedded-dng">Embedded DNG/ICC profile</option>
+                </select>
+              </label>
+            </div>
+            <small className="raw-decode-note">
+              {rawDecodeBusy
+                ? 'Reprocessing the original sensor file…'
+                : 'Decode changes reprocess the retained RAW file and remain editable in the Smart Object.'}
+            </small>
+          </details>
+          <details className="raw-advanced-controls" open>
             <summary>Detail &amp; noise</summary>
             <div className="raw-develop-controls">
               {(
@@ -20048,11 +20185,15 @@ export default function Home() {
           <div className="dialog-actions">
             <Button
               variant="outline"
-              onClick={() => setRawSettings({ ...defaultRawDevelopSettings })}
+              disabled={rawDecodeBusy}
+              onClick={resetRawDevelop}
             >
               Reset
             </Button>
-            <Button onClick={() => void applyRawDevelop()}>
+            <Button
+              disabled={rawDecodeBusy}
+              onClick={() => void applyRawDevelop()}
+            >
               {rawDevelop?.targetLayerId
                 ? 'Update Smart Object'
                 : 'Open as RAW Smart Object'}
