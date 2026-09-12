@@ -25,6 +25,7 @@ export type EmbeddedDocumentEnvelope = {
   width: number;
   height: number;
   workingDepth?: WorkingDepth;
+  sceneReferred?: boolean;
   layers: EmbeddedLayerRecord[];
   surfaces: EmbeddedSurfaceRecord[];
   selectedId: string;
@@ -61,6 +62,13 @@ export const validateEmbeddedDocument = (
     typeof data.selectedId !== 'string'
   )
     throw Error('Invalid embedded Smart Object document');
+  if (
+    data.sceneReferred !== undefined &&
+    typeof data.sceneReferred !== 'boolean'
+  )
+    throw Error('Invalid embedded Smart Object color encoding');
+  if (data.sceneReferred === true && workingDepth === '8u')
+    throw Error('Scene-referred embedded content requires high-depth pixels');
 
   const ids = new Set<string>();
   for (const layer of data.layers) {

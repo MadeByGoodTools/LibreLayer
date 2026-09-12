@@ -2,10 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   blendChannel,
+  compositePixel,
   blendRgb,
   blendRgbInSpace,
   pixelBlendModes,
 } from '../lib/layer-compositing.ts';
+
+void test('normal float compositing preserves scene values above display white', () => {
+  const result = compositePixel(
+    [0.25, 0.5, 0.75, 1],
+    [2.5, 1.5, 0.5, 0.5],
+    'source-over',
+  );
+  assert.deepEqual(result, [1.375, 1, 0.625, 1]);
+});
 
 void test('separable blend modes match their reference equations', () => {
   const close = (actual: number, expected: number) =>

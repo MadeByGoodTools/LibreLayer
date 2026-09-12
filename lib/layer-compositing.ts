@@ -206,10 +206,19 @@ export function compositePixel(
   const sourceAlpha = clamp(source[3]),
     backdropAlpha = clamp(backdrop[3]),
     alpha = sourceAlpha + backdropAlpha * (1 - sourceAlpha),
+    preserveExtended = mode === 'source-over' && blendSpace === 'gamma',
     convertIn = (value: number) =>
-      blendSpace === 'linear' ? srgbToLinear(clamp(value)) : clamp(value),
+      preserveExtended
+        ? value
+        : blendSpace === 'linear'
+          ? srgbToLinear(clamp(value))
+          : clamp(value),
     convertOut = (value: number) =>
-      blendSpace === 'linear' ? linearToSrgb(clamp(value)) : clamp(value),
+      preserveExtended
+        ? value
+        : blendSpace === 'linear'
+          ? linearToSrgb(clamp(value))
+          : clamp(value),
     sourceRgb = source.slice(0, 3).map(convertIn),
     backdropRgb = backdrop.slice(0, 3).map(convertIn),
     blendedRgb = blendRgb(backdropRgb, sourceRgb, mode),
@@ -233,18 +242,87 @@ export function compositePixels(
   mode: string,
   blendIf?: BlendIf,
   blendSpace: BlendSpace = 'gamma',
+  precision: 'u8' | 'f16' = 'u8',
 ) {
   const sourceCtx = source.getContext('2d')!,
     custom = pixelBlendModes.has(mode) || blendSpace === 'linear';
+  const read = (
+    context: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => {
+    if (precision === 'u8') return context.getImageData(x, y, width, height);
+    const image = (
+      context.getImageData as unknown as (
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        settings: { colorSpace: string; pixelFormat: string },
+      ) => ImageData
+    )(x, y, width, height, {
+      colorSpace: 'srgb',
+      pixelFormat: 'rgba-float16',
+    });
+    return {
+      data: Float32Array.from(image.data as unknown as ArrayLike<number>),
+      width,
+      height,
+    };
+  };
+  const write = (
+    context: CanvasRenderingContext2D,
+    image: {
+      data: Uint8ClampedArray | Float32Array;
+      width: number;
+      height: number;
+    },
+    x: number,
+    y: number,
+  ) => {
+    if (image.data instanceof Uint8ClampedArray) {
+      context.putImageData(
+        new ImageData(
+          Uint8ClampedArray.from(image.data),
+          image.width,
+          image.height,
+        ),
+        x,
+        y,
+      );
+      return;
+    }
+    const FloatImageData = ImageData as unknown as {
+      new (
+        data: Float16Array,
+        width: number,
+        height: number,
+        settings: { colorSpace: string; pixelFormat: string },
+      ): ImageData;
+    };
+    context.putImageData(
+      new FloatImageData(
+        new Float16Array(image.data),
+        image.width,
+        image.height,
+        { colorSpace: 'srgb', pixelFormat: 'rgba-float16' },
+      ),
+      x,
+      y,
+    );
+  };
   for (let y = 0; y < source.height; y += 256)
     for (let x = 0; x < source.width; x += 256) {
       const w = Math.min(256, source.width - x),
         h = Math.min(256, source.height - y),
-        s = sourceCtx.getImageData(x, y, w, h),
-        b = target.getImageData(x, y, w, h);
+        s = read(sourceCtx, x, y, w, h),
+        b = read(target, x, y, w, h),
+        maximum = precision === 'f16' ? 1 : 255;
       for (let i = 0; i < s.data.length; i += 4) {
-        let sa = s.data[i + 3] / 255;
-        const ba = b.data[i + 3] / 255;
+        let sa = s.data[i + 3] / maximum;
+        const ba = b.data[i + 3] / maximum;
         if (blendIf) {
           const channel = blendIf.channel ?? 'gray',
             index =
@@ -257,20 +335,22 @@ export function compositePixels(
                     : -1,
             sl =
               index < 0
-                ? 0.299 * s.data[i] +
-                  0.587 * s.data[i + 1] +
-                  0.114 * s.data[i + 2]
-                : s.data[i + index],
+                ? (0.299 * s.data[i] +
+                    0.587 * s.data[i + 1] +
+                    0.114 * s.data[i + 2]) *
+                  (255 / maximum)
+                : s.data[i + index] * (255 / maximum),
             bl =
               index < 0
-                ? 0.299 * b.data[i] +
-                  0.587 * b.data[i + 1] +
-                  0.114 * b.data[i + 2]
-                : b.data[i + index];
+                ? (0.299 * b.data[i] +
+                    0.587 * b.data[i + 1] +
+                    0.114 * b.data[i + 2]) *
+                  (255 / maximum)
+                : b.data[i + index] * (255 / maximum);
           sa *=
             rangeAlpha(sl, blendIf.source) *
             (ba === 0 ? 1 : rangeAlpha(bl, blendIf.backdrop));
-          s.data[i + 3] = Math.round(sa * 255);
+          s.data[i + 3] = sa * maximum;
         }
         if (!custom) continue;
         if (mode === 'dissolve') {
@@ -281,16 +361,26 @@ export function compositePixels(
           sa = (seed >>> 0) / 4294967296 < sa ? 1 : 0;
         }
         const result = compositePixel(
-          [b.data[i] / 255, b.data[i + 1] / 255, b.data[i + 2] / 255, ba],
-          [s.data[i] / 255, s.data[i + 1] / 255, s.data[i + 2] / 255, sa],
+          [
+            b.data[i] / maximum,
+            b.data[i + 1] / maximum,
+            b.data[i + 2] / maximum,
+            ba,
+          ],
+          [
+            s.data[i] / maximum,
+            s.data[i + 1] / maximum,
+            s.data[i + 2] / maximum,
+            sa,
+          ],
           mode,
           blendSpace,
         );
-        for (let c = 0; c < 3; c++) b.data[i + c] = result[c] * 255;
-        b.data[i + 3] = result[3] * 255;
+        for (let c = 0; c < 3; c++) b.data[i + c] = result[c] * maximum;
+        b.data[i + 3] = result[3] * maximum;
       }
-      if (custom) target.putImageData(b, x, y);
-      else sourceCtx.putImageData(s, x, y);
+      if (custom) write(target, b, x, y);
+      else write(sourceCtx, s, x, y);
     }
   if (!custom) {
     target.save();

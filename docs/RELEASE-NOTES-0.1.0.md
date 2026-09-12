@@ -20,6 +20,7 @@ LibreLayer 0.1.0 is the first open release candidate of the browser-local layere
 - An explicit-trust local scripting console with a disposable two-second-watchdog worker, registered-command-only output, seeded deterministic traces, integrity-checked replay, portable script/trace files, and the same validator/compiler in an optional repository CLI.
 - A measured Print Studio with persistent paper and layout preferences, custom sizing and placement, bleed and production marks, open-document contact sheets, proof metadata, PNG proof export, and browser print handoff.
 - Native 8-bit integer, 16-bit integer, 16-bit half-float, and 32-bit float RGB working documents with an explicit per-layer high-depth backing store, transactional depth conversion, undo/redo, recovery, copied-layer and embedded-Smart-Object retention, native-project round-trip, and direct high-depth image/canvas resizing.
+- Float16 intermediate rendering across the complete layer/group/mask/adjustment/Smart Object/Smart Filter/effect compositor on supported browsers, including precision-preserving Copy/Paste, Copy Merged, Merge Down, Merge Visible, Flatten, History layer restore, and final-only scene-to-display conversion.
 - Scene-linear Float32 HDR Merge with unclipped high-depth document storage, Float16 extended-range preview on compatible HDR displays, a deterministic SDR fallback, and a highlight clipping map.
 - PSD/PSB, image, TIFF, PDF, RAW, editable project, encrypted project, and web-export workflows with format-specific limitations documented in the format matrix.
 - Device-local autosave, recovery, preferences, remembered save handles where the browser permits them, configurable history compaction, and large-document reporting.
@@ -32,7 +33,7 @@ Documents and AI-assisted editing stay on the device. The application does not r
 
 - Deterministic core editing tests, TypeScript validation, lint, and production builds are required for every release candidate.
 - Browser smoke testing covers project creation, editing, undo/redo, save/recovery, settings persistence, and representative advanced workspaces.
-- The current dependency audit has no available-fix findings except two `image-size` denial-of-service advisories inherited from `vinext`; the audit names `2.0.3` as patched, but the registry currently publishes only `2.0.2`. LibreLayer does not directly invoke that package. This remains an upstream release blocker to monitor rather than a resolved finding.
+- The two `image-size@2.0.2` denial-of-service paths inherited from `vinext` are removed from the installed graph. LibreLayer pins the API-compatible `image-size-next@2.1.1` security fork, whose ICNS, JPEG XL, and HEIF guards are covered by local malformed-container regression tests. The production dependency audit reports zero known vulnerabilities.
 - Independent professional-editor beta and release-candidate signoff remains outstanding.
 
 ## Known limitations
@@ -40,7 +41,7 @@ Documents and AI-assisted editing stay on the device. The application does not r
 - Some advanced Photoshop workflows remain open in `LIBRELAYER-10-ROADMAP.md`; a checked item means the complete behavior has been implemented and verified, not simply displayed.
 - PSD/PSB round trips can preserve more data than the browser can edit, but unsupported constructs are reported rather than silently promised as editable.
 - Browser memory, GPU, file-system APIs, and color-management behavior vary by platform. Very large documents should be tested on the intended production device.
-- The browser canvas remains the display proxy. Filters and exchange formats documented as display-rendered can quantize changed output; the native project remains the authoritative high-depth master while the float-render-texture roadmap item is still open.
+- The browser canvas remains the display proxy. Browsers without Float16 Canvas support use an explicit 8-bit render fallback, and filters or exchange formats documented as display-rendered can quantize changed output. The native project remains the authoritative high-depth master.
 - Production JavaScript chunks still exceed the preferred 500 kB warning threshold and require continued lazy-loading work.
 
 See the user manual, format matrix, privacy model, migration policy, and roadmap for detailed behavior.

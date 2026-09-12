@@ -172,3 +172,54 @@ export function applyColorGradeToPixels(
   }
   return pixels;
 }
+
+/** Apply the legacy channel-grade recipe without quantizing a float render surface. */
+export function applyColorGradeToFloat32(
+  pixels: Float32Array,
+  value?: Partial<ColorGrade>,
+) {
+  if (colorGradeIsNeutral(value)) return pixels;
+  const grade = resolveColorGrade(value);
+  const channelNames = ['red', 'green', 'blue'] as const;
+  for (let index = 0; index < pixels.length; index += 4) {
+    let red = pixels[index];
+    let green = pixels[index + 1];
+    let blue = pixels[index + 2];
+
+    const temperature = grade.temperature / 100;
+    const tint = grade.tint / 100;
+    red += temperature * 0.14 + tint * 0.07;
+    green -= tint * 0.12;
+    blue -= temperature * 0.14 + tint * 0.07;
+
+    const maximum = Math.max(red, green, blue);
+    const minimum = Math.min(red, green, blue);
+    const saturation = maximum - minimum;
+    const average = (red + green + blue) / 3;
+    const vibrance = (grade.vibrance / 100) * (1 - clamp(saturation, 0, 1));
+    red = average + (red - average) * (1 + vibrance);
+    green = average + (green - average) * (1 + vibrance);
+    blue = average + (blue - average) * (1 + vibrance);
+
+    const luma = clamp(red * 0.2126 + green * 0.7152 + blue * 0.0722, 0, 1);
+    const weights = {
+      shadows: (1 - luma) ** 2,
+      midtones: 1 - Math.abs(luma * 2 - 1),
+      highlights: luma ** 2,
+    };
+    const channels = [red, green, blue];
+    for (let channel = 0; channel < 3; channel++)
+      for (const range of ['shadows', 'midtones', 'highlights'] as const)
+        channels[channel] +=
+          (grade[range][channelNames[channel]] / 100) * weights[range] * 0.3;
+
+    for (let channel = 0; channel < 3; channel++) {
+      const composite = levelValue(channels[channel] * 255, grade.levels.rgb);
+      pixels[index + channel] =
+        levelValue(composite, grade.levels[channelNames[channel]]) / 255;
+    }
+    pixels[index + 3] =
+      levelValue(pixels[index + 3] * 255, grade.levels.alpha) / 255;
+  }
+  return pixels;
+}

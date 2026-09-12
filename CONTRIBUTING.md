@@ -37,7 +37,10 @@ pnpm exec tsc --noEmit
 pnpm lint
 pnpm test:core
 pnpm build
+pnpm test:release
 ```
+
+Run `pnpm test:release` before requesting release-candidate review. It is the same full gate used on pull requests and pushes to `main`.
 
 For pixel-output changes, add stable fixtures that cover transparent and partial-alpha pixels as well as edge cases specific to the operation. Avoid timing-sensitive snapshots and environment-dependent output.
 

@@ -15,6 +15,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Per-channel curves, levels, color balance, HSL, color grading, and blend modes
 - PSD and PSB import, common image formats, editable LibreLayer projects, and web export
 - Native 8-bit integer, 16-bit integer, 16-bit half-float, and 32-bit float working documents with high-depth layer backing, depth conversion, undo/redo, recovery, and project round-trip
+- Float16 layer, group, mask, adjustment, Smart Object, Smart Filter, blend, transform, and effect compositing on supported browsers, with final-only HDR/display conversion and precision-preserving Copy/Paste, Merge, and Flatten operations
 - Layered 8/16/32-bit RGB PSD/PSB import with explicit display-working conversion for high-depth sources
 - Color-managed TIFF export with embedded sRGB, Display P3, Adobe RGB, or ProPhoto RGB profiles and print-resolution metadata
 - Bayer and X-Trans camera RAW development from sensor data with seven selectable demosaic recipes, camera/embedded-DNG profile paths, selectable white-balance sources, live wide-gamut controls, separate luma/chroma denoise, hot-pixel and banding repair, metadata-matched local optics profiles, re-editable RAW Smart Objects, device-local source recovery, and genuine 16-bit TIFF master export
@@ -111,7 +112,10 @@ Open `http://localhost:5173`.
 pnpm build
 pnpm test:core
 pnpm lint
+pnpm test:release
 ```
+
+`pnpm test:release` runs the complete type, lint, core, large-document performance, visual, production dependency-audit, and build gate used by continuous integration.
 
 ## File compatibility
 

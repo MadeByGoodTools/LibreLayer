@@ -22,4 +22,4 @@ Include the affected version, browser and operating system, reproduction steps, 
 
 ## Dependency policy
 
-Production dependencies are audited before release. Patched versions are applied when available and validated through type, lint, core-test, production-build, and browser smoke-test gates. An upstream advisory without a published patched version is recorded in the release review and must not be represented as resolved.
+Production dependencies are audited before release. Patched versions are applied when available and validated through type, lint, core-test, production-build, and browser smoke-test gates. When an upstream package has no safe published release, any pinned compatible replacement must be integrity-locked, reviewed against the original package, covered by exploit-regression fixtures, and documented in the release review.

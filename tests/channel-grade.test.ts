@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyColorGradeToFloat32,
   applyColorGradeToPixels,
   colorGradeIsNeutral,
   createDefaultColorGrade,
@@ -12,6 +13,22 @@ void test('neutral channel grade leaves pixels unchanged', () => {
   applyColorGradeToPixels(pixels, createDefaultColorGrade());
   assert.deepEqual([...pixels], [24, 96, 180, 220]);
   assert.equal(colorGradeIsNeutral(createDefaultColorGrade()), true);
+});
+
+void test('float channel grade preserves HDR samples without byte quantization', () => {
+  const neutral = new Float32Array([2.25, 0.5013, 0.1257, 0.73]);
+  const untouched = applyColorGradeToFloat32(
+    new Float32Array(neutral),
+    createDefaultColorGrade(),
+  );
+  assert.deepEqual(untouched, neutral);
+
+  const grade = createDefaultColorGrade(),
+    editable = new Float32Array([0.4213, 0.5013, 0.1257, 0.73]);
+  grade.temperature = 7;
+  const adjusted = applyColorGradeToFloat32(editable, grade);
+  assert.notEqual(adjusted[0], Math.round(adjusted[0] * 255) / 255);
+  assert.equal(adjusted[3], editable[3]);
 });
 
 void test('individual levels alter only their selected color channel', () => {

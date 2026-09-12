@@ -46,6 +46,47 @@ export function sharpenRgba(
   return output;
 }
 
+/** Float-preserving counterpart used by 16/32-bit render surfaces. */
+export function sharpenFloatRgba(
+  source: Float32Array,
+  width: number,
+  height: number,
+  amount: number,
+  threshold = 2 / 255,
+) {
+  if (source.length !== width * height * 4)
+    throw new Error('Sharpen input dimensions do not match its pixel data.');
+  const output = new Float32Array(source);
+  const strength = Math.max(0, Math.min(100, amount)) / 100;
+  if (!strength || width < 2 || height < 2) return output;
+
+  for (let y = 0; y < height; y++) {
+    const up = Math.max(0, y - 1);
+    const down = Math.min(height - 1, y + 1);
+    for (let x = 0; x < width; x++) {
+      const left = Math.max(0, x - 1);
+      const right = Math.min(width - 1, x + 1);
+      const center = (y * width + x) * 4;
+      const neighbors = [
+        (up * width + x) * 4,
+        (down * width + x) * 4,
+        (y * width + left) * 4,
+        (y * width + right) * 4,
+      ];
+      for (let channel = 0; channel < 3; channel++) {
+        const average =
+          neighbors.reduce((sum, index) => sum + source[index + channel], 0) /
+          neighbors.length;
+        const difference = source[center + channel] - average;
+        if (Math.abs(difference) >= threshold)
+          output[center + channel] =
+            source[center + channel] + difference * strength * 1.8;
+      }
+    }
+  }
+  return output;
+}
+
 /** Process large canvases in haloed tiles to keep temporary memory bounded. */
 export function sharpenCanvasTiled(
   source: HTMLCanvasElement,

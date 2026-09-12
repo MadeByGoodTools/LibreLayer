@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sharpenRgba } from '../lib/smart-filter-engine.ts';
+import { sharpenFloatRgba, sharpenRgba } from '../lib/smart-filter-engine.ts';
 
 void test('Smart Sharpen leaves a flat field and alpha channel unchanged', () => {
   const input = new Uint8ClampedArray(3 * 3 * 4);
@@ -30,4 +30,18 @@ void test('zero-amount Smart Sharpen is an exact no-op copy', () => {
   const output = sharpenRgba(input, 2, 1, 0);
   assert.deepEqual(output, input);
   assert.notEqual(output, input);
+});
+
+void test('float Smart Sharpen retains extended-range detail and alpha', () => {
+  const input = new Float32Array(3 * 3 * 4);
+  for (let index = 0; index < input.length; index += 4) {
+    input[index] = input[index + 1] = input[index + 2] = 1.25;
+    input[index + 3] = 0.73;
+  }
+  const center = (1 * 3 + 1) * 4;
+  input[center] = input[center + 1] = input[center + 2] = 2;
+  const output = sharpenFloatRgba(input, 3, 3, 50);
+  assert.ok(output[center] > 2);
+  assert.ok(output[(1 * 3 + 0) * 4] < 1.25);
+  assert.ok(Math.abs(output[center + 3] - 0.73) < 1e-6);
 });

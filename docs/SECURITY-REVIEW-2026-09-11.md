@@ -13,9 +13,9 @@ This review covers the LibreLayer 0.1.0 release-candidate source tree, productio
 - Confirmed local-only project persistence and explicit user-mediated file access in the documented storage model.
 - Required TypeScript, lint, deterministic core tests, production build, and a browser smoke test after dependency changes.
 
-## Open upstream finding
+## Image parser remediation
 
-`pnpm audit --prod` reports two high-severity denial-of-service advisories for `image-size@2.0.2`, inherited through `vinext`. Both advisories identify `2.0.3` as the patched release, but `2.0.3` is not available from the npm registry at the time of review. LibreLayer does not directly call `image-size`; exposure is limited to framework-controlled asset inspection. The dependency must be upgraded as soon as a compatible patched release is published, and untrusted server-side image inspection must not be added while this finding remains.
+The published `image-size@2.0.2` dependency inherited through `vinext` contains zero-length ICNS and zero-size JPEG XL/HEIF parser denial-of-service paths, and no fixed release exists under that package name. The workspace therefore removes that transitive edge and pins `image-size` to the API-compatible `image-size-next@2.1.1` security fork. The lockfile records the registry integrity hash, pnpm's supply-chain policy check passes, and local regression fixtures verify that all three malformed containers terminate while normal PNG metadata remains compatible. `pnpm audit --prod` now reports zero known vulnerabilities.
 
 ## Threat boundaries and residual risk
 
@@ -27,4 +27,4 @@ This review covers the LibreLayer 0.1.0 release-candidate source tree, productio
 
 ## Release disposition
 
-The directly actionable dependency findings are remediated and validated. The unpublished upstream `image-size` fix prevents declaring a zero-finding dependency audit. This candidate may be evaluated locally, but final release signoff requires the remaining upstream fix or a framework update that removes the vulnerable path, plus independent beta review.
+The directly actionable dependency findings are remediated and validated, including the inherited image-parser paths. Automated technical gates can now produce a release candidate with a zero-finding production dependency audit. Independent beta review and release-candidate signoff remain required before representing the build as professionally certified.

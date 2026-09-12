@@ -154,6 +154,7 @@ import {
   unpackProject,
 } from '@/lib/project-format';
 import {
+  applyColorGradeToFloat32,
   applyColorGradeToPixels,
   colorGradeIsNeutral,
   createDefaultColorGrade,
@@ -301,7 +302,10 @@ import {
   createPsdCompatibilityReport,
   type PsdCompatibilityReport,
 } from '@/lib/psd-compatibility';
-import { sharpenCanvasTiled } from '@/lib/smart-filter-engine';
+import {
+  sharpenCanvasTiled,
+  sharpenFloatRgba,
+} from '@/lib/smart-filter-engine';
 import {
   interpolateStrokeDabs,
   symmetryStrokePoints,
@@ -733,6 +737,7 @@ type Snapshot = {
   w: number;
   h: number;
   workingDepth?: WorkingDepth;
+  sceneReferred?: boolean;
   layers: LayerMeta[];
   surfaces: HistorySurface[];
   selectedId: string;
@@ -754,6 +759,7 @@ type EditorDocument = {
   saved: boolean;
   doc: { w: number; h: number };
   workingDepth?: WorkingDepth;
+  sceneReferred?: boolean;
   layers: LayerMeta[];
   surfaces: Map<string, LayerSurface>;
   selectedId: string;
@@ -916,111 +922,123 @@ const blendLabels: Record<BlendMode, string> = {
   color: 'Color',
   luminosity: 'Luminosity',
 };
-const makeCanvas = (w: number, h: number) => {
+type RenderPrecision = 'u8' | 'f16';
+
+const canvasContext = (
+  canvas: HTMLCanvasElement,
+  precision: RenderPrecision = 'u8',
+  willReadFrequently = false,
+) =>
+  canvas.getContext(
+    '2d',
+    precision === 'f16'
+      ? ({
+          colorSpace: 'srgb',
+          colorType: 'float16',
+          willReadFrequently,
+        } as CanvasRenderingContext2DSettings)
+      : { willReadFrequently },
+  ) as CanvasRenderingContext2D | null;
+
+const makeCanvas = (
+  w: number,
+  h: number,
+  precision: RenderPrecision = 'u8',
+) => {
   checkDimensions(w, h);
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
+  if (precision === 'f16') canvasContext(c, precision);
   return c;
 };
 
-const directHdrLayer = (
-  stack: LayerMeta[],
-  surfaces: Map<string, LayerSurface>,
+const floatImageData = (pixels: Float32Array, width: number, height: number) =>
+  new (ImageData as unknown as {
+    new (
+      data: Float16Array,
+      width: number,
+      height: number,
+      settings: { colorSpace: string; pixelFormat: string },
+    ): ImageData;
+  })(new Float16Array(pixels), width, height, {
+    colorSpace: 'srgb',
+    pixelFormat: 'rgba-float16',
+  });
+
+const readFloatCanvas = (
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
 ) => {
-  const visible = stack.filter((layer) => layer.visible);
-  if (visible.length !== 1) return null;
-  const layer = visible[0],
-    surface = surfaces.get(layer.id);
-  if (
-    !surface?.precision ||
-    layer.kind === 'group' ||
-    layer.kind === 'adjustment' ||
-    layer.kind === 'fill' ||
-    layer.parentId ||
-    layer.opacity !== 100 ||
-    (layer.fill ?? 100) !== 100 ||
-    layer.blend !== 'source-over' ||
-    layer.clipping ||
-    (layer.knockout ?? 'none') !== 'none' ||
-    layer.blendIf ||
-    layer.hasMask ||
-    layer.smartObject ||
-    layer.effects ||
-    layer.frame ||
-    layer.colorGrade ||
-    (layer.x ?? 0) !== 0 ||
-    (layer.y ?? 0) !== 0 ||
-    (layer.rotation ?? 0) !== 0 ||
-    (layer.scaleX ?? 1) !== 1 ||
-    (layer.scaleY ?? 1) !== 1 ||
-    (layer.brightness ?? 100) !== 100 ||
-    (layer.contrast ?? 100) !== 100 ||
-    (layer.saturation ?? 100) !== 100 ||
-    (layer.blur ?? 0) !== 0
-  )
-    return null;
-  return surface;
+  const image = (
+      context.getImageData as unknown as (
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        settings: { colorSpace: string; pixelFormat: string },
+      ) => ImageData
+    )(x, y, width, height, {
+      colorSpace: 'srgb',
+      pixelFormat: 'rgba-float16',
+    }),
+    data = image.data as unknown as ArrayLike<number>;
+  return Float32Array.from(data);
 };
 
-const renderDirectHdrPreview = (
-  canvas: HTMLCanvasElement,
-  surface: LayerSurface,
-  mode: EditorPreferences['hdrPreviewMode'],
-) => {
-  if (!surface.precision) return false;
-  const context = canvas.getContext('2d', {
-      colorSpace: 'srgb',
-      colorType: 'float16',
-      willReadFrequently: true,
-    } as CanvasRenderingContext2DSettings) as CanvasRenderingContext2D | null,
+const putFloatCanvas = (
+  context: CanvasRenderingContext2D,
+  pixels: Float32Array,
+  width: number,
+  height: number,
+  x = 0,
+  y = 0,
+) => context.putImageData(floatImageData(pixels, width, height), x, y);
+
+let floatCanvasSupportCache: boolean | undefined;
+const floatCanvasSupported = () => {
+  if (floatCanvasSupportCache !== undefined) return floatCanvasSupportCache;
+  if (typeof Float16Array === 'undefined') return false;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const context = canvasContext(canvas, 'f16'),
     attributes = context?.getContextAttributes?.() as
       | { colorType?: string }
       | undefined;
-  if (!context) return false;
-  const capability = hdrDisplayCapability(),
-    floatCanvas =
-      attributes?.colorType === 'float16' &&
-      typeof Float16Array !== 'undefined',
-    previewMode = normalizeHdrPreviewMode(mode),
-    preview = createHdrPreviewPixels(
-      workingSurfaceToFloat32(surface.precision),
-      previewMode,
-      floatCanvas && capability.css && capability.media && capability.float16,
-    );
-  const image = floatCanvas
-    ? new (ImageData as unknown as {
-        new (
-          data: Float16Array,
-          width: number,
-          height: number,
-          settings: { colorSpace: string; pixelFormat: string },
-        ): ImageData;
-      })(
-        new Float16Array(preview.pixels),
-        surface.precision.width,
-        surface.precision.height,
-        { colorSpace: 'srgb', pixelFormat: 'rgba-float16' },
-      )
-    : new ImageData(
-        Uint8ClampedArray.from(preview.pixels, (value) =>
-          Math.round(Math.max(0, Math.min(1, value)) * 255),
-        ),
-        surface.precision.width,
-        surface.precision.height,
-      );
-  context.putImageData(image, 0, 0);
-  canvas.style.setProperty(
-    'dynamic-range-limit',
-    preview.extended ? 'no-limit' : 'standard',
-  );
-  canvas.dataset.hdrPreview = preview.extended
-    ? 'extended'
-    : previewMode === 'highlights'
-      ? 'highlights'
-      : 'sdr';
-  return true;
+  canvas.width = canvas.height = 1;
+  floatCanvasSupportCache = attributes?.colorType === 'float16';
+  return floatCanvasSupportCache;
 };
+
+const workingSurfaceCanvas = (
+  surface: WorkingSurface,
+  precision: RenderPrecision,
+) => {
+  const canvas = makeCanvas(surface.width, surface.height, precision),
+    context = canvasContext(canvas, precision)!;
+  if (precision === 'f16')
+    putFloatCanvas(
+      context,
+      workingSurfaceToFloat32(surface),
+      surface.width,
+      surface.height,
+    );
+  else
+    context.putImageData(
+      new ImageData(
+        workingSurfaceToRgba8(surface),
+        surface.width,
+        surface.height,
+      ),
+      0,
+      0,
+    );
+  return canvas;
+};
+
 const smartFilterRenderCache = new VersionedRenderCache<HTMLCanvasElement>(
   24_000_000,
   (canvas) => {
@@ -1234,13 +1252,32 @@ const applyAdvancedPixels = (
 const remapRaster = (
   source: HTMLCanvasElement,
   mapper: (x: number, y: number, w: number, h: number) => [number, number],
+  precision: RenderPrecision = 'u8',
 ) => {
   const w = source.width,
     h = source.height,
-    input = source
-      .getContext('2d', { willReadFrequently: true })!
-      .getImageData(0, 0, w, h),
-    output = source.getContext('2d')!.createImageData(w, h);
+    context = source.getContext('2d', { willReadFrequently: true })!;
+  if (precision === 'f16') {
+    const input = readFloatCanvas(context, 0, 0, w, h),
+      output = new Float32Array(input.length);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const [sx, sy] = mapper(x, y, w, h),
+          ix = Math.round(sx),
+          iy = Math.round(sy),
+          target = (y * w + x) * 4;
+        if (ix < 0 || iy < 0 || ix >= w || iy >= h) continue;
+        const from = (iy * w + ix) * 4;
+        output[target] = input[from];
+        output[target + 1] = input[from + 1];
+        output[target + 2] = input[from + 2];
+        output[target + 3] = input[from + 3];
+      }
+    putFloatCanvas(context, output, w, h);
+    return;
+  }
+  const input = context.getImageData(0, 0, w, h),
+    output = context.createImageData(w, h);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const [sx, sy] = mapper(x, y, w, h),
@@ -1263,10 +1300,23 @@ const transformRasterPixels = (
   horizontal: number,
   vertical: number,
   preset?: 'arc' | 'flag' | 'fisheye' | 'twist',
+  precision: RenderPrecision = 'u8',
 ) => {
   if (mode === 'content-aware-scale') return;
-  remapRaster(canvas, (x, y, w, h) =>
-    warpSourcePoint(mode as WarpMode, x, y, w, h, horizontal, vertical, preset),
+  remapRaster(
+    canvas,
+    (x, y, w, h) =>
+      warpSourcePoint(
+        mode as WarpMode,
+        x,
+        y,
+        w,
+        h,
+        horizontal,
+        vertical,
+        preset,
+      ),
+    precision,
   );
 };
 
@@ -1652,9 +1702,14 @@ const applyEffectContour = (
 };
 const sliderNumber = (value: number | readonly number[]) =>
   Number(Array.isArray(value) ? value[0] : value);
-const nativeFillCanvas = (input: FillLayerRecipe, w: number, h: number) => {
+const nativeFillCanvas = (
+  input: FillLayerRecipe,
+  w: number,
+  h: number,
+  precision: RenderPrecision = 'u8',
+) => {
   const recipe = normalizeFillLayerRecipe(input),
-    output = makeCanvas(w, h),
+    output = makeCanvas(w, h, precision),
     context = output.getContext('2d')!;
   if (recipe.mode === 'solid') {
     context.fillStyle = recipe.color;
@@ -1681,7 +1736,7 @@ const nativeFillCanvas = (input: FillLayerRecipe, w: number, h: number) => {
     return output;
   }
   const unit = Math.max(4, Math.round(16 * (recipe.scale / 100))),
-    tile = makeCanvas(unit * 2, unit * 2),
+    tile = makeCanvas(unit * 2, unit * 2, precision),
     tileContext = tile.getContext('2d')!;
   tileContext.fillStyle = recipe.color;
   tileContext.fillRect(0, 0, tile.width, tile.height);
@@ -1714,11 +1769,12 @@ const colorGradedCanvas = (
   grade: ColorGrade | undefined,
   w: number,
   h: number,
+  precision: RenderPrecision = 'u8',
 ) => {
   if (colorGradeIsNeutral(grade)) return source;
-  const output = makeCanvas(w, h),
+  const output = makeCanvas(w, h, precision),
     outputContext = output.getContext('2d')!,
-    tile = makeCanvas(Math.min(256, w), Math.min(256, h));
+    tile = makeCanvas(Math.min(256, w), Math.min(256, h), precision);
   for (let y = 0; y < h; y += 256)
     for (let x = 0; x < w; x += 256) {
       const width = Math.min(256, w - x),
@@ -1726,12 +1782,52 @@ const colorGradedCanvas = (
         tileContext = tile.getContext('2d', { willReadFrequently: true })!;
       tileContext.clearRect(0, 0, tile.width, tile.height);
       tileContext.drawImage(source, x, y, width, height, 0, 0, width, height);
-      const pixels = tileContext.getImageData(0, 0, width, height);
-      applyColorGradeToPixels(pixels.data, grade);
-      tileContext.putImageData(pixels, 0, 0);
+      if (precision === 'f16') {
+        const pixels = readFloatCanvas(tileContext, 0, 0, width, height);
+        applyColorGradeToFloat32(pixels, grade);
+        putFloatCanvas(tileContext, pixels, width, height);
+      } else {
+        const pixels = tileContext.getImageData(0, 0, width, height);
+        applyColorGradeToPixels(pixels.data, grade);
+        tileContext.putImageData(pixels, 0, 0);
+      }
       outputContext.drawImage(tile, 0, 0, width, height, x, y, width, height);
     }
   tile.width = tile.height = 1;
+  return output;
+};
+
+const sharpenFloatCanvasTiled = (
+  source: HTMLCanvasElement,
+  amount: number,
+  tileSize = 512,
+) => {
+  const output = makeCanvas(source.width, source.height, 'f16'),
+    sourceContext = canvasContext(source, 'f16', true)!,
+    outputContext = canvasContext(output, 'f16')!;
+  outputContext.drawImage(source, 0, 0);
+  for (let y = 0; y < source.height; y += tileSize)
+    for (let x = 0; x < source.width; x += tileSize) {
+      const left = Math.max(0, x - 1),
+        top = Math.max(0, y - 1),
+        right = Math.min(source.width, x + tileSize + 1),
+        bottom = Math.min(source.height, y + tileSize + 1),
+        width = right - left,
+        height = bottom - top,
+        pixels = readFloatCanvas(sourceContext, left, top, width, height),
+        sharpened = sharpenFloatRgba(pixels, width, height, amount),
+        dirtyX = x - left,
+        dirtyY = y - top,
+        dirtyWidth = Math.min(tileSize, source.width - x),
+        dirtyHeight = Math.min(tileSize, source.height - y),
+        dirty = new Float32Array(dirtyWidth * dirtyHeight * 4);
+      for (let row = 0; row < dirtyHeight; row++) {
+        const from = ((dirtyY + row) * width + dirtyX) * 4,
+          to = row * dirtyWidth * 4;
+        dirty.set(sharpened.subarray(from, from + dirtyWidth * 4), to);
+      }
+      putFloatCanvas(outputContext, dirty, dirtyWidth, dirtyHeight, x, y);
+    }
   return output;
 };
 const drawLayer = (
@@ -1742,15 +1838,18 @@ const drawLayer = (
   h: number,
   quality: FilterGraphQuality = 'final',
   previewPixelBudget = 2_000_000,
+  precision: RenderPrecision = 'u8',
 ) => {
   let source =
     layer.kind === 'fill' && layer.fillLayer
-      ? nativeFillCanvas(layer.fillLayer, w, h)
-      : surface.pixels;
+      ? nativeFillCanvas(layer.fillLayer, w, h, precision)
+      : precision === 'f16' && surface.precision
+        ? workingSurfaceCanvas(surface.precision, precision)
+        : surface.pixels;
   const masks: HTMLCanvasElement[] = [];
   if (layer.frame) {
     const recipe = normalizeFrame(layer.frame, w, h),
-      frame = makeCanvas(w, h),
+      frame = makeCanvas(w, h, precision),
       frameContext = frame.getContext('2d')!;
     frameContext.fillStyle = 'white';
     frameContext.beginPath();
@@ -1777,7 +1876,7 @@ const drawLayer = (
     masks.push(frame);
   }
   if (layer.vectorMask?.length && layer.vectorMask.length > 2) {
-    const vector = makeCanvas(w, h),
+    const vector = makeCanvas(w, h, precision),
       vc = vector.getContext('2d')!;
     vc.fillStyle = 'white';
     vc.beginPath();
@@ -1796,7 +1895,7 @@ const drawLayer = (
   )
     masks.push(maskToAlpha(surface.mask, layer.maskDensity, layer.maskFeather));
   if (masks.length) {
-    const temp = makeCanvas(w, h),
+    const temp = makeCanvas(w, h, precision),
       tc = temp.getContext('2d')!;
     tc.drawImage(source, 0, 0);
     for (const alpha of masks) {
@@ -1810,7 +1909,7 @@ const drawLayer = (
   const smartObject = layer.smartObject,
     smartTransform = normalizeSmartObjectTransform(smartObject?.transform);
   if (hasSmartObjectTransform(smartTransform)) {
-    const warped = makeCanvas(w, h);
+    const warped = makeCanvas(w, h, precision);
     warped.getContext('2d')!.drawImage(source, 0, 0);
     transformRasterPixels(
       warped,
@@ -1818,6 +1917,7 @@ const drawLayer = (
       smartTransform.horizontal,
       smartTransform.vertical,
       smartTransform.preset,
+      precision,
     );
     if (source !== surface.pixels) source.width = source.height = 1;
     source = warped;
@@ -1838,11 +1938,11 @@ const drawLayer = (
           quality,
           transform: smartObject?.transform,
           filters: smartObject.filters,
-        })
+        }) + `:${precision}`
       : '',
     cached = cacheable ? smartFilterRenderCache.get(cacheKey) : undefined;
   if (cached) {
-    const copy = makeCanvas(w, h);
+    const copy = makeCanvas(w, h, precision);
     copy.getContext('2d')!.drawImage(cached, 0, 0);
     if (source !== surface.pixels) source.width = source.height = 1;
     source = copy;
@@ -1855,6 +1955,7 @@ const drawLayer = (
       const reduced = makeCanvas(
         Math.max(1, Math.round(w * previewScale)),
         Math.max(1, Math.round(h * previewScale)),
+        precision,
       );
       reduced
         .getContext('2d')!
@@ -1865,8 +1966,10 @@ const drawLayer = (
     for (const smartFilter of activeSmartFilters) {
       const filtered =
           smartFilter.name === 'Sharpen'
-            ? sharpenCanvasTiled(source, smartFilter.amount)
-            : makeCanvas(source.width, source.height),
+            ? precision === 'f16'
+              ? sharpenFloatCanvasTiled(source, smartFilter.amount)
+              : sharpenCanvasTiled(source, smartFilter.amount)
+            : makeCanvas(source.width, source.height, precision),
         fc = filtered.getContext('2d')!;
       if (smartFilter.name !== 'Sharpen') {
         fc.filter =
@@ -1891,7 +1994,7 @@ const drawLayer = (
         fc.drawImage(alpha, 0, 0);
         alpha.width = alpha.height = 1;
       }
-      const combined = makeCanvas(source.width, source.height),
+      const combined = makeCanvas(source.width, source.height, precision),
         cc = combined.getContext('2d')!;
       cc.drawImage(source, 0, 0);
       cc.globalAlpha = smartFilter.opacity / 100;
@@ -1903,18 +2006,18 @@ const drawLayer = (
       source = combined;
     }
     if (previewScale < 1) {
-      const expanded = makeCanvas(w, h);
+      const expanded = makeCanvas(w, h, precision);
       expanded.getContext('2d')!.drawImage(source, 0, 0, w, h);
       source.width = source.height = 1;
       source = expanded;
     }
     if (cacheable) {
-      const stored = makeCanvas(w, h);
+      const stored = makeCanvas(w, h, precision);
       stored.getContext('2d')!.drawImage(source, 0, 0);
       smartFilterRenderCache.set(cacheKey, stored, w * h);
     }
   }
-  const graded = colorGradedCanvas(source, layer.colorGrade, w, h);
+  const graded = colorGradedCanvas(source, layer.colorGrade, w, h, precision);
   if (graded !== source) {
     if (source !== surface.pixels) source.width = source.height = 1;
     source = graded;
@@ -1933,7 +2036,7 @@ const drawLayer = (
     !layer.smartObject?.filterMask &&
     layer.maskLinked === false
   ) {
-    const placed = makeCanvas(w, h),
+    const placed = makeCanvas(w, h, precision),
       pc = placed.getContext('2d')!;
     pc.filter = filter;
     pc.translate(layer.x + w / 2, layer.y + h / 2);
@@ -1976,6 +2079,9 @@ const drawLayer = (
       { pixels: placed },
       w,
       h,
+      quality,
+      previewPixelBudget,
+      precision,
     );
     placed.width = placed.height = 1;
     if (source !== surface.pixels) source.width = source.height = 1;
@@ -1997,7 +2103,7 @@ const drawLayer = (
         offsetX: number,
         offsetY: number,
       ) => {
-        const rendered = makeCanvas(w, h),
+        const rendered = makeCanvas(w, h, precision),
           renderedContext = rendered.getContext('2d')!;
         renderedContext.shadowColor = effectColor;
         renderedContext.shadowBlur = blur;
@@ -2054,7 +2160,7 @@ const drawLayer = (
         effects.distance,
         effects.scale,
       ),
-      overlay = makeCanvas(w, h),
+      overlay = makeCanvas(w, h, precision),
       oc = overlay.getContext('2d')!;
     if (effects.colorOverlay) {
       oc.fillStyle = effects.color;
@@ -2100,7 +2206,7 @@ const drawLayer = (
       effects.bevel ||
       effects.satin
     ) {
-      const inner = makeCanvas(w, h),
+      const inner = makeCanvas(w, h, precision),
         ic = inner.getContext('2d')!;
       ic.drawImage(source, 0, 0);
       ic.globalCompositeOperation = 'source-atop';
@@ -2142,9 +2248,10 @@ const applyAdjustment = (
   w: number,
   h: number,
   surface?: LayerSurface,
+  precision: RenderPrecision = 'u8',
 ) => {
-  const source = makeCanvas(w, h),
-    adjusted = makeCanvas(w, h),
+  const source = makeCanvas(w, h, precision),
+    adjusted = makeCanvas(w, h, precision),
     ac = adjusted.getContext('2d')!,
     sourceContext = source.getContext('2d', { willReadFrequently: true })!;
   source.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
@@ -2158,13 +2265,27 @@ const applyAdjustment = (
     for (let x = 0; x < w; x += 256) {
       const width = Math.min(256, w - x),
         height = Math.min(256, h - y),
-        tile = sourceContext.getImageData(x, y, width, height),
-        result = adjustHighDepth({ width, height, data: tile.data }, settings);
-      tile.data.set(precisionToEncodedRgba({ width, height, data: result }));
-      ac.putImageData(tile, x, y);
+        tile =
+          precision === 'f16'
+            ? readFloatCanvas(sourceContext, x, y, width, height)
+            : sourceContext.getImageData(x, y, width, height),
+        result = adjustHighDepth(
+          {
+            width,
+            height,
+            data: tile instanceof Float32Array ? tile : tile.data,
+          },
+          settings,
+        );
+      if (precision === 'f16') putFloatCanvas(ac, result, width, height, x, y);
+      else {
+        const image = tile as ImageData;
+        image.data.set(precisionToEncodedRgba({ width, height, data: result }));
+        ac.putImageData(image, x, y);
+      }
     }
   if (layer.blur) {
-    const blurred = makeCanvas(w, h),
+    const blurred = makeCanvas(w, h, precision),
       blurredContext = blurred.getContext('2d')!;
     blurredContext.filter = `blur(${Math.max(0, layer.blur)}px)`;
     blurredContext.drawImage(adjusted, 0, 0);
@@ -2758,6 +2879,7 @@ export default function Home() {
   );
   const clipboardRef = useRef<{
     pixels: HTMLCanvasElement;
+    precision?: WorkingSurface;
     x: number;
     y: number;
   } | null>(null);
@@ -2799,9 +2921,15 @@ export default function Home() {
   const [doc, setDoc] = useState({ w: 1200, h: 800 });
   const [workingDepth, setWorkingDepthState] = useState<WorkingDepth>('8u');
   const workingDepthRef = useRef<WorkingDepth>('8u');
+  const [sceneReferred, setSceneReferredState] = useState(false);
+  const sceneReferredRef = useRef(false);
   const setWorkingDepth = (depth: WorkingDepth) => {
     workingDepthRef.current = depth;
     setWorkingDepthState(depth);
+  };
+  const setSceneReferred = (value: boolean) => {
+    sceneReferredRef.current = value;
+    setSceneReferredState(value);
   };
   const [artboards, setArtboards] = useState<Artboard[]>([]),
     [activeArtboardId, setActiveArtboardId] = useState(''),
@@ -3236,6 +3364,7 @@ export default function Home() {
     surfaceMap = surfacesRef.current,
     size = doc,
     quality: FilterGraphQuality = 'final',
+    precision: RenderPrecision = 'u8',
   ) => {
     const device = navigator as Navigator & { deviceMemory?: number };
     const performancePolicy = adaptivePerformancePolicy({
@@ -3262,7 +3391,7 @@ export default function Home() {
     };
     const nodeAppearance = (layer: LayerMeta): HTMLCanvasElement | null => {
       if (layer.kind === 'adjustment') return null;
-      const appearance = makeCanvas(size.w, size.h);
+      const appearance = makeCanvas(size.w, size.h, precision);
       if (layer.kind === 'group') {
         const masks = paintSiblings(appearance.getContext('2d')!, layer.id);
         for (const mask of masks) mask.width = mask.height = 1;
@@ -3289,6 +3418,7 @@ export default function Home() {
         size.h,
         quality,
         performancePolicy.previewPixelBudget,
+        precision,
       );
       return appearance;
     };
@@ -3298,7 +3428,7 @@ export default function Home() {
       surface: LayerSurface,
       siblings: LayerMeta[],
     ) => {
-      const source = makeCanvas(size.w, size.h),
+      const source = makeCanvas(size.w, size.h, precision),
         sourceContext = source.getContext('2d')!;
       drawLayer(
         sourceContext,
@@ -3314,6 +3444,8 @@ export default function Home() {
         size.w,
         size.h,
         quality,
+        performancePolicy.previewPixelBudget,
+        precision,
       );
       if (layer.clipping) {
         const baseId = clippingBaseId(siblings, layer.id),
@@ -3333,7 +3465,7 @@ export default function Home() {
       if (knockout !== 'none') {
         erase(target, source);
         if (knockout === 'deep') {
-          const mask = makeCanvas(size.w, size.h);
+          const mask = makeCanvas(size.w, size.h, precision);
           mask.getContext('2d')!.drawImage(source, 0, 0);
           deepMasks.push(mask);
         }
@@ -3349,6 +3481,7 @@ export default function Home() {
           layer.blend,
           layer.blendIf,
           layer.blendSpace,
+          precision,
         );
       else {
         target.save();
@@ -3374,12 +3507,13 @@ export default function Home() {
           size.w,
           size.h,
           surfaceMap.get(layer.id),
+          precision,
         );
         return [];
       }
       if (layer.kind === 'group') {
         if (groupCanPassThrough(layer)) return paintSiblings(target, layer.id);
-        const groupCanvas = makeCanvas(size.w, size.h),
+        const groupCanvas = makeCanvas(size.w, size.h, precision),
           nestedDeep = paintSiblings(groupCanvas.getContext('2d')!, layer.id);
         for (const mask of nestedDeep) erase(target, mask);
         const groupSurface = surfaceMap.get(layer.id),
@@ -3409,35 +3543,151 @@ export default function Home() {
     const deepMasks = paintSiblings(ctx);
     for (const mask of deepMasks) mask.width = mask.height = 1;
   };
+  const renderEditableSurface = (
+    stack = layersRef.current,
+    surfaceMap = surfacesRef.current,
+    size = doc,
+    background?: string,
+  ): LayerSurface => {
+    const highDepth = workingDepthRef.current !== '8u',
+      precision: RenderPrecision =
+        highDepth && floatCanvasSupported() ? 'f16' : 'u8',
+      rendered = makeCanvas(size.w, size.h, precision),
+      context = canvasContext(rendered, precision, true)!;
+    renderLayers(context, stack, surfaceMap, size, 'final', precision);
+    if (background) {
+      context.save();
+      context.globalCompositeOperation = 'destination-over';
+      context.fillStyle = background;
+      context.fillRect(0, 0, size.w, size.h);
+      context.restore();
+    }
+    if (!highDepth) return { pixels: rendered };
+    const backing =
+        precision === 'f16'
+          ? workingSurfaceFromFloat32(
+              readFloatCanvas(context, 0, 0, size.w, size.h),
+              size.w,
+              size.h,
+              workingDepthRef.current as HighWorkingDepth,
+            )
+          : createPrecisionBacking(
+              { pixels: rendered },
+              workingDepthRef.current as HighWorkingDepth,
+            ),
+      proxy = makeCanvas(size.w, size.h);
+    proxy
+      .getContext('2d')!
+      .putImageData(
+        new ImageData(workingSurfaceToRgba8(backing), size.w, size.h),
+        0,
+        0,
+      );
+    rendered.width = rendered.height = 1;
+    return { pixels: proxy, precision: backing };
+  };
+  const copyRenderedRegion = (
+    stack: LayerMeta[],
+    surfaceMap: Map<string, LayerSurface>,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    selectionMaskCanvas?: HTMLCanvasElement,
+  ) => {
+    const highDepth = workingDepthRef.current !== '8u',
+      precision: RenderPrecision =
+        highDepth && floatCanvasSupported() ? 'f16' : 'u8',
+      full = makeCanvas(doc.w, doc.h, precision),
+      region = makeCanvas(width, height, precision),
+      regionContext = canvasContext(region, precision, true)!;
+    renderLayers(
+      canvasContext(full, precision, true)!,
+      stack,
+      surfaceMap,
+      doc,
+      'final',
+      precision,
+    );
+    regionContext.drawImage(full, -x, -y);
+    if (selectionMaskCanvas) {
+      regionContext.globalCompositeOperation = 'destination-in';
+      regionContext.drawImage(selectionMaskCanvas, -x, -y);
+      regionContext.globalCompositeOperation = 'source-over';
+    }
+    full.width = full.height = 1;
+    if (!highDepth) return { pixels: region, x, y };
+    const backing =
+        precision === 'f16'
+          ? workingSurfaceFromFloat32(
+              readFloatCanvas(regionContext, 0, 0, width, height),
+              width,
+              height,
+              workingDepthRef.current as HighWorkingDepth,
+            )
+          : createPrecisionBacking(
+              { pixels: region },
+              workingDepthRef.current as HighWorkingDepth,
+            ),
+      proxy = makeCanvas(width, height);
+    proxy
+      .getContext('2d')!
+      .putImageData(
+        new ImageData(workingSurfaceToRgba8(backing), width, height),
+        0,
+        0,
+      );
+    region.width = region.height = 1;
+    return { pixels: proxy, precision: backing, x, y };
+  };
   const render = useCallback(() => {
     const out = displayRef.current;
     if (!out) return;
     if (out.width !== doc.w) out.width = doc.w;
     if (out.height !== doc.h) out.height = doc.h;
-    const hdrSurface =
-        workingDepthRef.current === '16f' || workingDepthRef.current === '32f'
-          ? directHdrLayer(layersRef.current, surfacesRef.current)
-          : null,
-      directHdr = (() => {
-        if (!hdrSurface) return false;
-        syncPrecisionSurface(hdrSurface);
-        return renderDirectHdrPreview(
-          out,
-          hdrSurface,
-          preferences.hdrPreviewMode,
-        );
-      })(),
-      ctx = out.getContext('2d', { willReadFrequently: true })!;
-    if (!directHdr) {
+    const highDepth = workingDepthRef.current !== '8u',
+      renderPrecision: RenderPrecision =
+        highDepth && floatCanvasSupported() ? 'f16' : 'u8';
+    if (highDepth)
+      for (const surface of surfacesRef.current.values())
+        if (surface.precision) syncPrecisionSurface(surface);
+    const ctx = canvasContext(out, renderPrecision, true)!;
+    renderLayers(
+      ctx,
+      layersRef.current,
+      surfacesRef.current,
+      doc,
+      smartFilterPreviewRef.current ? 'preview' : 'final',
+      renderPrecision,
+    );
+    if (renderPrecision === 'f16') {
+      const raw = readFloatCanvas(ctx, 0, 0, doc.w, doc.h),
+        capability = hdrDisplayCapability(),
+        previewMode = normalizeHdrPreviewMode(preferences.hdrPreviewMode),
+        preview = sceneReferred
+          ? createHdrPreviewPixels(
+              raw,
+              previewMode,
+              capability.css && capability.media && capability.float16,
+            )
+          : { pixels: raw, extended: false };
+      putFloatCanvas(ctx, preview.pixels, doc.w, doc.h);
+      out.style.setProperty(
+        'dynamic-range-limit',
+        preview.extended ? 'no-limit' : 'standard',
+      );
+      out.dataset.hdrPreview = sceneReferred
+        ? preview.extended
+          ? 'extended'
+          : previewMode === 'highlights'
+            ? 'highlights'
+            : 'sdr'
+        : 'display-referred';
+      out.dataset.renderPrecision = 'float16';
+    } else {
       out.style.removeProperty('dynamic-range-limit');
       delete out.dataset.hdrPreview;
-      renderLayers(
-        ctx,
-        layersRef.current,
-        surfacesRef.current,
-        doc,
-        smartFilterPreviewRef.current ? 'preview' : 'final',
-      );
+      out.dataset.renderPrecision = 'uint8-fallback';
     }
     const activeLayer = layersRef.current.find(
         (layer) => layer.id === selectedRef.current,
@@ -3538,6 +3788,7 @@ export default function Home() {
     size,
     selectedId,
     workingDepth,
+    sceneReferred,
     preferences.hdrPreviewMode,
   ]);
   useEffect(() => {
@@ -3567,6 +3818,7 @@ export default function Home() {
         w: first?.pixels.width ?? 1200,
         h: first?.pixels.height ?? 800,
         workingDepth: workingDepthRef.current,
+        sceneReferred: sceneReferredRef.current,
         layers: layersRef.current.map((x) => ({ ...x })),
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
@@ -3680,6 +3932,7 @@ export default function Home() {
     surfacesRef.current = nextMap;
     setDoc({ w: snap.w, h: snap.h });
     setWorkingDepth(snap.workingDepth ?? '8u');
+    setSceneReferred(snap.sceneReferred === true);
     syncLayers(snap.layers.map((x) => ({ ...x })));
     selectMany(snap.selectedIds ?? [snap.selectedId], snap.selectedId);
     const restoredSelection = snap.selection
@@ -3725,10 +3978,13 @@ export default function Home() {
       return;
     }
     const previousSurface = surfacesRef.current.get(id),
-      nextSurface = {
+      nextSurface: LayerSurface = {
         pixels: restoreTiles(historicSurface.pixels),
         mask: historicSurface.mask
           ? restoreTiles(historicSurface.mask)
+          : undefined,
+        precision: historicSurface.precision
+          ? cloneWorkingSurface(historicSurface.precision)
           : undefined,
       },
       parentId = historicMeta.parentId
@@ -3815,6 +4071,7 @@ export default function Home() {
         saved: false,
         doc: { w: snap.w, h: snap.h },
         workingDepth: snap.workingDepth ?? '8u',
+        sceneReferred: snap.sceneReferred === true,
         layers: branchSnapshot.layers,
         surfaces,
         selectedId: snap.selectedId,
@@ -4154,6 +4411,7 @@ export default function Home() {
       saved,
       doc: { ...doc },
       workingDepth: workingDepthRef.current,
+      sceneReferred: sceneReferredRef.current,
       layers: layersRef.current,
       surfaces: surfacesRef.current,
       selectedId: selectedRef.current,
@@ -4179,6 +4437,7 @@ export default function Home() {
     width: source.doc.w,
     height: source.doc.h,
     workingDepth: source.workingDepth ?? '8u',
+    sceneReferred: source.sceneReferred === true,
     layers: structuredClone(source.layers),
     surfaces: source.layers.map((layer) => {
       const surface = source.surfaces.get(layer.id);
@@ -4276,6 +4535,7 @@ export default function Home() {
       w: parent.doc.w,
       h: parent.doc.h,
       workingDepth: parent.workingDepth ?? '8u',
+      sceneReferred: parent.sceneReferred === true,
       layers: structuredClone(parent.layers),
       selectedId: parent.selectedId,
       selectedIds: [...(parent.selectedIds ?? [parent.selectedId])],
@@ -4343,6 +4603,7 @@ export default function Home() {
     boundHistory();
     setDoc(next.doc);
     setWorkingDepth(next.workingDepth ?? '8u');
+    setSceneReferred(next.sceneReferred === true);
     setZoom(clampZoom(next.zoom));
     setView(readView(next.view));
     setSelection(next.selection);
@@ -7260,12 +7521,11 @@ export default function Home() {
       );
       return;
     }
-    const pixels = makeCanvas(doc.w, doc.h);
-    renderLayers(pixels.getContext('2d')!, [
+    const mergedSurface = renderEditableSurface([
       { ...upper, parentId: undefined },
       { ...lower, parentId: undefined },
     ]);
-    surfacesRef.current.set(lower.id, { pixels });
+    surfacesRef.current.set(lower.id, mergedSurface);
     surfacesRef.current.delete(upper.id);
     const merged: LayerMeta = {
       id: lower.id,
@@ -7300,8 +7560,7 @@ export default function Home() {
       !permit(visible.map((l) => l.id))
     )
       return;
-    const pixels = makeCanvas(doc.w, doc.h);
-    renderLayers(pixels.getContext('2d')!);
+    const mergedSurface = renderEditableSurface();
     const removed = new Set(
         visible.filter((l) => l.kind !== 'group').map((l) => l.id),
       ),
@@ -7318,7 +7577,7 @@ export default function Home() {
         maskEnabled: true,
       };
     for (const id of removed) surfacesRef.current.delete(id);
-    surfacesRef.current.set(id, { pixels });
+    surfacesRef.current.set(id, mergedSurface);
     syncLayers([
       merged,
       ...layersRef.current.filter((l) => !removed.has(l.id)),
@@ -7336,13 +7595,12 @@ export default function Home() {
       )
     )
       return;
-    const pixels = makeCanvas(doc.w, doc.h),
-      ctx = pixels.getContext('2d')!;
-    renderLayers(ctx);
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, doc.w, doc.h);
-    ctx.globalCompositeOperation = 'source-over';
+    const flattenedSurface = renderEditableSurface(
+      layersRef.current,
+      surfacesRef.current,
+      doc,
+      'white',
+    );
     const id = crypto.randomUUID(),
       flat: LayerMeta = {
         id,
@@ -7356,7 +7614,7 @@ export default function Home() {
         maskEnabled: true,
         locked: false,
       };
-    surfacesRef.current = new Map([[id, { pixels }]]);
+    surfacesRef.current = new Map([[id, flattenedSurface]]);
     syncLayers([flat]);
     select(id);
     setEditing('pixels');
@@ -8111,6 +8369,7 @@ export default function Home() {
           { parentDocumentId, instanceId },
           undefined,
           normalizeWorkingDepth(embedded.workingDepth),
+          embedded.sceneReferred === true,
         );
         const opened = documentStoreRef.current.get(activeDocumentRef.current);
         if (opened) {
@@ -9936,25 +10195,26 @@ export default function Home() {
       y = Math.max(0, Math.round(s?.y ?? 0)),
       w = Math.max(1, Math.min(doc.w - x, Math.round(s?.w ?? doc.w))),
       h = Math.max(1, Math.min(doc.h - y, Math.round(s?.h ?? doc.h))),
-      rendered = makeCanvas(doc.w, doc.h),
-      pixels = makeCanvas(w, h),
-      ctx = pixels.getContext('2d')!;
-    drawLayer(
-      rendered.getContext('2d')!,
-      { ...meta, blend: 'source-over', opacity: 100, fill: 100 },
-      surface,
-      doc.w,
-      doc.h,
+      selectedPixels = s ? selectionMask(doc.w, doc.h, 0, 0) : undefined;
+    clipboardRef.current = copyRenderedRegion(
+      [
+        {
+          ...meta,
+          parentId: undefined,
+          blend: 'source-over',
+          opacity: 100,
+          fill: 100,
+          clipping: false,
+        },
+      ],
+      new Map([[meta.id, surface]]),
+      x,
+      y,
+      w,
+      h,
+      selectedPixels,
     );
-    ctx.drawImage(rendered, -x, -y);
-    if (s) {
-      ctx.globalCompositeOperation = 'destination-in';
-      const selectedPixels = selectionMask(doc.w, doc.h, 0, 0);
-      ctx.drawImage(selectedPixels, -x, -y);
-      selectedPixels.width = selectedPixels.height = 1;
-    }
-    rendered.width = rendered.height = 1;
-    clipboardRef.current = { pixels, x, y };
+    if (selectedPixels) selectedPixels.width = selectedPixels.height = 1;
     setStatus(
       `Copied ${w} × ${h}px${feather ? ` with ${feather}px feather` : ''}`,
     );
@@ -10001,6 +10261,24 @@ export default function Home() {
     if (!id) return;
     const surface = surfacesRef.current.get(id)!;
     surface.pixels.getContext('2d')!.drawImage(clip.pixels, clip.x, clip.y);
+    if (workingDepthRef.current !== '8u') {
+      const source = clip.precision
+        ? convertWorkingSurface(
+            clip.precision,
+            workingDepthRef.current as HighWorkingDepth,
+          )
+        : createPrecisionBacking(
+            { pixels: clip.pixels },
+            workingDepthRef.current as HighWorkingDepth,
+          );
+      surface.precision = placeWorkingSurface(
+        source,
+        doc.w,
+        doc.h,
+        clip.x,
+        clip.y,
+      );
+    }
     snapshot('Paste');
     render();
     setStatus('Pasted as a new layer');
@@ -10222,6 +10500,7 @@ export default function Home() {
       'paths' | 'artboards' | 'layerComps' | 'savedSelections' | 'feather'
     >,
     nextWorkingDepth: WorkingDepth = '8u',
+    sceneReferred = false,
   ) => {
     nextLayers = treeOrder(nextLayers);
     requireRoom(
@@ -10241,6 +10520,7 @@ export default function Home() {
         w,
         h,
         workingDepth: nextWorkingDepth,
+        sceneReferred,
         layers: nextLayers.map((x) => ({ ...x })),
         selectedId: selectedLayer.id,
         paths: structuredClone(extras?.paths ?? []),
@@ -10264,6 +10544,7 @@ export default function Home() {
         saved: restore?.saved ?? true,
         doc: { w, h },
         workingDepth: nextWorkingDepth,
+        sceneReferred,
         layers: nextLayers,
         surfaces: nextSurfaces,
         selectedId: selectedLayer.id,
@@ -10648,6 +10929,7 @@ export default function Home() {
         width: doc.w,
         height: doc.h,
         workingDepth: workingDepthRef.current,
+        sceneReferred: sceneReferredRef.current,
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
         layerComps: layerCompsRef.current,
@@ -10759,6 +11041,12 @@ export default function Home() {
         throw Error('Invalid project');
       checkDimensions(data.width, data.height);
       const projectDepth = normalizeWorkingDepth(data.workingDepth);
+      if (
+        (data.sceneReferred !== undefined &&
+          typeof data.sceneReferred !== 'boolean') ||
+        (data.sceneReferred === true && projectDepth === '8u')
+      )
+        throw Error('Invalid project color encoding');
       requireRoom(
         data.width,
         data.height,
@@ -11104,6 +11392,7 @@ export default function Home() {
         undefined,
         undefined,
         projectDepth,
+        data.sceneReferred === true,
       );
       setPaths(importedPaths);
       setArtboards(importedArtboards);
@@ -13184,6 +13473,7 @@ export default function Home() {
             d.name,
             d.zoom,
             d.workingDepth ?? '8u',
+            d.sceneReferred ? 1 : 0,
             JSON.stringify(d.view ?? {}),
             d.selectedId,
           ].join(':'),
@@ -13235,6 +13525,7 @@ export default function Home() {
           width: d.doc.w,
           height: d.doc.h,
           workingDepth: d.workingDepth ?? '8u',
+          sceneReferred: d.sceneReferred === true,
           selectedId: d.selectedId,
           selectedIds: d.selectedIds,
           layerComps: d.layerComps,
@@ -13532,17 +13823,22 @@ export default function Home() {
     }
     if (feature.kind === 'selection') {
       if (feature.command === 'copy-merged') {
-        const full = makeCanvas(doc.w, doc.h);
-        renderLayers(full.getContext('2d')!);
         const s = selectionRef.current,
           x = Math.round(s?.x ?? 0),
           y = Math.round(s?.y ?? 0),
           w = Math.max(1, Math.round(s?.w ?? doc.w)),
           h = Math.max(1, Math.round(s?.h ?? doc.h)),
-          clip = makeCanvas(w, h);
-        clip.getContext('2d')!.drawImage(full, -x, -y);
-        clipboardRef.current = { pixels: clip, x, y };
-        full.width = full.height = 1;
+          mask = s ? selectionMask(doc.w, doc.h, 0, 0) : undefined;
+        clipboardRef.current = copyRenderedRegion(
+          layersRef.current,
+          surfacesRef.current,
+          x,
+          y,
+          w,
+          h,
+          mask,
+        );
+        if (mask) mask.width = mask.height = 1;
         setStatus('Visible composite copied');
         return;
       }
@@ -13564,6 +13860,24 @@ export default function Home() {
         if (!id) return;
         const surface = surfacesRef.current.get(id)!;
         surface.pixels.getContext('2d')!.drawImage(clip.pixels, clip.x, clip.y);
+        if (workingDepthRef.current !== '8u') {
+          const source = clip.precision
+            ? convertWorkingSurface(
+                clip.precision,
+                workingDepthRef.current as HighWorkingDepth,
+              )
+            : createPrecisionBacking(
+                { pixels: clip.pixels },
+                workingDepthRef.current as HighWorkingDepth,
+              );
+          surface.precision = placeWorkingSurface(
+            source,
+            doc.w,
+            doc.h,
+            clip.x,
+            clip.y,
+          );
+        }
         if (feature.command === 'paste-into' && selectionRef.current) {
           const mask = selectionMask(doc.w, doc.h, 0, 0);
           surface.mask = mask;
@@ -14386,6 +14700,7 @@ export default function Home() {
               undefined,
               undefined,
               '32f',
+              true,
             );
             setStatus(
               `Scene-linear 32-bit HDR document created from ${items.length} layers · choose automatic, SDR, or highlight preview`,
@@ -14840,10 +15155,11 @@ export default function Home() {
         else delete surface.precision;
       });
       setWorkingDepth(nextDepth);
+      if (nextDepth === '8u') setSceneReferred(false);
       snapshot(`Convert to ${WORKING_DEPTH_LABELS[nextDepth]}`);
       render();
       setStatus(
-        `Document converted to ${WORKING_DEPTH_LABELS[nextDepth]} · high-depth backing is saved with the layered project`,
+        `Document converted to ${WORKING_DEPTH_LABELS[nextDepth]}${nextDepth === '8u' ? '' : ' · high-depth backing is saved with the layered project'}${sceneReferredRef.current ? ' · scene-linear values retained' : ''}`,
       );
     } catch (error) {
       setPsdError(
@@ -17721,7 +18037,8 @@ export default function Home() {
                   ? 'Layer group'
                   : 'Layer pixels'}{' '}
           · RGB {WORKING_DEPTH_LABELS[workingDepth]}
-          {(workingDepth === '16f' || workingDepth === '32f') &&
+          {workingDepth !== '8u' && ' · Float render'}
+          {sceneReferred &&
             ` · HDR ${
               preferences.hdrPreviewMode === 'sdr'
                 ? 'SDR preview'
