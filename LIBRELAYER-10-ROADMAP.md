@@ -135,7 +135,7 @@ This is the release ledger for closing the remaining gap with a professional des
 ## 10. Filters and effects
 
 - [x] Core blur, sharpen, noise, color, stylize, and editable Smart Filter operations.
-- [ ] Reference-quality blur gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and noise reduction.
+- [x] Reference-quality blur gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and noise reduction.
 - [ ] Lens correction, displacement, polar, wave, ripple, spherize, pixelate, and halftone.
 - [ ] Oil Paint, lighting, clouds, fibers, Filter Gallery, and custom convolution.
 - [ ] Third-party WASM filter API with deterministic CPU fallback.

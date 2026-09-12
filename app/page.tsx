@@ -188,6 +188,7 @@ import { ProSuiteDialog } from '@/components/pro-suite-dialog';
 import {
   applySuitePixelOperation,
   encodeAnimatedGif,
+  suiteFeatures,
   type SuiteFeature,
   type SuiteOptions,
 } from '@/lib/pro-suite';
@@ -339,6 +340,10 @@ import {
   type PathStrokeStyle,
 } from '@/lib/path-engine';
 import { parseSvgDocument, serializeSvgDocument } from '@/lib/svg-path';
+import {
+  applyReferenceFilter,
+  type ReferenceFilter,
+} from '@/lib/filter-gallery';
 import {
   multiScaleExportPlan,
   normalizeArtboard,
@@ -12700,26 +12705,35 @@ export default function Home() {
       [
         'blur-gallery',
         'lens-blur',
-        'median-dust',
-        'minimum-maximum',
+        'surface-blur',
         'noise',
         'smart-sharpen',
+        'high-pass',
       ].includes(feature.command)
     ) {
-      const filtered = makeCanvas(canvas.width, canvas.height),
-        fc = filtered.getContext('2d')!;
-      if (
-        feature.command === 'blur-gallery' ||
-        feature.command === 'lens-blur' ||
-        feature.command === 'median-dust'
-      )
-        fc.filter = `blur(${Math.max(1, options.amount / 8)}px)`;
-      else if (feature.command === 'smart-sharpen')
-        fc.filter = `contrast(${100 + options.amount}%) saturate(${100 + options.secondary / 2}%)`;
-      fc.drawImage(canvas, 0, 0);
-      canvas.getContext('2d')!.clearRect(0, 0, canvas.width, canvas.height);
-      canvas.getContext('2d')!.drawImage(filtered, 0, 0);
-      filtered.width = filtered.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true })!,
+        image = context.getImageData(0, 0, canvas.width, canvas.height);
+      if (feature.command === 'noise' && options.secondary >= 50)
+        context.putImageData(
+          applySuitePixelOperation(image, feature.command, options),
+          0,
+          0,
+        );
+      else {
+        const pixels = applyReferenceFilter(
+          image.data,
+          image.width,
+          image.height,
+          feature.command as ReferenceFilter,
+          options.amount,
+          options.secondary,
+        );
+        context.putImageData(
+          new ImageData(pixels, image.width, image.height),
+          0,
+          0,
+        );
+      }
     } else if (
       [
         'liquify',
@@ -13515,7 +13529,7 @@ export default function Home() {
             { name: 'New adjustment layer', action: createAdjustment },
             { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
             {
-              name: 'Professional Studio — 113 tools…',
+              name: 'Professional Studio — 114 tools…',
               action: () => setProSuiteOpen(true),
             },
             { name: 'AI Remove Background', action: aiRemoveBackground },
@@ -13525,6 +13539,29 @@ export default function Home() {
               name: 'Adjustments and blur…',
               action: () => setAdjustmentsOpen(true),
             },
+            { separator: true },
+            ...[
+              ['blur-gallery', 'Blur Gallery…', 55, 50],
+              ['lens-blur', 'Lens Blur…', 55, 50],
+              ['surface-blur', 'Surface Blur…', 45, 55],
+              ['smart-sharpen', 'Smart Sharpen…', 45, 30],
+              ['high-pass', 'High Pass…', 45, 30],
+              ['noise', 'Noise Reduction…', 45, 25],
+            ].map(([command, name, amount, secondary]) => ({
+              name: name as string,
+              action: () => {
+                const feature = suiteFeatures.find(
+                  (item) => item.command === command,
+                );
+                if (feature)
+                  runProFeature(feature, {
+                    amount: amount as number,
+                    secondary: secondary as number,
+                    color: '#6d8cff',
+                    text: '',
+                  });
+              },
+            })),
             { name: 'Black & white', action: () => filter('grayscale') },
             { name: 'Invert colors', action: () => filter('invert') },
             { name: 'Sharpen', action: () => filter('sharpen') },

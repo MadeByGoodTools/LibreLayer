@@ -60,6 +60,7 @@ export const suiteFeatures: SuiteFeature[] = [
     [180, 'frame', 'Frame tool'],
   ]),
   ...group('Filters & photography', 'pixel', [
+    [181, 'surface-blur', 'Surface Blur'],
     [182, 'blur-gallery', 'Blur Gallery'],
     [183, 'smart-sharpen', 'Unsharp Mask and Smart Sharpen'],
     [184, 'noise', 'Noise reduction and Add Noise'],
@@ -333,10 +334,10 @@ export function runSuiteSelfTest() {
   const ids = new Set(suiteFeatures.map((x) => x.id));
   const commands = new Set(suiteFeatures.map((x) => x.command));
   const failures: string[] = [];
-  if (suiteFeatures.length !== 113)
-    failures.push(`Expected 113 features, found ${suiteFeatures.length}`);
-  if (ids.size !== 113) failures.push('Feature IDs are not unique');
-  if (commands.size !== 113) failures.push('Feature commands are not unique');
+  if (suiteFeatures.length !== 114)
+    failures.push(`Expected 114 features, found ${suiteFeatures.length}`);
+  if (ids.size !== 114) failures.push('Feature IDs are not unique');
+  if (commands.size !== 114) failures.push('Feature commands are not unique');
   for (const feature of suiteFeatures) {
     if (
       !feature.label ||

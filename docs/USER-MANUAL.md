@@ -79,6 +79,10 @@ Use nondestructive adjustment layers whenever an edit may need revisiting. Avail
 
 Built-in and imported `.cube` LUTs preview live. Histograms, waveform, RGB parade, and vectorscope help evaluate tone and color. CMYK and grayscale proof modes are previews only; they do not convert the document profile.
 
+## Filters
+
+The Filter menu exposes Blur Gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and Noise Reduction directly. The same filters are available in Professional Studio with Amount and Secondary controls. Blur Gallery uses Secondary as the in-focus vertical position; Lens Blur treats image luminance as a depth map and Secondary as the focal depth; Surface Blur uses Secondary as its edge threshold. Noise Reduction is selected below 50% Secondary, while 50% or above intentionally adds noise. Every filter preserves alpha, respects the active selection, and creates a full undo/redo history state.
+
 ## Saving and export
 
 - **Editable master:** File → Save layered project (`Ctrl/⌘+S`) writes `.librelayer`. Password-protected projects use local AES-256-GCM encryption; losing the password makes the file unrecoverable.
