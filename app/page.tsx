@@ -351,10 +351,14 @@ import {
   type RenderFilter,
 } from '@/lib/render-filter';
 import {
-  applyFilterPlugin,
   validateFilterPlugin,
   type FilterPluginManifest,
 } from '@/lib/filter-plugin';
+import {
+  JobCancelledError,
+  JobWatchdogError,
+  runFilterPluginJob,
+} from '@/lib/filter-plugin-job';
 import { runGpuCpuReferenceCheck } from '@/lib/gpu-filter-reference';
 import {
   adaptivePerformancePolicy,
@@ -2549,7 +2553,28 @@ export default function Home() {
   const [fileName, setFileName] = useState('Untitled artwork');
   const [saved, setSaved] = useState(true);
   const [status, setStatus] = useState('Ready');
+  const [activeJob, setActiveJob] = useState<{
+    id: string;
+    label: string;
+    progress: number;
+  } | null>(null);
+  const activeJobAbort = useRef<AbortController | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  useEffect(() => {
+    try {
+      const interrupted = localStorage.getItem('librelayer-active-job');
+      if (interrupted) {
+        const record = JSON.parse(interrupted) as { label?: string };
+        localStorage.removeItem('librelayer-active-job');
+        setStatus(
+          `${record.label || 'A background operation'} ended before completion · the last intact document state was restored`,
+        );
+      }
+    } catch {
+      localStorage.removeItem('librelayer-active-job');
+    }
+    return () => activeJobAbort.current?.abort();
+  }, []);
   const [transformSession, setTransformSession] = useState<LayerMeta[] | null>(
     null,
   );
@@ -12034,14 +12059,35 @@ export default function Home() {
       image = context.getImageData(0, 0, canvas.width, canvas.height),
       original = makeCanvas(canvas.width, canvas.height);
     original.getContext('2d')!.putImageData(image, 0, 0);
+    activeJobAbort.current?.abort();
+    const controller = new AbortController(),
+      jobId = crypto.randomUUID();
+    activeJobAbort.current = controller;
+    setActiveJob({ id: jobId, label: plugin.name, progress: 0 });
+    try {
+      localStorage.setItem(
+        'librelayer-active-job',
+        JSON.stringify({ id: jobId, label: plugin.name, started: Date.now() }),
+      );
+    } catch {
+      // The worker remains cancelable even when the browser blocks the journal.
+    }
     setStatus(`Running ${plugin.name} locally…`);
     try {
-      const result = await applyFilterPlugin(
+      const result = await runFilterPluginJob(
         plugin,
         image.data,
         image.width,
         image.height,
-        amount,
+        {
+          amount,
+          signal: controller.signal,
+          timeoutMs: 30000,
+          onProgress: (progress) =>
+            setActiveJob((current) =>
+              current?.id === jobId ? { ...current, progress } : current,
+            ),
+        },
       );
       context.putImageData(
         new ImageData(
@@ -12073,10 +12119,27 @@ export default function Home() {
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(original, 0, 0);
       setStatus(
-        error instanceof Error ? error.message : 'The filter plug-in failed safely',
+        error instanceof JobCancelledError
+          ? `${plugin.name} cancelled · no pixels were changed`
+          : error instanceof JobWatchdogError
+            ? `${plugin.name} stopped by the safety watchdog · no pixels were changed`
+            : error instanceof Error
+              ? error.message
+              : 'The filter plug-in failed safely',
       );
     } finally {
       original.width = original.height = 1;
+      if (activeJobAbort.current === controller) activeJobAbort.current = null;
+      setActiveJob((current) => (current?.id === jobId ? null : current));
+      try {
+        const journal = JSON.parse(
+          localStorage.getItem('librelayer-active-job') || 'null',
+        ) as { id?: string } | null;
+        if (journal?.id === jobId)
+          localStorage.removeItem('librelayer-active-job');
+      } catch {
+        localStorage.removeItem('librelayer-active-job');
+      }
     }
   };
   const loadFilterPlugin = async (file?: File) => {
@@ -18973,10 +19036,28 @@ export default function Home() {
         </aside>
       </div>
       <footer className="status-bar">
-        <span title={recoveryStatus}>
-          {status}
-          {recoveryStatus ? ` · ${recoveryStatus}` : ''}
-        </span>
+        <div className="status-message" title={recoveryStatus}>
+          <span>
+            {status}
+            {recoveryStatus ? ` · ${recoveryStatus}` : ''}
+          </span>
+          {activeJob && (
+            <span className="active-job" role="status">
+              <progress
+                aria-label={`${activeJob.label} progress`}
+                max={100}
+                value={activeJob.progress}
+              />
+              <span>{activeJob.progress}%</span>
+              <button
+                type="button"
+                onClick={() => activeJobAbort.current?.abort()}
+              >
+                Cancel
+              </button>
+            </span>
+          )}
+        </div>
         <span className="status-center">
           {doc.w} × {doc.h}px · {layers.length} layers
           {selection ? ' · selection active' : ''}

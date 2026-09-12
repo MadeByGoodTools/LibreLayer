@@ -800,6 +800,35 @@ button {
 .status-center {
   justify-self: center;
 }
+.status-message {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+.status-message > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-job {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.active-job progress {
+  width: 64px;
+  height: 5px;
+  accent-color: var(--accent);
+}
+.active-job button {
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: inherit;
+}
 .zoom-control {
   justify-self: end;
   display: grid;

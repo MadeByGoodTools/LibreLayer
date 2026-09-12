@@ -86,12 +86,14 @@ export const applyCpuFilterPlugin = (
   height: number,
   kernel: FilterPluginManifest['cpuKernel'],
   amount = 100,
+  onProgress?: (progress: number) => void,
 ) => {
   if (source.length !== width * height * 4 || width < 1 || height < 1)
     throw new Error('The filter plug-in received invalid pixel dimensions.');
   const output = new Uint8ClampedArray(source.length),
     mix = Math.max(0, Math.min(1, amount / 100));
-  for (let y = 0; y < height; y++)
+  const progressStride = Math.max(1, Math.floor(height / 20));
+  for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const target = (y * width + x) * 4;
       for (let channel = 0; channel < 3; channel++) {
@@ -110,6 +112,9 @@ export const applyCpuFilterPlugin = (
       }
       output[target + 3] = source[target + 3];
     }
+    if (y % progressStride === 0 || y === height - 1)
+      onProgress?.(Math.round(((y + 1) / height) * 100));
+  }
   return output;
 };
 
@@ -148,19 +153,23 @@ export const applyFilterPlugin = async (
   width: number,
   height: number,
   amount = 100,
+  onProgress?: (progress: number) => void,
 ): Promise<FilterPluginResult> => {
   const manifest = validateFilterPlugin(manifestValue),
     original = new Uint8ClampedArray(source);
   if (manifest.wasmBase64)
     try {
+      onProgress?.(20);
+      const pixels = await runWasmFilterPlugin(
+        original,
+        width,
+        height,
+        manifest.wasmBase64,
+        amount,
+      );
+      onProgress?.(100);
       return {
-        pixels: await runWasmFilterPlugin(
-          original,
-          width,
-          height,
-          manifest.wasmBase64,
-          amount,
-        ),
+        pixels,
         backend: 'wasm',
       };
     } catch (error) {
@@ -171,6 +180,7 @@ export const applyFilterPlugin = async (
           height,
           manifest.cpuKernel,
           amount,
+          onProgress,
         ),
         backend: 'cpu',
         warning: error instanceof Error ? error.message : 'WebAssembly failed.',
@@ -183,6 +193,7 @@ export const applyFilterPlugin = async (
       height,
       manifest.cpuKernel,
       amount,
+      onProgress,
     ),
     backend: 'cpu',
   };

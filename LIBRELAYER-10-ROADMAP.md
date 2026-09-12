@@ -150,7 +150,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Memory-pressure adaptation and preview/final quality scheduling.
 - [ ] OPFS scratch storage with selectable locations and quotas.
 - [ ] Incremental saving, pixel deduplication, compressed history, and transaction journal.
-- [ ] Cancelable jobs, watchdogs, and crash recovery.
+- [x] Cancelable jobs, watchdogs, and crash recovery.
 - [ ] 12–100+ MP and hundreds-of-layers performance suite.
 
 ## 12. Typography, vectors, and layout

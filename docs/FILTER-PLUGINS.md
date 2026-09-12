@@ -34,5 +34,6 @@ LibreLayer writes tightly packed RGBA8 pixels at `ptr = 0`, grows exported memor
 - The edit creates one history state and supports Undo and Redo.
 - A rejected manifest never changes the document.
 - A WebAssembly failure uses the declared CPU kernel and reports the fallback in the status bar.
+- Processing runs in a dedicated worker with status-bar progress, cancellation, and a 30-second watchdog. Pixels are committed only after the worker finishes successfully.
 
 See `tests/fixtures/sharpen.librefilter` for a working CPU-only example.

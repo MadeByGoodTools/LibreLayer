@@ -1,0 +1,9 @@
+{
+  "format": "librelayer-filter-plugin",
+  "version": 1,
+  "id": "librelayer.qa.watchdog",
+  "name": "QA Watchdog",
+  "pluginVersion": "1.0.0",
+  "cpuKernel": [0, 0, 0, 0, 1, 0, 0, 0, 0],
+  "wasmBase64": "AGFzbQEAAAABCQFgBX9/f39/AAMCAQAFAwEAAQcUAgZtZW1vcnkCAAdwcm9jZXNzAAAKCQEHAANADAALCw=="
+}

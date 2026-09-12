@@ -79,3 +79,20 @@ void test('invalid WebAssembly falls back to the declared CPU kernel', async () 
   assert.match(result.warning ?? '', /WebAssembly|magic/i);
   assert.deepEqual(result.pixels, source);
 });
+
+void test('CPU filter jobs report bounded monotonic progress through completion', async () => {
+  const progress: number[] = [],
+    source = new Uint8ClampedArray(4 * 8 * 8).fill(80);
+  await applyFilterPlugin(identity, source, 8, 8, 100, (value) =>
+    progress.push(value),
+  );
+  assert.ok(progress.length > 1);
+  assert.equal(progress.at(-1), 100);
+  assert.equal(
+    progress.every(
+      (value, index) =>
+        value >= 0 && value <= 100 && (!index || value >= progress[index - 1]),
+    ),
+    true,
+  );
+});
