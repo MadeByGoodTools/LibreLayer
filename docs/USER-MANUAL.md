@@ -23,7 +23,7 @@ Create pixel, text, shape, adjustment, fill, Smart Object, or group layers. The 
 
 Layer masks support density, feather, overlay, inversion, enable/disable, application, deletion, edge refinement, and independent transform when unlinked. Select and Mask offers six preview modes and can output a selection, layer mask, or duplicated layer with mask. Vector masks are editable paths.
 
-Smart Objects retain embedded or linked source data, transforms, and editable Smart Filters. Linked files may require browser permission again after reconnecting a drive.
+Smart Objects retain embedded or linked source data, transforms, and editable Smart Filters. When the browser supports file handles, linked sources remember their connection on this browser profile. Use **Refresh** to reread the source and **Relink** after a file moves or a drive is reconnected. A missing or denied link is shown explicitly, while the packaged embedded fallback remains visible and travels inside the `.librelayer` project. Browsers without persistent handles can still place a linked-style object with an embedded fallback, but must use Relink to refresh it.
 
 ## Selecting
 

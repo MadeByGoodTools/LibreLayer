@@ -72,6 +72,7 @@ import {
   type TiledImage,
 } from '@/lib/tiled-history';
 import { penIntent } from '@/lib/pointer-input';
+import { resolveLinkedFile } from '@/lib/linked-smart-object';
 import {
   checkDimensions,
   checkFileSize,
@@ -106,6 +107,7 @@ import {
   deleteVersion,
   forgetRecentFile,
   getDefaultSaveDirectory,
+  getLinkedFileHandle,
   loadRawAsset,
   loadWorkspaceState,
   recentFiles,
@@ -116,6 +118,7 @@ import {
   saveVersion,
   saveWorkspaceState,
   saveBrushTip,
+  saveLinkedFileHandle,
   setDefaultSaveDirectory,
   deleteRecovery,
   type LocalDirectoryHandle,
@@ -379,6 +382,8 @@ type SmartObjectData = {
   sourceData: string;
   filters: SmartFilter[];
   filterMask: boolean;
+  linkedHandleId?: string;
+  linkedStatus?: 'connected' | 'missing';
   raw?: {
     assetId: string;
     width: number;
@@ -6343,12 +6348,35 @@ export default function Home() {
     );
     setStatus('Embedded Smart Object created; transforms are non-destructive');
   };
-  const chooseSmartFile = (action: 'link' | 'replace' | 'relink') => {
+  async function chooseSmartFile(action: 'link' | 'replace' | 'relink') {
     smartFileAction.current = action;
-    smartObjectFileRef.current?.click();
-  };
-  const applySmartFile = async (file?: File) => {
-    if (!file) return;
+    const picker = (
+      window as unknown as {
+        showOpenFilePicker?: (options: unknown) => Promise<LocalFileHandle[]>;
+      }
+    ).showOpenFilePicker;
+    if (!picker) {
+      smartObjectFileRef.current?.click();
+      return;
+    }
+    try {
+      const [handle] = await picker({
+        multiple: false,
+        types: [
+          {
+            description: 'Images',
+            accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] },
+          },
+        ],
+      });
+      if (handle) await applySmartFile(await handle.getFile(), handle);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError'))
+        setStatus('The linked image could not be selected');
+    }
+  }
+  async function applySmartFile(file?: File, handle?: LocalFileHandle) {
+    if (!file) return false;
     const action = smartFileAction.current;
     try {
       const image = new Image(),
@@ -6389,6 +6417,19 @@ export default function Home() {
             sourceData: pixels.toDataURL('image/png'),
             filters: previous?.filters ?? [],
             filterMask: previous?.filterMask ?? false,
+            linkedHandleId:
+              action === 'link' || action === 'relink'
+                ? meta.id
+                : previous?.linkedHandleId,
+            linkedStatus:
+              handle &&
+              (action === 'link' ||
+                action === 'relink' ||
+                previous?.kind === 'linked')
+                ? 'connected'
+                : action === 'link' || action === 'relink'
+                  ? 'missing'
+                  : previous?.linkedStatus,
           },
         },
         action === 'replace'
@@ -6397,6 +6438,13 @@ export default function Home() {
             ? 'Relink Smart Object'
             : 'Place linked Smart Object',
       );
+      if (
+        handle &&
+        (action === 'link' ||
+          action === 'relink' ||
+          previous?.kind === 'linked')
+      )
+        await saveLinkedFileHandle(meta.id, handle);
       render();
       setStatus(
         action === 'replace'
@@ -6405,14 +6453,41 @@ export default function Home() {
             ? 'Linked Smart Object relinked'
             : 'Linked Smart Object placed with an embedded fallback',
       );
+      return true;
     } catch (error) {
       setStatus(
         error instanceof Error
           ? error.message
           : 'Smart Object file could not be opened',
       );
+      return false;
     } finally {
       if (smartObjectFileRef.current) smartObjectFileRef.current.value = '';
+    }
+  }
+  const refreshLinkedSmartObject = async () => {
+    const meta = selected(),
+      smart = meta?.smartObject;
+    if (!meta || smart?.kind !== 'linked') {
+      setStatus('Select a linked Smart Object first');
+      return;
+    }
+    try {
+      const record = await getLinkedFileHandle(smart.linkedHandleId ?? meta.id),
+        resolved = await resolveLinkedFile(record);
+      smartFileAction.current = 'replace';
+      if (!(await applySmartFile(resolved.file, resolved.handle)))
+        throw Error('The linked image could not be decoded');
+      setStatus(`${resolved.name} refreshed from its linked file`);
+    } catch (error) {
+      patchLayer(
+        meta.id,
+        { smartObject: { ...smart, linkedStatus: 'missing' } },
+        'Linked file unavailable',
+      );
+      setStatus(
+        `${error instanceof Error ? error.message : 'The linked file is unavailable'} · embedded fallback retained · use Relink`,
+      );
     }
   };
   const resolveRawMaster = async (raw: NonNullable<SmartObjectData['raw']>) => {
@@ -11980,16 +12055,20 @@ export default function Home() {
             { name: 'Convert to Smart Object', action: convertToSmartObject },
             {
               name: 'Place linked Smart Object…',
-              action: () => chooseSmartFile('link'),
+              action: () => void chooseSmartFile('link'),
             },
             { name: 'Edit Smart Object contents', action: editSmartContents },
             {
+              name: 'Refresh linked Smart Object',
+              action: () => void refreshLinkedSmartObject(),
+            },
+            {
               name: 'Replace Smart Object contents…',
-              action: () => chooseSmartFile('replace'),
+              action: () => void chooseSmartFile('replace'),
             },
             {
               name: 'Relink Smart Object…',
-              action: () => chooseSmartFile('relink'),
+              action: () => void chooseSmartFile('relink'),
             },
             {
               name: 'Add Blur Smart Filter',
@@ -14917,6 +14996,28 @@ export default function Home() {
                       </div>
                       {active?.smartObject && (
                         <>
+                          {active.smartObject.kind === 'linked' && (
+                            <div className="linked-smart-summary">
+                              <div>
+                                <strong>{active.smartObject.sourceName}</strong>
+                                <small>
+                                  {active.smartObject.linkedStatus === 'missing'
+                                    ? 'Link missing · embedded fallback active'
+                                    : 'Linked source · embedded fallback packaged'}
+                                </small>
+                              </div>
+                              <button
+                                onClick={() => void refreshLinkedSmartObject()}
+                              >
+                                Refresh
+                              </button>
+                              <button
+                                onClick={() => void chooseSmartFile('relink')}
+                              >
+                                Relink…
+                              </button>
+                            </div>
+                          )}
                           {active.smartObject.raw && (
                             <div className="raw-smart-summary">
                               <div>

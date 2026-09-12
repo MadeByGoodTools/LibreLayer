@@ -127,7 +127,7 @@ This is the release ledger for closing the remaining gap with a professional des
 
 - [x] Embedded/linked object metadata, transforms, editable filters, order, visibility, blend, opacity, and masks.
 - [ ] True embedded source documents editable in their own tabs.
-- [ ] Persistent linked-file handles, refresh, missing-link repair, relinking, and packaging.
+- [x] Persistent linked-file handles, refresh, missing-link repair, relinking, and packaging.
 - [ ] Shared and independent instances with a dependency graph and cycle protection.
 - [ ] Nondestructive skew, perspective, warp, vector, RAW, and nested object content.
 - [ ] Cached preview/final filter graph with versioned parameters.

@@ -24,6 +24,13 @@ export type LocalFileHandle = {
   requestPermission?: (options: { mode: 'read' }) => Promise<PermissionState>;
 };
 
+export type LinkedFileHandleRecord = {
+  id: string;
+  name: string;
+  updated: number;
+  handle: LocalFileHandle;
+};
+
 export type RecentFileRecord = {
   id: string;
   name: string;
@@ -375,6 +382,17 @@ export async function getDefaultSaveDirectory(): Promise<LocalDirectoryHandle | 
 
 export const setDefaultSaveDirectory = (handle: LocalDirectoryHandle) =>
   writeOne('handles', { id: 'default-save-directory', handle });
+
+export const saveLinkedFileHandle = (id: string, handle: LocalFileHandle) =>
+  writeOne('handles', {
+    id: `linked:${id}`,
+    name: handle.name,
+    updated: Date.now(),
+    handle,
+  } satisfies LinkedFileHandleRecord);
+
+export const getLinkedFileHandle = (id: string) =>
+  readOne<LinkedFileHandleRecord>('handles', `linked:${id}`);
 
 export async function clearDefaultSaveDirectory(): Promise<void> {
   const db = await openDatabase();
