@@ -366,6 +366,7 @@ import {
   normalizePerformanceMode,
   previewScaleForPixels,
 } from '@/lib/performance-policy';
+import { runPerformanceSuite } from '@/lib/performance-suite-job';
 import {
   cleanScratch,
   deleteScratch,
@@ -2000,6 +2001,9 @@ export default function Home() {
   const [preferences, setPreferences] =
       useState<EditorPreferences>(defaultPreferences),
     [settingsOpen, setSettingsOpen] = useState(false),
+    [settingsInitialTab, setSettingsInitialTab] = useState<
+      'layout' | 'performance'
+    >('layout'),
     [panelsHidden, setPanelsHidden] = useState(false),
     [commandPaletteOpen, setCommandPaletteOpen] = useState(false),
     [contextMenu, setContextMenu] = useState<{
@@ -2057,6 +2061,10 @@ export default function Home() {
     [recoveryStatus, setRecoveryStatus] = useState(''),
     [storageStatus, setStorageStatus] = useState('Checking browser storage…'),
     [scratchStatus, setScratchStatus] = useState('Checking scratch storage…'),
+    [performanceCheckStatus, setPerformanceCheckStatus] = useState(
+      'Not run on this computer yet',
+    ),
+    [performanceCheckRunning, setPerformanceCheckRunning] = useState(false),
     [saveLocationName, setSaveLocationName] = useState('Downloads'),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(
       null,
@@ -2180,6 +2188,37 @@ export default function Home() {
       );
     }
   };
+  const runLocalPerformanceCheck = async () => {
+    if (performanceCheckRunning) return;
+    setPerformanceCheckRunning(true);
+    setPerformanceCheckStatus('Starting local worker…');
+    try {
+      const report = await runPerformanceSuite((progress) =>
+        setPerformanceCheckStatus(`${progress}% · testing local tiled workloads`),
+      );
+      const total = report.results.reduce(
+          (sum, result) => sum + result.elapsedMs,
+          report.layers.elapsedMs,
+        ),
+        largest = report.results.at(-1)!;
+      setPerformanceCheckStatus(
+        `Passed in ${Math.round(total).toLocaleString()} ms · ${largest.megapixels} MP across ${largest.tiles} tiles · ${report.layers.layers} layers`,
+      );
+    } catch (error) {
+      setPerformanceCheckStatus(
+        error instanceof Error ? error.message : 'The local performance check failed.',
+      );
+    } finally {
+      setPerformanceCheckRunning(false);
+    }
+  };
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('qa') !== 'performance')
+      return;
+    setSettingsInitialTab('performance');
+    setSettingsOpen(true);
+    void runLocalPerformanceCheck();
+  }, []);
   useEffect(() => {
     void refreshStorageStatus().catch(() =>
       setStorageStatus('Storage details are unavailable in this browser'),
@@ -20197,6 +20236,10 @@ export default function Home() {
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
         scratchStatus={scratchStatus}
         onCleanScratch={() => void cleanLocalScratch()}
+        performanceCheckStatus={performanceCheckStatus}
+        performanceCheckRunning={performanceCheckRunning}
+        onRunPerformanceCheck={() => void runLocalPerformanceCheck()}
+        initialTab={settingsInitialTab}
         documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/${preferences.historyDepth ?? 32} history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels · ${activePerformancePolicy.mode} mode · ${activePerformancePolicy.pressure} pressure · ${(activePerformancePolicy.previewPixelBudget / 1_000_000).toFixed(1)} MP interactive preview`}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}

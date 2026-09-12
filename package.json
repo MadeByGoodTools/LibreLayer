@@ -16,6 +16,7 @@
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "test:core": "node --test tests/*.test.ts",
+    "test:performance": "node scripts/performance-suite.ts",
     "lint": "oxlint",
     "format": "oxfmt"
   },

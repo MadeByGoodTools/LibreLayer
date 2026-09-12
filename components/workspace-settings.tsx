@@ -97,6 +97,10 @@ export function WorkspaceSettings({
   onResetSaveLocation,
   scratchStatus,
   onCleanScratch,
+  performanceCheckStatus,
+  performanceCheckRunning,
+  onRunPerformanceCheck,
+  initialTab = 'layout',
   documentStatus,
 }: {
   commands: { name: string; shortcut: string }[];
@@ -114,6 +118,10 @@ export function WorkspaceSettings({
   onResetSaveLocation: () => void;
   scratchStatus: string;
   onCleanScratch: () => void;
+  performanceCheckStatus: string;
+  performanceCheckRunning: boolean;
+  onRunPerformanceCheck: () => void;
+  initialTab?: 'layout' | 'performance';
   documentStatus: string;
 }) {
   const [name, setName] = useState(''),
@@ -143,7 +151,7 @@ export function WorkspaceSettings({
           Saved on this browser profile. These settings remain after you close
           LibreLayer.
         </DialogDescription>
-        <Tabs defaultValue="layout">
+        <Tabs defaultValue={initialTab}>
           <TabsList>
             <TabsTrigger value="layout">Workspace</TabsTrigger>
             <TabsTrigger value="keys">Shortcuts</TabsTrigger>
@@ -818,6 +826,23 @@ export function WorkspaceSettings({
             <div className="flex items-center justify-between gap-3 rounded border p-3">
               <span>{scratchStatus}</span>
               <Button variant="outline" onClick={onCleanScratch}>Clean scratch</Button>
+            </div>
+            <div className="grid gap-2 rounded border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <strong>Large-document check</strong>
+                <Button
+                  variant="outline"
+                  disabled={performanceCheckRunning}
+                  onClick={onRunPerformanceCheck}
+                >
+                  {performanceCheckRunning ? 'Running…' : 'Run local check'}
+                </Button>
+              </div>
+              <span>{performanceCheckStatus}</span>
+              <p>
+                Runs off the interface thread using 12, 36, 64, and 100 MP tiled
+                workloads plus a 300-layer composite fixture.
+              </p>
             </div>
             <label>
               Undo history states
