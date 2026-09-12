@@ -344,6 +344,7 @@ import {
   applyReferenceFilter,
   type ReferenceFilter,
 } from '@/lib/filter-gallery';
+import { applyDistortFilter, type DistortFilter } from '@/lib/distort-filter';
 import {
   multiScaleExportPlan,
   normalizeArtboard,
@@ -12736,13 +12737,35 @@ export default function Home() {
       }
     } else if (
       [
-        'liquify',
         'lens-correction',
-        'wide-angle',
-        'vanishing-point',
         'displace',
-        'distort-filters',
+        'polar',
+        'wave',
+        'ripple',
+        'spherize',
+        'pixelate',
+        'halftone',
       ].includes(feature.command)
+    ) {
+      const context = canvas.getContext('2d', { willReadFrequently: true })!,
+        image = context.getImageData(0, 0, canvas.width, canvas.height),
+        pixels = applyDistortFilter(
+          image.data,
+          image.width,
+          image.height,
+          feature.command as DistortFilter,
+          options.amount,
+          options.secondary,
+        );
+      context.putImageData(
+        new ImageData(pixels, image.width, image.height),
+        0,
+        0,
+      );
+    } else if (
+      ['liquify', 'wide-angle', 'vanishing-point', 'distort-filters'].includes(
+        feature.command,
+      )
     ) {
       remapRaster(canvas, (x, y, w, h) => {
         const nx = x / w - 0.5,
@@ -13529,7 +13552,7 @@ export default function Home() {
             { name: 'New adjustment layer', action: createAdjustment },
             { name: 'Layer Studio…', action: () => setLayerStudioOpen(true) },
             {
-              name: 'Professional Studio — 114 tools…',
+              name: 'Professional Studio — 119 tools…',
               action: () => setProSuiteOpen(true),
             },
             { name: 'AI Remove Background', action: aiRemoveBackground },

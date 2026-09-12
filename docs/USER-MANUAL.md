@@ -83,6 +83,8 @@ Built-in and imported `.cube` LUTs preview live. Histograms, waveform, RGB parad
 
 The Filter menu exposes Blur Gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and Noise Reduction directly. The same filters are available in Professional Studio with Amount and Secondary controls. Blur Gallery uses Secondary as the in-focus vertical position; Lens Blur treats image luminance as a depth map and Secondary as the focal depth; Surface Blur uses Secondary as its edge threshold. Noise Reduction is selected below 50% Secondary, while 50% or above intentionally adds noise. Every filter preserves alpha, respects the active selection, and creates a full undo/redo history state.
 
+Professional Studio's Specialty Filters include Lens Correction, Displacement Maps, Polar Coordinates, Wave, Ripple, Spherize, Pixelate, and Halftone. Amount controls correction strength or cell size; Secondary controls wave frequency. Distortion filters use bilinear sampling, preserve transparent pixels, respect the current selection, and can be undone or replayed in an exported local workflow.
+
 ## Saving and export
 
 - **Editable master:** File → Save layered project (`Ctrl/⌘+S`) writes `.librelayer`. Password-protected projects use local AES-256-GCM encryption; losing the password makes the file unrecoverable.

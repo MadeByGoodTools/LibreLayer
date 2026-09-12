@@ -264,7 +264,7 @@ export function ProSuiteDialog({
               );
             }}
           >
-            Run 113 feature checks
+            Run {suiteFeatures.length} feature checks
           </Button>
           {report && <output aria-live="polite">{report}</output>}
           <Button onClick={onClose}>Done</Button>

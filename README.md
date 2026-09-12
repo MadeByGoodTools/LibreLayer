@@ -75,6 +75,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Persisted vector stroke recipes with caps, joins, dash styles, tapered start/end widths, pixel painting, and editable SVG import/export that round-trips LibreLayer width metadata
 - Editable artboards with named bounds and backgrounds, nondestructive rectangular/elliptical frame clipping, key-object alignment, equal-gap spacing, and local 1×/2×/3× PNG asset export
 - Deterministic Blur Gallery, depth-aware Lens Blur, edge-preserving Surface Blur and noise reduction, Smart Sharpen, and High Pass filters with selection-aware undo/redo
+- Bilinear lens correction, displacement, polar-coordinate, wave, ripple, spherize, pixelate, and halftone filters with reproducible output
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 
 Projects remain on the user's device unless they explicitly export or share a file.

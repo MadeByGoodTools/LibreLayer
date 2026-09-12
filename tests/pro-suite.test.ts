@@ -20,7 +20,7 @@ void test('all Professional Studio commands pass their registry and pixel checks
   const { runSuiteSelfTest, suiteFeatures } =
     await import('../lib/pro-suite.ts');
   const result = runSuiteSelfTest();
-  assert.equal(suiteFeatures.length, 114);
+  assert.equal(suiteFeatures.length, 119);
   assert.deepEqual(result.failures, []);
   assert.equal(result.passed, result.total);
 });
