@@ -1,6 +1,6 @@
-# LibreLayer 0.1.0 release candidate
+# LibreLayer 0.5 — Deep Canvas Update
 
-LibreLayer 0.1.0 is the first open release candidate of the browser-local layered image editor. It is suitable for evaluation and contribution, but it is not yet represented as full Photoshop parity or independently production-certified.
+Released September 12, 2026. LibreLayer 0.5 is the largest pre-1.0 release of the browser-local layered image editor. The Deep Canvas Update focuses on high-depth color, HDR rendering, nondestructive editing, local recovery, performance, and dependable release gates. Version 1.0 remains reserved for completion of the professional-parity roadmap; 0.5 is not represented as full Photoshop parity or independent production certification.
 
 ## Editing highlights
 

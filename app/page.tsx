@@ -2630,7 +2630,7 @@ export default function Home() {
         // A production service worker left on localhost can cache Vite's
         // development client and break hot reload with repeated send errors.
         void navigator.serviceWorker
-          .register('/sw.js?dev-cleanup=v30')
+          .register('/sw.js?dev-cleanup=v0.5.0')
           .then(() => navigator.serviceWorker.getRegistrations())
           .then(async (registrations) => {
             const wasControlled = Boolean(navigator.serviceWorker.controller);

@@ -1,4 +1,4 @@
-const CACHE = 'librelayer-shell-v30';
+const CACHE = 'librelayer-shell-v0.5.0';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/offline.html'];
 const LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1'].includes(
   self.location.hostname,

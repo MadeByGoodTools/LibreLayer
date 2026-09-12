@@ -2,6 +2,8 @@
 
 LibreLayer is a free, open-source layered image editor that runs in the browser. It provides familiar desktop-style editing workflows without requiring users to upload their work to a server.
 
+Current release: **LibreLayer 0.5 — Deep Canvas Update**. Version 1.0 remains reserved for completion of the full professional-parity release roadmap.
+
 [Open LibreLayer](https://librelayer.goodtools.ca) · [Good Tools product page](https://goodtools.ca/tools/librelayer)
 
 ![LibreLayer editor](docs/screenshots/librelayer.jpg)
@@ -121,7 +123,7 @@ pnpm test:release
 
 See [PSD-COMPATIBILITY.md](PSD-COMPATIBILITY.md) for the current PSD and PSB compatibility notes. Third-party decoder and renderer notices are included in [public/editor-import-licenses.txt](public/editor-import-licenses.txt).
 
-The [user manual](docs/USER-MANUAL.md), [printing guide](docs/PRINTING.md), [local scripting guide](docs/LOCAL-SCRIPTING.md), [plug-in platform specification](docs/PLUGIN-PLATFORM.md), [filter plug-in specification](docs/FILTER-PLUGINS.md), [background-job safety model](docs/BACKGROUND-JOBS.md), [format matrix](docs/FORMAT-MATRIX.md), [privacy and storage model](docs/PRIVACY-AND-STORAGE.md), [migration policy](docs/MIGRATION-POLICY.md), [security policy](SECURITY.md), and [0.1.0 release-candidate notes](docs/RELEASE-NOTES-0.1.0.md) document the current verified scope and limits.
+The [user manual](docs/USER-MANUAL.md), [printing guide](docs/PRINTING.md), [local scripting guide](docs/LOCAL-SCRIPTING.md), [plug-in platform specification](docs/PLUGIN-PLATFORM.md), [filter plug-in specification](docs/FILTER-PLUGINS.md), [background-job safety model](docs/BACKGROUND-JOBS.md), [format matrix](docs/FORMAT-MATRIX.md), [privacy and storage model](docs/PRIVACY-AND-STORAGE.md), [migration policy](docs/MIGRATION-POLICY.md), [security policy](SECURITY.md), and [0.5 Deep Canvas release notes](docs/RELEASE-NOTES-0.5.0.md) document the current verified scope and limits.
 
 ## Contributing
 

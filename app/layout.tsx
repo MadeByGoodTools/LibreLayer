@@ -14,10 +14,15 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'LibreLayer by Good Tools — Online Image Editor',
-  description: 'A free, familiar browser-based image editor from Good Tools.',
+  description:
+    'LibreLayer 0.5 Deep Canvas Update — a free, familiar browser-based image editor from Good Tools.',
   manifest: '/manifest.webmanifest',
   icons: { icon: '/favicon.svg', apple: '/favicon.svg' },
   applicationName: 'LibreLayer by Good Tools',
+  other: {
+    'application-version': '0.5.0',
+    'release-name': 'Deep Canvas Update',
+  },
 };
 
 export default function RootLayout({

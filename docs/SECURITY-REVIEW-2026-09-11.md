@@ -2,7 +2,7 @@
 
 ## Scope
 
-This review covers the LibreLayer 0.1.0 release-candidate source tree, production dependencies, browser storage and file access, user-provided markup paths, encryption boundaries, and release checks.
+This review covers the LibreLayer 0.5 Deep Canvas release source tree, production dependencies, browser storage and file access, user-provided markup paths, encryption boundaries, and release checks. It was refreshed on September 12, 2026 for the public release.
 
 ## Completed checks
 
