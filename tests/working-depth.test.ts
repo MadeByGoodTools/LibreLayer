@@ -9,7 +9,9 @@ import {
   resizeWorkingSurface,
   serializeWorkingSurface,
   syncWorkingSurfaceFromRgba8,
+  workingSurfaceFromFloat32,
   workingSurfaceFromRgba8,
+  workingSurfaceToFloat32,
   workingSurfaceToRgba8,
   writeWorkingChannel,
   placeWorkingSurface,
@@ -99,4 +101,11 @@ void test('high-depth resize and canvas placement avoid an 8-bit intermediate', 
   const placed = placeWorkingSurface(resized, 6, 2, 1, 1);
   assert.equal(readWorkingChannel(placed, (1 * 6 + 1) * 4), 2.5);
   assert.equal(readWorkingChannel(placed, 0), 0);
+});
+
+void test('scene-linear float pixels round-trip without display quantization', () => {
+  const source = new Float32Array([4, 0.25, 1.5, 1, 0, 0.5, 12, 0.75]),
+    surface = workingSurfaceFromFloat32(source, 2, 1, '32f'),
+    restored = workingSurfaceToFloat32(surface);
+  assert.deepEqual(restored, source);
 });

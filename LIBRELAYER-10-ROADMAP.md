@@ -110,7 +110,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Seven selectable LibRaw demosaic recipes, including AHD, DCB, DHT, and modified AHD, verified by reopening real Bayer DNG and Fujifilm X-Trans sensor files.
 - [x] Highlight reconstruction, hot-pixel and banding removal, plus separate browser-local chroma/luma denoise. AI denoise was intentionally removed from scope in favor of a tuned deterministic local engine.
 - [x] Local focal-family lens profiles with metadata matching, distortion, vignette, aberration, defringe, and RAW sharpening.
-- [ ] Scene-referred HDR and supported HDR-display preview.
+- [x] Scene-referred 32-bit HDR Merge with Float16 extended-sRGB preview on supported HDR displays, deterministic SDR fallback, and highlight map.
 - [x] Portable sidecars and sequential local batch development with progress, per-file failure reporting, and safe stopping.
 - [ ] Full camera fixture matrix.
 

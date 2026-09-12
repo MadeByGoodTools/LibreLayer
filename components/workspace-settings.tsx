@@ -19,6 +19,7 @@ import {
 import type { MotionPreference } from '@/lib/accessibility-preferences';
 import type { PerformanceMode } from '@/lib/performance-policy';
 import type { ScratchLocation } from '@/lib/scratch-storage';
+import type { HdrPreviewMode } from '@/lib/hdr-display';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -53,6 +54,7 @@ export type EditorPreferences = {
   autosave: boolean;
   proofMode?: SoftProofMode;
   gamutWarning?: boolean;
+  hdrPreviewMode?: HdrPreviewMode;
   historyDepth?: number;
   historyBudgetMb?: number;
   toolbar?: ToolbarPreferences;
@@ -72,6 +74,7 @@ export const defaultPreferences: EditorPreferences = {
   autosave: true,
   proofMode: 'none',
   gamutWarning: false,
+  hdrPreviewMode: 'auto',
   historyDepth: 32,
   historyBudgetMb: 512,
   toolbar: { order: [], hidden: [], groupByFamily: true },
@@ -789,15 +792,17 @@ export function WorkspaceSettings({
                   })
                 }
               >
-                <option value="performance">Performance — fastest previews</option>
+                <option value="performance">
+                  Performance — fastest previews
+                </option>
                 <option value="balanced">Balanced — adaptive</option>
                 <option value="quality">Quality — sharper live previews</option>
               </select>
             </label>
             <p>
               LibreLayer automatically reduces interactive preview work when a
-              document approaches this computer&apos;s memory budget, then renders
-              the final full-quality result after the control settles.
+              document approaches this computer&apos;s memory budget, then
+              renders the final full-quality result after the control settles.
             </p>
             <label>
               Scratch storage
@@ -812,7 +817,9 @@ export function WorkspaceSettings({
                 }
               >
                 <option value="browser">Private browser storage</option>
-                <option value="save-folder">Remembered save folder or external drive</option>
+                <option value="save-folder">
+                  Remembered save folder or external drive
+                </option>
               </select>
             </label>
             <label>
@@ -827,14 +834,19 @@ export function WorkspaceSettings({
                 onChange={(event) =>
                   onChange({
                     ...value,
-                    scratchQuotaMb: Math.max(128, Math.min(8192, +event.target.value || 1024)),
+                    scratchQuotaMb: Math.max(
+                      128,
+                      Math.min(8192, +event.target.value || 1024),
+                    ),
                   })
                 }
               />
             </label>
             <div className="flex items-center justify-between gap-3 rounded border p-3">
               <span>{scratchStatus}</span>
-              <Button variant="outline" onClick={onCleanScratch}>Clean scratch</Button>
+              <Button variant="outline" onClick={onCleanScratch}>
+                Clean scratch
+              </Button>
             </div>
             <div className="grid gap-2 rounded border p-3">
               <div className="flex items-center justify-between gap-3">
@@ -943,6 +955,26 @@ export function WorkspaceSettings({
                 }
               />{' '}
               Show out-of-gamut colors in magenta
+            </label>
+            <label>
+              Floating-point HDR preview
+              <select
+                aria-label="Floating-point HDR preview"
+                className="block border rounded p-2 bg-background w-full"
+                value={value.hdrPreviewMode ?? 'auto'}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    hdrPreviewMode: event.target.value as HdrPreviewMode,
+                  })
+                }
+              >
+                <option value="auto">
+                  Automatic — extended range when supported
+                </option>
+                <option value="sdr">SDR tone-mapped preview</option>
+                <option value="highlights">Highlight clipping map</option>
+              </select>
             </label>
             <p>
               Proofing changes only the on-screen preview. Exported pixels stay

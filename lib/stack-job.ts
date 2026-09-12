@@ -5,6 +5,7 @@ import { JobCancelledError, JobWatchdogError } from './filter-plugin-job';
 export type StackJobResult =
   | { kind: 'aligned'; translations: Translation[] }
   | ({ kind: 'panorama' } & PanoramaResult)
+  | { kind: 'hdr'; pixels: Float32Array }
   | { kind: 'result'; pixels: Uint8ClampedArray };
 
 export function runStackJob(
@@ -57,6 +58,7 @@ export function runStackJob(
         | { kind: 'progress'; progress: number }
         | { kind: 'aligned'; translations: Translation[] }
         | ({ kind: 'panorama' } & PanoramaResult)
+        | { kind: 'hdr'; pixels: Float32Array }
         | { kind: 'result'; pixels: Uint8ClampedArray }
         | { kind: 'error'; message: string }
       >,
@@ -75,6 +77,8 @@ export function runStackJob(
           pixels: new Uint8ClampedArray(event.data.pixels),
           translations: event.data.translations,
         });
+      else if (event.data.kind === 'hdr')
+        finish({ kind: 'hdr', pixels: new Float32Array(event.data.pixels) });
       else
         finish({
           kind: 'result',

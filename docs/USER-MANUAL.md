@@ -95,6 +95,8 @@ Use nondestructive adjustment layers whenever an edit may need revisiting. Avail
 
 Built-in and imported `.cube` LUTs preview live. Histograms, waveform, RGB parade, and vectorscope help evaluate tone and color. CMYK and grayscale proof modes are previews only; they do not convert the document profile.
 
+For 16-bit half-float and 32-bit float documents, **View → HDR display preview** can use an extended-range Float16 canvas on compatible HDR browsers and displays. **Automatic** enables extended highlights only when the browser reports HDR support, **SDR tone-mapped preview** provides a consistent bounded fallback, and **Highlight clipping map** marks scene values above display white. The chosen preview mode is saved with device-local preferences. The document's scene-linear samples are not changed by any preview mode.
+
 ## Camera Raw
 
 Supported Bayer and X-Trans camera files open in a live scene-linear developer. **Decode & color profile** offers Linear, VNG, PPG, AHD, DCB, DHT, and modified-AHD LibRaw interpolation recipes; as-shot, automatic, calibrated daylight, and calibrated tungsten white-balance sources; and camera-matrix or embedded DNG/ICC profile processing. Changing any decode option reprocesses the retained sensor file rather than filtering its preview. Alongside exposure, temperature/tint, highlight recovery, and color controls, **Detail & noise** provides independent luminance noise, color noise, hot-pixel, and row-banding correction. **Optics** can match a local focal-family profile from the embedded lens name or use a manually selected profile, with separate distortion, vignette, chromatic-aberration, purple-fringe, and RAW-sharpening controls. All settings are stored in the editable RAW recipe; the original sensor data remains unchanged.
@@ -154,7 +156,9 @@ Put placeholders such as `{{name}}` or `{{price}}` in one or more editable text 
 
 ## Aligning and stacking layers
 
-Select two or more visible pixel layers in the Layers panel. **Layer → Auto-align opaque content** measures image overlap rather than layer bounds, keeps the active layer fixed, and moves the other unlocked layers into registration. **Filter → Professional Studio → Compositing & motion** provides Auto-Blend exposure fusion, Focus Stack, scene-linear HDR Merge with display tone mapping, and Image Stack. Image Stack uses the panel's **Secondary** value to choose minimum (0–19), median (20–39), mean (40–59), maximum (60–79), or range (80–100).
+Select two or more visible pixel layers in the Layers panel. **Layer → Auto-align opaque content** measures image overlap rather than layer bounds, keeps the active layer fixed, and moves the other unlocked layers into registration. **Filter → Professional Studio → Compositing & motion** provides Auto-Blend exposure fusion, Focus Stack, scene-linear HDR Merge, and Image Stack. Image Stack uses the panel's **Secondary** value to choose minimum (0–19), median (20–39), mean (40–59), maximum (60–79), or range (80–100).
+
+HDR Merge transfers its unclipped scene-linear Float32 result into a new 32-bit float document. Values above display white remain in the layer's high-depth backing store and survive undo/redo, recovery, and editable-project saves. Display tone mapping is a preview choice rather than a destructive part of the merge.
 
 Each stack operation runs in a cancelable background worker and opens its result as a new one-layer editable document. Source documents remain unchanged. Cancellation, timeout, invalid output, or insufficient document memory creates no partial result.
 

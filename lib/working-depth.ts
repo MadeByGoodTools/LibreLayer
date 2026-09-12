@@ -134,6 +134,34 @@ export const workingSurfaceToRgba8 = (surface: WorkingSurface) => {
   return output;
 };
 
+export const workingSurfaceToFloat32 = (surface: WorkingSurface) => {
+  assertWorkingSurface(surface);
+  const output = new Float32Array(surface.data.length);
+  for (let index = 0; index < output.length; index++)
+    output[index] = readWorkingChannel(surface, index);
+  return output;
+};
+
+export const workingSurfaceFromFloat32 = (
+  pixels: Float32Array,
+  width: number,
+  height: number,
+  depth: HighWorkingDepth = '32f',
+) => {
+  if (!validDimensions(width, height) || pixels.length !== width * height * 4)
+    throw Error('Working surface dimensions do not match its pixels.');
+  const surface: WorkingSurface = {
+    version: 1,
+    depth,
+    width,
+    height,
+    data: allocate(depth, pixels.length),
+  };
+  for (let index = 0; index < pixels.length; index++)
+    writeWorkingChannel(surface, index, pixels[index]);
+  return surface;
+};
+
 export const syncWorkingSurfaceFromRgba8 = (
   surface: WorkingSurface,
   displayPixels: Uint8ClampedArray,

@@ -20,6 +20,7 @@ LibreLayer 0.1.0 is the first open release candidate of the browser-local layere
 - An explicit-trust local scripting console with a disposable two-second-watchdog worker, registered-command-only output, seeded deterministic traces, integrity-checked replay, portable script/trace files, and the same validator/compiler in an optional repository CLI.
 - A measured Print Studio with persistent paper and layout preferences, custom sizing and placement, bleed and production marks, open-document contact sheets, proof metadata, PNG proof export, and browser print handoff.
 - Native 8-bit integer, 16-bit integer, 16-bit half-float, and 32-bit float RGB working documents with an explicit per-layer high-depth backing store, transactional depth conversion, undo/redo, recovery, copied-layer and embedded-Smart-Object retention, native-project round-trip, and direct high-depth image/canvas resizing.
+- Scene-linear Float32 HDR Merge with unclipped high-depth document storage, Float16 extended-range preview on compatible HDR displays, a deterministic SDR fallback, and a highlight clipping map.
 - PSD/PSB, image, TIFF, PDF, RAW, editable project, encrypted project, and web-export workflows with format-specific limitations documented in the format matrix.
 - Device-local autosave, recovery, preferences, remembered save handles where the browser permits them, configurable history compaction, and large-document reporting.
 

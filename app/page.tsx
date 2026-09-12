@@ -443,6 +443,11 @@ import {
   type HighDepthAdjustments,
   type HueSaturationRangeTarget,
 } from '@/lib/high-depth';
+import {
+  createHdrPreviewPixels,
+  hdrDisplayCapability,
+  normalizeHdrPreviewMode,
+} from '@/lib/hdr-display';
 import { runStackJob } from '@/lib/stack-job';
 import type { StackMode } from '@/lib/stack-engine';
 import { substituteDataVariables, type DataRecord } from '@/lib/data-driven';
@@ -460,7 +465,9 @@ import {
   serializeWorkingSurface,
   syncWorkingSurfaceFromRgba8,
   workingDepthBytesPerPixel,
+  workingSurfaceFromFloat32,
   workingSurfaceFromRgba8,
+  workingSurfaceToFloat32,
   workingSurfaceToRgba8,
   type HighWorkingDepth,
   type StoredWorkingSurface,
@@ -915,6 +922,104 @@ const makeCanvas = (w: number, h: number) => {
   c.width = w;
   c.height = h;
   return c;
+};
+
+const directHdrLayer = (
+  stack: LayerMeta[],
+  surfaces: Map<string, LayerSurface>,
+) => {
+  const visible = stack.filter((layer) => layer.visible);
+  if (visible.length !== 1) return null;
+  const layer = visible[0],
+    surface = surfaces.get(layer.id);
+  if (
+    !surface?.precision ||
+    layer.kind === 'group' ||
+    layer.kind === 'adjustment' ||
+    layer.kind === 'fill' ||
+    layer.parentId ||
+    layer.opacity !== 100 ||
+    (layer.fill ?? 100) !== 100 ||
+    layer.blend !== 'source-over' ||
+    layer.clipping ||
+    (layer.knockout ?? 'none') !== 'none' ||
+    layer.blendIf ||
+    layer.hasMask ||
+    layer.smartObject ||
+    layer.effects ||
+    layer.frame ||
+    layer.colorGrade ||
+    (layer.x ?? 0) !== 0 ||
+    (layer.y ?? 0) !== 0 ||
+    (layer.rotation ?? 0) !== 0 ||
+    (layer.scaleX ?? 1) !== 1 ||
+    (layer.scaleY ?? 1) !== 1 ||
+    (layer.brightness ?? 100) !== 100 ||
+    (layer.contrast ?? 100) !== 100 ||
+    (layer.saturation ?? 100) !== 100 ||
+    (layer.blur ?? 0) !== 0
+  )
+    return null;
+  return surface;
+};
+
+const renderDirectHdrPreview = (
+  canvas: HTMLCanvasElement,
+  surface: LayerSurface,
+  mode: EditorPreferences['hdrPreviewMode'],
+) => {
+  if (!surface.precision) return false;
+  const context = canvas.getContext('2d', {
+      colorSpace: 'srgb',
+      colorType: 'float16',
+      willReadFrequently: true,
+    } as CanvasRenderingContext2DSettings) as CanvasRenderingContext2D | null,
+    attributes = context?.getContextAttributes?.() as
+      | { colorType?: string }
+      | undefined;
+  if (!context) return false;
+  const capability = hdrDisplayCapability(),
+    floatCanvas =
+      attributes?.colorType === 'float16' &&
+      typeof Float16Array !== 'undefined',
+    previewMode = normalizeHdrPreviewMode(mode),
+    preview = createHdrPreviewPixels(
+      workingSurfaceToFloat32(surface.precision),
+      previewMode,
+      floatCanvas && capability.css && capability.media && capability.float16,
+    );
+  const image = floatCanvas
+    ? new (ImageData as unknown as {
+        new (
+          data: Float16Array,
+          width: number,
+          height: number,
+          settings: { colorSpace: string; pixelFormat: string },
+        ): ImageData;
+      })(
+        new Float16Array(preview.pixels),
+        surface.precision.width,
+        surface.precision.height,
+        { colorSpace: 'srgb', pixelFormat: 'rgba-float16' },
+      )
+    : new ImageData(
+        Uint8ClampedArray.from(preview.pixels, (value) =>
+          Math.round(Math.max(0, Math.min(1, value)) * 255),
+        ),
+        surface.precision.width,
+        surface.precision.height,
+      );
+  context.putImageData(image, 0, 0);
+  canvas.style.setProperty(
+    'dynamic-range-limit',
+    preview.extended ? 'no-limit' : 'standard',
+  );
+  canvas.dataset.hdrPreview = preview.extended
+    ? 'extended'
+    : previewMode === 'highlights'
+      ? 'highlights'
+      : 'sdr';
+  return true;
 };
 const smartFilterRenderCache = new VersionedRenderCache<HTMLCanvasElement>(
   24_000_000,
@@ -2199,6 +2304,7 @@ export default function Home() {
             ? p.interfaceScale
             : 100,
           motion: normalizeMotionPreference(p.motion),
+          hdrPreviewMode: normalizeHdrPreviewMode(p.hdrPreviewMode),
           toolbar: normalizeToolbar(
             toolItems.map((item) => item.id),
             p.toolbar,
@@ -3308,14 +3414,31 @@ export default function Home() {
     if (!out) return;
     if (out.width !== doc.w) out.width = doc.w;
     if (out.height !== doc.h) out.height = doc.h;
-    const ctx = out.getContext('2d', { willReadFrequently: true })!;
-    renderLayers(
-      ctx,
-      layersRef.current,
-      surfacesRef.current,
-      doc,
-      smartFilterPreviewRef.current ? 'preview' : 'final',
-    );
+    const hdrSurface =
+        workingDepthRef.current === '16f' || workingDepthRef.current === '32f'
+          ? directHdrLayer(layersRef.current, surfacesRef.current)
+          : null,
+      directHdr = (() => {
+        if (!hdrSurface) return false;
+        syncPrecisionSurface(hdrSurface);
+        return renderDirectHdrPreview(
+          out,
+          hdrSurface,
+          preferences.hdrPreviewMode,
+        );
+      })(),
+      ctx = out.getContext('2d', { willReadFrequently: true })!;
+    if (!directHdr) {
+      out.style.removeProperty('dynamic-range-limit');
+      delete out.dataset.hdrPreview;
+      renderLayers(
+        ctx,
+        layersRef.current,
+        surfacesRef.current,
+        doc,
+        smartFilterPreviewRef.current ? 'preview' : 'final',
+      );
+    }
     const activeLayer = layersRef.current.find(
         (layer) => layer.id === selectedRef.current,
       ),
@@ -3414,6 +3537,8 @@ export default function Home() {
     zoom,
     size,
     selectedId,
+    workingDepth,
+    preferences.hdrPreviewMode,
   ]);
   useEffect(() => {
     render();
@@ -14222,6 +14347,51 @@ export default function Home() {
                 ),
             },
           );
+          if (feature.command === 'hdr-merge') {
+            if (result.kind !== 'hdr')
+              throw Error('HDR merge result was invalid.');
+            const precision = workingSurfaceFromFloat32(
+                result.pixels,
+                doc.w,
+                doc.h,
+                '32f',
+              ),
+              preview = workingSurfaceToRgba8(precision),
+              canvas = makeCanvas(doc.w, doc.h),
+              id = crypto.randomUUID();
+            canvas
+              .getContext('2d')!
+              .putImageData(new ImageData(preview, doc.w, doc.h), 0, 0);
+            loadImportedDocument(
+              `${fileName} — ${feature.label}`,
+              doc.w,
+              doc.h,
+              [
+                {
+                  id,
+                  name: feature.label,
+                  kind: 'pixel',
+                  visible: true,
+                  opacity: 100,
+                  blend: 'source-over',
+                  x: 0,
+                  y: 0,
+                  hasMask: false,
+                  maskEnabled: true,
+                },
+              ],
+              new Map([[id, { pixels: canvas, precision }]]),
+              'Create scene-linear HDR merge',
+              undefined,
+              undefined,
+              undefined,
+              '32f',
+            );
+            setStatus(
+              `Scene-linear 32-bit HDR document created from ${items.length} layers · choose automatic, SDR, or highlight preview`,
+            );
+            return;
+          }
           if (result.kind !== 'result')
             throw Error('Image-stack result was invalid.');
           const canvas = makeCanvas(doc.w, doc.h);
@@ -15646,6 +15816,34 @@ export default function Home() {
               action: () => setCommandPaletteOpen(true),
             },
             { name: 'RGB composite', action: () => setChannelView('rgb') },
+            {
+              name: 'HDR preview · Automatic',
+              action: () => {
+                updatePreferences({ ...preferences, hdrPreviewMode: 'auto' });
+                setStatus(
+                  'HDR preview uses extended range on supported displays and tone maps safely elsewhere',
+                );
+              },
+            },
+            {
+              name: 'HDR preview · SDR tone map',
+              action: () => {
+                updatePreferences({ ...preferences, hdrPreviewMode: 'sdr' });
+                setStatus('Floating-point documents now use the SDR tone map');
+              },
+            },
+            {
+              name: 'HDR preview · Highlight map',
+              action: () => {
+                updatePreferences({
+                  ...preferences,
+                  hdrPreviewMode: 'highlights',
+                });
+                setStatus(
+                  'HDR values above scene white are highlighted in magenta',
+                );
+              },
+            },
             { separator: true },
             {
               name: 'Zoom in',
@@ -17523,6 +17721,14 @@ export default function Home() {
                   ? 'Layer group'
                   : 'Layer pixels'}{' '}
           · RGB {WORKING_DEPTH_LABELS[workingDepth]}
+          {(workingDepth === '16f' || workingDepth === '32f') &&
+            ` · HDR ${
+              preferences.hdrPreviewMode === 'sdr'
+                ? 'SDR preview'
+                : preferences.hdrPreviewMode === 'highlights'
+                  ? 'highlight map'
+                  : 'automatic preview'
+            }`}
         </span>
         <span className="options-hint">
           {active?.locked
@@ -18016,6 +18222,11 @@ export default function Home() {
             getComparisonCanvas={renderComparisonDocument}
           >
             <canvas
+              key={
+                workingDepth === '16f' || workingDepth === '32f'
+                  ? 'float-display'
+                  : 'integer-display'
+              }
               ref={displayRef}
               aria-label="Editable image canvas"
               className={`soft-proof-${preferences.proofMode ?? 'none'}`}

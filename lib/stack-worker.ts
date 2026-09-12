@@ -6,7 +6,6 @@ import {
   mergeHdrStack,
   statisticalStack,
   stitchPanorama,
-  toneMapHdr,
   type StackMode,
 } from './stack-engine';
 
@@ -51,19 +50,18 @@ self.onmessage = (event: MessageEvent<Request>) => {
       );
       return;
     }
+    if (command === 'hdr') {
+      const pixels = mergeHdrStack(sources, width, height);
+      self.postMessage({ kind: 'progress', progress: 95 });
+      self.postMessage({ kind: 'hdr', pixels }, { transfer: [pixels.buffer] });
+      return;
+    }
     const pixels =
       command === 'auto-blend'
         ? autoBlendStack(sources, width, height)
         : command === 'focus'
           ? focusStack(sources, width, height)
-          : command === 'hdr'
-            ? toneMapHdr(mergeHdrStack(sources, width, height))
-            : statisticalStack(
-                sources,
-                width,
-                height,
-                event.data.mode ?? 'mean',
-              );
+          : statisticalStack(sources, width, height, event.data.mode ?? 'mean');
     self.postMessage({ kind: 'progress', progress: 95 });
     self.postMessage({ kind: 'result', pixels }, { transfer: [pixels.buffer] });
   } catch (error) {

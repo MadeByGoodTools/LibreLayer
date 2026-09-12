@@ -4,6 +4,8 @@ LibreLayer runs third-party `.librefilter` and `.libreplugin` JavaScript, WebAss
 
 Auto-align, Auto-Blend, focus stack, HDR merge, panorama stitching, and statistical image stacks use the same isolation model in a dedicated stack worker. Auto-align returns translations only; stack and panorama operations return a complete copied result and never write into their source layers. Layer/artboard ZIP export and contact-sheet rendering yield between sources, report progress, and do not download or open a result until every source succeeds.
 
+HDR merge is the exception to the display-buffer result format: its worker returns a transferable scene-linear `Float32Array` without tone mapping or 8-bit conversion. The editor validates its dimensions and opens it transactionally as a new 32-bit float document. SDR tone mapping and HDR highlight presentation happen only in the display path.
+
 ## Transaction sequence
 
 1. LibreLayer validates the installed filter and active layer.
