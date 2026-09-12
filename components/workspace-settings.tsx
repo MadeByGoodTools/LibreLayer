@@ -62,6 +62,7 @@ export type EditorPreferences = {
   performanceMode?: PerformanceMode;
   scratchLocation?: ScratchLocation;
   scratchQuotaMb?: number;
+  versionRetention?: number;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -80,6 +81,7 @@ export const defaultPreferences: EditorPreferences = {
   performanceMode: 'balanced',
   scratchLocation: 'browser',
   scratchQuotaMb: 1024,
+  versionRetention: 12,
 };
 export function WorkspaceSettings({
   commands,
@@ -90,10 +92,11 @@ export function WorkspaceSettings({
   tools,
   current,
   onApply,
-  saveLocationName,
+  saveLocationHealth,
   storageStatus,
   onChooseSaveLocation,
   onProtectStorage,
+  onRefreshStorage,
   onResetSaveLocation,
   scratchStatus,
   onCleanScratch,
@@ -111,10 +114,11 @@ export function WorkspaceSettings({
   tools: { id: string; label: string; key: string }[];
   current: Omit<ToolPreset, 'name'>;
   onApply: (p: ToolPreset) => void;
-  saveLocationName: string;
+  saveLocationHealth: string;
   storageStatus: string;
   onChooseSaveLocation: () => void;
   onProtectStorage: () => void;
+  onRefreshStorage: () => void;
   onResetSaveLocation: () => void;
   scratchStatus: string;
   onCleanScratch: () => void;
@@ -214,9 +218,14 @@ export function WorkspaceSettings({
             <div className="grid gap-2 rounded border p-3">
               <strong>Local working storage</strong>
               <span>{storageStatus}</span>
-              <Button variant="outline" onClick={onProtectStorage}>
-                Protect local working storage
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={onProtectStorage}>
+                  Protect local working storage
+                </Button>
+                <Button variant="ghost" onClick={onRefreshStorage}>
+                  Check health
+                </Button>
+              </div>
               <p>
                 This asks the browser to protect recovery data from automatic
                 cleanup. Important projects should still be saved as files.
@@ -224,7 +233,7 @@ export function WorkspaceSettings({
             </div>
             <div className="grid gap-2 rounded border p-3">
               <strong>Default project save location</strong>
-              <span>{saveLocationName}</span>
+              <span>{saveLocationHealth}</span>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onChooseSaveLocation}>
                   Choose folder…
@@ -858,6 +867,25 @@ export function WorkspaceSettings({
                     historyDepth: Math.max(
                       5,
                       Math.min(100, +event.target.value || 32),
+                    ),
+                  })
+                }
+              />
+            </label>
+            <label>
+              Dated recovery versions kept per document
+              <input
+                className="block border rounded p-2 w-full"
+                type="number"
+                min={2}
+                max={50}
+                value={value.versionRetention ?? 12}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    versionRetention: Math.max(
+                      2,
+                      Math.min(50, Math.round(+event.target.value || 12)),
                     ),
                   })
                 }

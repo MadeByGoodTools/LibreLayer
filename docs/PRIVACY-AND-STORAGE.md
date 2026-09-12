@@ -12,6 +12,8 @@ Large local filter jobs can stage a temporary input buffer in private Origin Pri
 
 Default save folders and recent external-drive files use the browser’s File System Access permission when supported. A remembered handle is not unrestricted disk access: the browser can prompt again, and LibreLayer cannot use a disconnected drive. Unsupported browsers fall back to Downloads and file pickers.
 
+Workspace settings reports whether the remembered folder is writable, needs re-authorization, or is unavailable. If a drive disconnects during a project write, LibreLayer aborts the incomplete writable stream, keeps the remembered folder preference for reconnection, and downloads the complete integrity-protected package instead. The dated-version retention limit is configurable from 2–50 copies per document and remains saved on the browser profile.
+
 Password-protected project packages are encrypted locally with AES-256-GCM. Passwords are not stored or recoverable. Encryption protects the exported package, not screenshots, browser memory, unencrypted recovery copies, or already-exported images.
 
 Before any optional cloud or generative provider is added, the UI must disclose the provider, data sent, purpose, retention implications, and whether a local fallback exists; upload must require an explicit user action.

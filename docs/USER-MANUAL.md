@@ -91,6 +91,8 @@ Creative filters include Oil Paint, Lighting Effects, Clouds, Fibers, Filter Gal
 
 - **Editable master:** File → Save layered project (`Ctrl/⌘+S`) writes `.librelayer`. Password-protected projects use local AES-256-GCM encryption; losing the password makes the file unrecoverable.
 - **Default location:** Workspace & presets → Workspace → Choose folder remembers a supported local or external-drive folder. Downloads remains the cross-browser fallback.
+- **Drive health and fallback:** Check health reports whether the remembered folder is writable. A disconnected or permission-blocked drive never receives a partial project; LibreLayer keeps the folder preference and saves the complete project through Downloads.
+- **Version retention:** Workspace & presets → Performance keeps 2–50 dated versions per document. Reducing the number prunes oldest versions on the next version save.
 - **Images:** Export supports PNG, JPEG, WebP, TIFF, and PDF. TIFF can include supported ICC profiles and print resolution. A true 16-bit TIFF master is available from retained high-precision RAW data.
 - **PSD/PSB:** layered export is limited to compatible raster structure. The export dialog blocks or warns rather than silently baking unsupported editable features. Flattened export preserves appearance but not editability.
 

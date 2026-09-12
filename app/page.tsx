@@ -308,6 +308,11 @@ import {
 import { contentAwareScale as scaleContentAwarePixels } from '@/lib/content-aware-scale';
 import { warpSourcePoint, type WarpMode } from '@/lib/warp-engine';
 import {
+  normalizeVersionRetention,
+  saveLocationStatus,
+  type SaveLocationState,
+} from '@/lib/storage-policy';
+import {
   hasSmartObjectTransform,
   isSmartObjectTransform,
   normalizeSmartObjectTransform,
@@ -2093,6 +2098,9 @@ export default function Home() {
     ),
     [performanceCheckRunning, setPerformanceCheckRunning] = useState(false),
     [saveLocationName, setSaveLocationName] = useState('Downloads'),
+    [saveLocationHealth, setSaveLocationHealth] = useState(
+      saveLocationStatus('Downloads', 'downloads'),
+    ),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(
       null,
     );
@@ -2143,6 +2151,7 @@ export default function Home() {
             ? p.scratchLocation
             : 'browser',
           scratchQuotaMb: normalizeScratchQuota(p.scratchQuotaMb),
+          versionRetention: normalizeVersionRetention(p.versionRetention),
           workspaces: p.workspaces
             .filter(
               (w: any) =>
@@ -2185,6 +2194,23 @@ export default function Home() {
     setStorageStatus(
       `${used.toLocaleString()} MB used of ${quota.toLocaleString()} MB${protectedStorage ? ' · protected' : ''}`,
     );
+  };
+  const refreshSaveLocationHealth = async () => {
+    let name = 'Downloads',
+      state: SaveLocationState = 'downloads';
+    try {
+      const handle = await getDefaultSaveDirectory();
+      if (handle) {
+        name = handle.name;
+        const permission = await handle.queryPermission({ mode: 'readwrite' });
+        state = permission === 'granted' ? 'connected' : 'permission-needed';
+      }
+    } catch {
+      name = saveLocationName === 'Downloads' ? 'Remembered folder' : saveLocationName;
+      state = 'unavailable';
+    }
+    setSaveLocationName(name);
+    setSaveLocationHealth(saveLocationStatus(name, state));
   };
   const refreshScratchStatus = async () => {
     try {
@@ -2280,9 +2306,7 @@ export default function Home() {
       .catch(() =>
         setRecoveryStatus('The local recovery journal could not be checked'),
       );
-    void getDefaultSaveDirectory()
-      .then((handle) => setSaveLocationName(handle?.name ?? 'Downloads'))
-      .catch(() => setSaveLocationName('Downloads'));
+    void refreshSaveLocationHealth();
     void recentFiles()
       .then(setRecent)
       .catch(() => setRecent([]));
@@ -10064,6 +10088,7 @@ export default function Home() {
       const handle = await picker.call(window);
       await setDefaultSaveDirectory(handle);
       setSaveLocationName(handle.name);
+      setSaveLocationHealth(saveLocationStatus(handle.name, 'connected'));
       setRecoveryStatus(`Default save location set to ${handle.name}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -10074,6 +10099,7 @@ export default function Home() {
     try {
       await clearDefaultSaveDirectory();
       setSaveLocationName('Downloads');
+      setSaveLocationHealth(saveLocationStatus('Downloads', 'downloads'));
       setRecoveryStatus('Default save location reset to Downloads');
     } catch {
       setRecoveryStatus('The default save location could not be reset');
@@ -10141,7 +10167,8 @@ export default function Home() {
         : await packProject(project);
       checkFileSize(blob.size);
       const projectName = `${(fileName.replace(/\.[^.]+$/, '') || 'Artwork').replace(/[\\/?%*:|"<>]/g, '-')}${encrypted ? '-encrypted' : ''}.librelayer`;
-      let savedToFolder = false;
+      let savedToFolder = false,
+        folderFailure = Boolean(directory && folderPermission !== 'granted');
       if (directory && folderPermission === 'granted') {
         let writable:
           | Awaited<
@@ -10163,6 +10190,7 @@ export default function Home() {
           setRecent(await recentFiles());
           savedToFolder = true;
         } catch {
+          folderFailure = true;
           try {
             await writable?.abort?.();
           } catch {}
@@ -10183,8 +10211,14 @@ export default function Home() {
       setStatus(
         savedToFolder
           ? `${encrypted ? 'Encrypted' : 'Integrity-protected'} project saved to ${directory?.name}`
-          : `${encrypted ? 'Encrypted' : 'Integrity-protected'} project saved to Downloads — reopen with File > Open`,
+          : `${folderFailure ? `${directory?.name ?? 'The remembered folder'} was unavailable; ` : ''}${encrypted ? 'Encrypted' : 'Integrity-protected'} project saved to Downloads — the folder preference was kept for reconnection`,
       );
+      if (savedToFolder && directory)
+        setSaveLocationHealth(saveLocationStatus(directory.name, 'connected'));
+      else if (folderFailure)
+        setSaveLocationHealth(
+          saveLocationStatus(directory?.name ?? saveLocationName, 'unavailable'),
+        );
       return true;
     } catch (e) {
       setPsdError(
@@ -12443,14 +12477,17 @@ export default function Home() {
         const now = Date.now(),
           previousVersion = lastVersionAt.current.get(d.id) ?? 0;
         if (manual || now - previousVersion >= 120000) {
-          await saveVersion({
-            id: `${d.id}:${now}`,
-            documentId: d.id,
-            name: d.name,
-            updated: now,
-            reason: manual ? 'manual' : 'autosave',
-            json,
-          });
+          await saveVersion(
+            {
+              id: `${d.id}:${now}`,
+              documentId: d.id,
+              name: d.name,
+              updated: now,
+              reason: manual ? 'manual' : 'autosave',
+              json,
+            },
+            normalizeVersionRetention(preferences.versionRetention),
+          );
           lastVersionAt.current.set(d.id, now);
         }
         count++;
@@ -20316,10 +20353,14 @@ export default function Home() {
         onClose={() => setSettingsOpen(false)}
         value={preferences}
         onChange={updatePreferences}
-        saveLocationName={saveLocationName}
+        saveLocationHealth={saveLocationHealth}
         storageStatus={storageStatus}
         onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
         onProtectStorage={() => void protectLocalStorage()}
+        onRefreshStorage={() => {
+          void refreshStorageStatus();
+          void refreshSaveLocationHealth();
+        }}
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
         scratchStatus={scratchStatus}
         onCleanScratch={() => void cleanLocalScratch()}
