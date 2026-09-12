@@ -2,6 +2,8 @@
 
 LibreLayer runs third-party filter processing in a dedicated browser worker. The worker receives a copied RGBA pixel buffer and cannot mutate the open document directly.
 
+Auto-align, Auto-Blend, focus stack, HDR merge, and statistical image stacks use the same isolation model in a dedicated stack worker. Auto-align returns translations only; stack operations return a complete copied result and never write into their source layers.
+
 ## Transaction sequence
 
 1. LibreLayer validates the installed filter and active layer.

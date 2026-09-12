@@ -440,6 +440,8 @@ import {
   type HighDepthAdjustments,
   type HueSaturationRangeTarget,
 } from '@/lib/high-depth';
+import { runStackJob } from '@/lib/stack-job';
+import type { StackMode } from '@/lib/stack-engine';
 const Mask = Focus;
 
 type Tool =
@@ -11235,34 +11237,82 @@ export default function Home() {
     render();
     setStatus('Selected layer centers distributed evenly');
   };
-  const autoAlign = () => {
-    const items = selectedRoots().filter(
+  const stackSourcesForLayers = (items: LayerMeta[]) => {
+    const canvases = items.map((layer) => {
+        const canvas = makeCanvas(doc.w, doc.h);
+        renderLayers(canvas.getContext('2d')!, [layer], surfacesRef.current, doc);
+        return canvas;
+      }),
+      sources = canvases.map(
+        (canvas) =>
+          canvas
+            .getContext('2d', { willReadFrequently: true })!
+            .getImageData(0, 0, doc.w, doc.h).data,
+      );
+    canvases.forEach((canvas) => {
+      canvas.width = canvas.height = 1;
+    });
+    return sources;
+  };
+  const autoAlign = async () => {
+    const roots = selectedRoots().filter(
         (l) => l.kind !== 'group' && l.kind !== 'adjustment',
       ),
-      anchor = items.find((l) => l.id === selectedRef.current) ?? items[0];
+      anchor = roots.find((l) => l.id === selectedRef.current) ?? roots[0],
+      items = anchor
+        ? [anchor, ...roots.filter((layer) => layer.id !== anchor.id)]
+        : roots,
+      controller = new AbortController(),
+      jobId = crypto.randomUUID();
     if (items.length < 2 || !anchor || !permit(items.map((l) => l.id))) {
       setStatus('Select at least two unlocked pixel layers to auto-align.');
       return;
     }
-    const base = layerBounds(anchor);
-    if (!base) return;
-    syncLayers(
-      layersRef.current.map((layer) => {
-        if (layer.id === anchor.id || !items.some((x) => x.id === layer.id))
-          return layer;
-        const b = layerBounds(layer);
-        return b
-          ? {
-              ...layer,
-              x: layer.x + (base.left + base.right - b.left - b.right) / 2,
-              y: layer.y + (base.top + base.bottom - b.top - b.bottom) / 2,
-            }
-          : layer;
-      }),
-    );
-    snapshot('Auto-align layers');
-    render();
-    setStatus('Opaque content centers aligned by translation');
+    activeJobAbort.current?.abort();
+    activeJobAbort.current = controller;
+    setActiveJob({ id: jobId, label: 'Auto-align layers', progress: 0 });
+    setStatus('Analyzing image overlap in a background worker…');
+    try {
+      const result = await runStackJob(
+        'align',
+        stackSourcesForLayers(items),
+        doc.w,
+        doc.h,
+        {
+          signal: controller.signal,
+          onProgress: (progress) =>
+            setActiveJob((current) =>
+              current?.id === jobId ? { ...current, progress } : current,
+            ),
+        },
+      );
+      if (result.kind !== 'aligned') throw Error('Alignment result was invalid.');
+      const moves = new Map(
+        items.map((layer, index) => [layer.id, result.translations[index]]),
+      );
+      syncLayers(
+        layersRef.current.map((layer) => {
+          const move = moves.get(layer.id);
+          return move && layer.id !== anchor.id
+            ? { ...layer, x: layer.x + move.x, y: layer.y + move.y }
+            : layer;
+        }),
+      );
+      snapshot('Auto-align layers');
+      render();
+      setStatus(`${items.length} layers aligned by image-content correlation`);
+    } catch (error) {
+      setStatus(
+        error instanceof JobCancelledError
+          ? 'Auto-align cancelled; layer positions were not changed'
+          : error instanceof Error
+            ? error.message
+            : 'The layers could not be aligned.',
+      );
+    } finally {
+      if (activeJobAbort.current === controller) activeJobAbort.current = null;
+      setActiveJob((current) => (current?.id === jobId ? null : current));
+    }
   };
   const captureCompStates = (): LayerComp['states'] =>
     layersRef.current.map(
@@ -12834,7 +12884,10 @@ export default function Home() {
     }
   };
 
-  const runProFeature = (feature: SuiteFeature, options: SuiteOptions) => {
+  const runProFeature = async (
+    feature: SuiteFeature,
+    options: SuiteOptions,
+  ) => {
     if (
       ['liquify', 'wide-angle', 'vanishing-point'].includes(feature.command)
     ) {
@@ -13272,7 +13325,88 @@ export default function Home() {
     }
     if (feature.kind === 'document') {
       if (
-        ['frame-animation', 'video-timeline', 'image-stack'].includes(
+        ['auto-blend', 'focus-stack', 'hdr-merge', 'image-stack'].includes(
+          feature.command,
+        )
+      ) {
+        const items = selectedRoots().filter(
+          (layer) =>
+            layer.visible &&
+            layer.kind !== 'group' &&
+            layer.kind !== 'adjustment' &&
+            Boolean(surfacesRef.current.get(layer.id)),
+        );
+        if (items.length < 2) {
+          setStatus(`Select at least two visible pixel layers for ${feature.label}`);
+          return;
+        }
+        const command =
+            feature.command === 'auto-blend'
+              ? 'auto-blend'
+              : feature.command === 'focus-stack'
+                ? 'focus'
+                : feature.command === 'hdr-merge'
+                  ? 'hdr'
+                  : 'statistical',
+          modes: StackMode[] = ['minimum', 'median', 'mean', 'maximum', 'range'],
+          mode = modes[Math.min(4, Math.floor(options.secondary / 20))],
+          controller = new AbortController(),
+          jobId = crypto.randomUUID();
+        activeJobAbort.current?.abort();
+        activeJobAbort.current = controller;
+        setActiveJob({ id: jobId, label: feature.label, progress: 0 });
+        setStatus(`Running ${feature.label} in a background worker…`);
+        try {
+          const result = await runStackJob(
+            command,
+            stackSourcesForLayers(items),
+            doc.w,
+            doc.h,
+            {
+              mode,
+              signal: controller.signal,
+              timeoutMs: 120000,
+              onProgress: (progress) =>
+                setActiveJob((current) =>
+                  current?.id === jobId ? { ...current, progress } : current,
+                ),
+            },
+          );
+          if (result.kind !== 'result') throw Error('Image-stack result was invalid.');
+          const canvas = makeCanvas(doc.w, doc.h);
+          canvas
+            .getContext('2d')!
+            .putImageData(
+              new ImageData(Uint8ClampedArray.from(result.pixels), doc.w, doc.h),
+              0,
+              0,
+            );
+          const suffix =
+            feature.command === 'image-stack'
+              ? `Image Stack · ${mode}`
+              : feature.label;
+          openComposite(suffix, canvas);
+          canvas.width = canvas.height = 1;
+          setStatus(
+            `${suffix} created from ${items.length} aligned-size layers as a new editable document`,
+          );
+        } catch (error) {
+          setStatus(
+            error instanceof JobCancelledError
+              ? `${feature.label} cancelled; no result document was created`
+              : error instanceof Error
+                ? error.message
+                : `${feature.label} failed safely`,
+          );
+        } finally {
+          if (activeJobAbort.current === controller)
+            activeJobAbort.current = null;
+          setActiveJob((current) => (current?.id === jobId ? null : current));
+        }
+        return;
+      }
+      if (
+        ['frame-animation', 'video-timeline'].includes(
           feature.command,
         )
       ) {
@@ -13479,7 +13613,7 @@ export default function Home() {
             : prompt.includes('soft')
               ? 'lens-blur'
               : 'harmonize';
-      runProFeature({ ...feature, command: mapped }, options);
+      void runProFeature({ ...feature, command: mapped }, options);
       return;
     }
     const targetContextValue = targetContext();
@@ -14396,7 +14530,7 @@ export default function Home() {
                   (item) => item.command === command,
                 );
                 if (feature)
-                  runProFeature(feature, {
+                  void runProFeature(feature, {
                     amount: 50,
                     secondary: 50,
                     color: '#6d8cff',
@@ -14426,7 +14560,7 @@ export default function Home() {
                   (item) => item.command === command,
                 );
                 if (feature)
-                  runProFeature(feature, {
+                  void runProFeature(feature, {
                     amount: amount as number,
                     secondary: secondary as number,
                     color: '#6d8cff',

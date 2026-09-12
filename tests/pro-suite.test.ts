@@ -34,3 +34,12 @@ void test('every Professional Studio command exposes a truthful capability level
     true,
   );
 });
+
+void test('completed image-stack commands are marked Functional', async () => {
+  const { suiteFeatures } = await import('../lib/pro-suite.ts');
+  for (const command of ['hdr-merge', 'focus-stack', 'auto-blend', 'image-stack'])
+    assert.equal(
+      suiteFeatures.find((feature) => feature.command === command)?.level,
+      'Functional',
+    );
+});

@@ -31,6 +31,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Every Layers, Properties, Channels, Paths, and History panel can be tab-stacked, docked, floated, resized, collapsed, or isolated in solo view
 - Searchable command palette for every tool and registered menu action with `Cmd/Ctrl+K`
 - Persistent editable Action sets with conditional steps, portable `.libreactions` sets and `.libredroplet` recipes, plus a cancelable local Image Processor for PNG, JPEG, WebP, AVIF, and browser-supported HEIC sources
+- Background-worker image stacking with content-correlation Auto-align, exposure-fusion Auto-Blend, local-detail focus stacking, scene-linear HDR merge, and mean, median, minimum, maximum, or range statistics
 - Branch any history state into an independent editable document and generate pixel-accurate change maps
 - Record, export, validate, and replay open `.libreflow` editing workflows without executing arbitrary code
 - Password-encrypted layered project packages using local AES-256-GCM encryption

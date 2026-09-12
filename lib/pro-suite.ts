@@ -19,7 +19,19 @@ export type SuiteFeature = {
   level: CapabilityLevel;
 };
 
-const capabilityLevel = (name: string, kind: SuiteKind): CapabilityLevel => {
+const functionalOverrides = new Set([
+  'hdr-merge',
+  'focus-stack',
+  'auto-blend',
+  'image-stack',
+]);
+
+const capabilityLevel = (
+  name: string,
+  kind: SuiteKind,
+  command: string,
+): CapabilityLevel => {
+  if (functionalOverrides.has(command)) return 'Functional';
   if (name === 'AI-assisted editing' || kind === 'collaboration')
     return 'Experimental';
   if (
@@ -46,7 +58,7 @@ const group = (
     label,
     group: name,
     kind,
-    level: capabilityLevel(name, kind),
+    level: capabilityLevel(name, kind, command),
   }));
 
 export const suiteFeatures: SuiteFeature[] = [

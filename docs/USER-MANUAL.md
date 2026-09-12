@@ -122,6 +122,12 @@ Open **Filter → Professional Studio** to record the tools you run as an editab
 
 The **Image Processor** runs the selected saved Action—or the current draft—over chosen local image files one at a time. Choose PNG, JPEG, or WebP output, quality, optional maximum edge, and a filename suffix. Only pixel-compatible Action steps run in this file workflow; document and layer commands are skipped. Progress and failures are reported, Stop leaves source files unchanged, and the browser may ask permission for multiple downloads.
 
+## Aligning and stacking layers
+
+Select two or more visible pixel layers in the Layers panel. **Layer → Auto-align opaque content** measures image overlap rather than layer bounds, keeps the active layer fixed, and moves the other unlocked layers into registration. **Filter → Professional Studio → Compositing & motion** provides Auto-Blend exposure fusion, Focus Stack, scene-linear HDR Merge with display tone mapping, and Image Stack. Image Stack uses the panel's **Secondary** value to choose minimum (0–19), median (20–39), mean (40–59), maximum (60–79), or range (80–100).
+
+Each stack operation runs in a cancelable background worker and opens its result as a new one-layer editable document. Source documents remain unchanged. Cancellation, timeout, invalid output, or insufficient document memory creates no partial result.
+
 Current limits are 16,384 pixels per side, 64 megapixels per document, 96 million expanded layer/mask pixels across open tabs, 100 layers, 20 nested groups, and 256 MiB per input file. Close unused documents, reduce history, or lower dimensions when browser memory is constrained.
 
 ## Recovery and privacy
