@@ -366,6 +366,14 @@ import {
   previewScaleForPixels,
 } from '@/lib/performance-policy';
 import {
+  cleanScratch,
+  deleteScratch,
+  normalizeScratchQuota,
+  scratchUsage,
+  writeScratch,
+  type ScratchLocation,
+} from '@/lib/scratch-storage';
+import {
   multiScaleExportPlan,
   normalizeArtboard,
   normalizeFrame,
@@ -2047,6 +2055,7 @@ export default function Home() {
     [recent, setRecent] = useState<RecentFileRecord[]>([]),
     [recoveryStatus, setRecoveryStatus] = useState(''),
     [storageStatus, setStorageStatus] = useState('Checking browser storage…'),
+    [scratchStatus, setScratchStatus] = useState('Checking scratch storage…'),
     [saveLocationName, setSaveLocationName] = useState('Downloads'),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(
       null,
@@ -2094,6 +2103,10 @@ export default function Home() {
             p.historyBudgetMb,
           ).budgetMb,
           performanceMode: normalizePerformanceMode(p.performanceMode),
+          scratchLocation: ['browser', 'save-folder'].includes(p.scratchLocation)
+            ? p.scratchLocation
+            : 'browser',
+          scratchQuotaMb: normalizeScratchQuota(p.scratchQuotaMb),
           workspaces: p.workspaces
             .filter(
               (w: any) =>
@@ -2137,11 +2150,43 @@ export default function Home() {
       `${used.toLocaleString()} MB used of ${quota.toLocaleString()} MB${protectedStorage ? ' · protected' : ''}`,
     );
   };
+  const refreshScratchStatus = async () => {
+    try {
+      const location = preferences.scratchLocation ?? 'browser';
+      const directory =
+        location === 'save-folder' ? await getDefaultSaveDirectory() : null;
+      const usage = await scratchUsage(location, directory);
+      setScratchStatus(
+        `${Math.round(usage.bytes / 1048576).toLocaleString()} MB in ${usage.files} temporary ${usage.files === 1 ? 'file' : 'files'} · ${normalizeScratchQuota(preferences.scratchQuotaMb).toLocaleString()} MB limit`,
+      );
+    } catch (error) {
+      setScratchStatus(
+        error instanceof Error ? error.message : 'Scratch storage is unavailable',
+      );
+    }
+  };
+  const cleanLocalScratch = async () => {
+    try {
+      const location = preferences.scratchLocation ?? 'browser';
+      const directory =
+        location === 'save-folder' ? await getDefaultSaveDirectory() : null;
+      const count = await cleanScratch(location, directory);
+      await refreshScratchStatus();
+      setRecoveryStatus(`${count} temporary scratch ${count === 1 ? 'file' : 'files'} removed`);
+    } catch (error) {
+      setRecoveryStatus(
+        error instanceof Error ? error.message : 'Scratch storage could not be cleaned',
+      );
+    }
+  };
   useEffect(() => {
     void refreshStorageStatus().catch(() =>
       setStorageStatus('Storage details are unavailable in this browser'),
     );
   }, []);
+  useEffect(() => {
+    void refreshScratchStatus();
+  }, [preferences.scratchLocation, preferences.scratchQuotaMb, saveLocationName]);
   const protectLocalStorage = async () => {
     try {
       const protectedStorage = await navigator.storage?.persist?.();
@@ -12072,6 +12117,30 @@ export default function Home() {
     } catch {
       // The worker remains cancelable even when the browser blocks the journal.
     }
+    let scratchName: string | null = null,
+      scratchDirectory: LocalDirectoryHandle | null = null;
+    const scratchLocation: ScratchLocation =
+      preferences.scratchLocation ?? 'browser';
+    if (image.data.byteLength >= 4 * 1048576) {
+      try {
+        scratchDirectory =
+          scratchLocation === 'save-folder' ? await getDefaultSaveDirectory() : null;
+        scratchName = await writeScratch(
+          jobId,
+          new Blob([image.data.slice().buffer]),
+          {
+            location: scratchLocation,
+            quotaMb: normalizeScratchQuota(preferences.scratchQuotaMb),
+            saveDirectory: scratchDirectory,
+          },
+        );
+        void refreshScratchStatus();
+      } catch (error) {
+        setRecoveryStatus(
+          `${error instanceof Error ? error.message : 'Scratch storage is unavailable'} The filter will continue safely in memory.`,
+        );
+      }
+    }
     setStatus(`Running ${plugin.name} locally…`);
     try {
       const result = await runFilterPluginJob(
@@ -12128,6 +12197,14 @@ export default function Home() {
               : 'The filter plug-in failed safely',
       );
     } finally {
+      if (scratchName) {
+        try {
+          await deleteScratch(scratchName, scratchLocation, scratchDirectory);
+          void refreshScratchStatus();
+        } catch {
+          setRecoveryStatus('A temporary scratch file remains and can be removed in Workspace settings');
+        }
+      }
       original.width = original.height = 1;
       if (activeJobAbort.current === controller) activeJobAbort.current = null;
       setActiveJob((current) => (current?.id === jobId ? null : current));
@@ -20107,6 +20184,8 @@ export default function Home() {
         onChooseSaveLocation={() => void chooseDefaultSaveDirectory()}
         onProtectStorage={() => void protectLocalStorage()}
         onResetSaveLocation={() => void resetDefaultSaveDirectory()}
+        scratchStatus={scratchStatus}
+        onCleanScratch={() => void cleanLocalScratch()}
         documentStatus={`${doc.w.toLocaleString()} × ${doc.h.toLocaleString()} px · ${layers.length} layers · ${historyRef.current.length}/${preferences.historyDepth ?? 32} history states · about ${Math.round((doc.w * doc.h * Math.max(1, layers.length) * 4) / 1048576).toLocaleString()} MB active pixels · ${activePerformancePolicy.mode} mode · ${activePerformancePolicy.pressure} pressure · ${(activePerformancePolicy.previewPixelBudget / 1_000_000).toFixed(1)} MP interactive preview`}
         tools={toolItems}
         current={{ tool, size, opacity, color, fontSize, feather }}

@@ -18,6 +18,7 @@ import {
 } from '@/lib/toolbar-config';
 import type { MotionPreference } from '@/lib/accessibility-preferences';
 import type { PerformanceMode } from '@/lib/performance-policy';
+import type { ScratchLocation } from '@/lib/scratch-storage';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -59,6 +60,8 @@ export type EditorPreferences = {
   interfaceScale?: 85 | 100 | 115 | 125;
   motion?: MotionPreference;
   performanceMode?: PerformanceMode;
+  scratchLocation?: ScratchLocation;
+  scratchQuotaMb?: number;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -75,6 +78,8 @@ export const defaultPreferences: EditorPreferences = {
   interfaceScale: 100,
   motion: 'system',
   performanceMode: 'balanced',
+  scratchLocation: 'browser',
+  scratchQuotaMb: 1024,
 };
 export function WorkspaceSettings({
   commands,
@@ -90,6 +95,8 @@ export function WorkspaceSettings({
   onChooseSaveLocation,
   onProtectStorage,
   onResetSaveLocation,
+  scratchStatus,
+  onCleanScratch,
   documentStatus,
 }: {
   commands: { name: string; shortcut: string }[];
@@ -105,6 +112,8 @@ export function WorkspaceSettings({
   onChooseSaveLocation: () => void;
   onProtectStorage: () => void;
   onResetSaveLocation: () => void;
+  scratchStatus: string;
+  onCleanScratch: () => void;
   documentStatus: string;
 }) {
   const [name, setName] = useState(''),
@@ -773,6 +782,43 @@ export function WorkspaceSettings({
               document approaches this computer&apos;s memory budget, then renders
               the final full-quality result after the control settles.
             </p>
+            <label>
+              Scratch storage
+              <select
+                className="block border rounded p-2 bg-background w-full"
+                value={value.scratchLocation ?? 'browser'}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    scratchLocation: event.target.value as ScratchLocation,
+                  })
+                }
+              >
+                <option value="browser">Private browser storage</option>
+                <option value="save-folder">Remembered save folder or external drive</option>
+              </select>
+            </label>
+            <label>
+              Scratch quota (MB)
+              <input
+                className="block border rounded p-2 w-full"
+                type="number"
+                min={128}
+                max={8192}
+                step={128}
+                value={value.scratchQuotaMb ?? 1024}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    scratchQuotaMb: Math.max(128, Math.min(8192, +event.target.value || 1024)),
+                  })
+                }
+              />
+            </label>
+            <div className="flex items-center justify-between gap-3 rounded border p-3">
+              <span>{scratchStatus}</span>
+              <Button variant="outline" onClick={onCleanScratch}>Clean scratch</Button>
+            </div>
             <label>
               Undo history states
               <input

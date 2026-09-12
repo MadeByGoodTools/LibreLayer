@@ -88,6 +88,7 @@ export type LocalDirectoryHandle = {
       }>;
     }
   >;
+  removeEntry?: (name: string) => Promise<void>;
 };
 
 const databaseName = 'pixel-studio-recovery';
