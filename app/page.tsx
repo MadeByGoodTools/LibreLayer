@@ -79,6 +79,10 @@ import {
 } from '@/lib/document-limits';
 import { preflightImage } from '@/lib/image-preflight';
 import {
+  motionClassName,
+  normalizeMotionPreference,
+} from '@/lib/accessibility-preferences';
+import {
   canvasFont,
   canvasFontStretch,
   canvasVariableFont,
@@ -1563,6 +1567,7 @@ export default function Home() {
           interfaceScale: [85, 100, 115, 125].includes(p.interfaceScale)
             ? p.interfaceScale
             : 100,
+          motion: normalizeMotionPreference(p.motion),
           toolbar: normalizeToolbar(
             toolItems.map((item) => item.id),
             p.toolbar,
@@ -11307,7 +11312,7 @@ export default function Home() {
 
   return (
     <main
-      className={`editor-shell theme-${preferences.theme ?? 'dark'} ui-scale-${preferences.interfaceScale ?? 100}`}
+      className={`editor-shell theme-${preferences.theme ?? 'dark'} ui-scale-${preferences.interfaceScale ?? 100} ${motionClassName(preferences.motion)}`}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -13617,6 +13622,7 @@ export default function Home() {
                   size="icon-lg"
                   className={tool === id ? 'tool-button active' : 'tool-button'}
                   aria-label={label}
+                  aria-pressed={tool === id}
                   title={`${label} · ${(preferences.shortcuts[id] ?? key).toUpperCase()}`}
                   onClick={() => {
                     setTool(id);

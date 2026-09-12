@@ -201,6 +201,14 @@ button {
   outline: 3px solid #ffe66d;
   outline-offset: 1px;
 }
+.theme-contrast [aria-pressed='true'],
+.theme-contrast [aria-selected='true'],
+.theme-contrast [aria-current='true'] {
+  outline: 2px solid #fff;
+  outline-offset: -3px;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
 .theme-contrast .canvas-stage {
   background-color: #101010;
   background-image: radial-gradient(#555 0.8px, transparent 0.8px);
@@ -500,7 +508,30 @@ button {
 .tool-button.active {
   background: #32bd88 !important;
   color: #06140f !important;
-  box-shadow: 0 0 0 1px #78e2ba inset;
+  border-inline-start: 3px solid currentColor;
+  box-shadow:
+    0 0 0 1px #78e2ba inset,
+    0 0 0 1px #07110d;
+}
+
+.motion-reduced *,
+.motion-reduced *::before,
+.motion-reduced *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-system *,
+  .motion-system *::before,
+  .motion-system *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 .tool-divider {
   height: 1px;

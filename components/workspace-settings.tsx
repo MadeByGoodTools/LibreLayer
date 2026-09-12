@@ -16,6 +16,7 @@ import {
   normalizeToolbar,
   type ToolbarPreferences,
 } from '@/lib/toolbar-config';
+import type { MotionPreference } from '@/lib/accessibility-preferences';
 export type ToolPreset = {
   name: string;
   tool: string;
@@ -55,6 +56,7 @@ export type EditorPreferences = {
   toolbar?: ToolbarPreferences;
   theme?: 'dark' | 'light' | 'contrast';
   interfaceScale?: 85 | 100 | 115 | 125;
+  motion?: MotionPreference;
 };
 export const defaultPreferences: EditorPreferences = {
   layout: { side: 'right', width: 300, smart: true },
@@ -69,6 +71,7 @@ export const defaultPreferences: EditorPreferences = {
   toolbar: { order: [], hidden: [], groupByFamily: true },
   theme: 'dark',
   interfaceScale: 100,
+  motion: 'system',
 };
 export function WorkspaceSettings({
   commands,
@@ -551,6 +554,24 @@ export function WorkspaceSettings({
               Scaling changes the application controls and spacing, not image
               pixels, zoom accuracy, or export dimensions.
             </p>
+            <label>
+              Interface motion
+              <select
+                aria-label="Interface motion"
+                className="block w-full rounded border bg-background p-2"
+                value={value.motion ?? 'system'}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    motion: event.target.value as MotionPreference,
+                  })
+                }
+              >
+                <option value="system">Follow system setting</option>
+                <option value="reduced">Reduce motion</option>
+                <option value="full">Allow interface motion</option>
+              </select>
+            </label>
             <Button
               variant="outline"
               onClick={() =>
@@ -558,6 +579,7 @@ export function WorkspaceSettings({
                   ...value,
                   theme: defaultPreferences.theme,
                   interfaceScale: defaultPreferences.interfaceScale,
+                  motion: defaultPreferences.motion,
                 })
               }
             >

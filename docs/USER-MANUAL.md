@@ -13,6 +13,8 @@ LibreLayer is a local-first layered image editor for current desktop browsers. E
 
 The application menu and options bar run across the top, tools are on the left, the canvas is central, and Layers/Channels/Paths/History share the right dock. Panels can be docked or floated and the layout is stored on the browser profile. `Tab` hides or shows panels. `Ctrl/⌘+K` searches every registered command.
 
+Appearance settings provide dark, light, and high-contrast themes; 85–125% interface scaling; and system-controlled, always-reduced, or full interface motion. Selected tools expose both an accessible pressed state and a visible edge/outline so the state does not depend on color alone.
+
 Use Fit, 100%, the status-bar zoom slider, canvas rotation, rulers, guides, and grid without changing document pixels. A captured reference can be shown as a split or side-by-side view with matched navigation.
 
 ## Layers and masks
