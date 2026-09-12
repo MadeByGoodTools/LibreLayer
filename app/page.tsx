@@ -351,6 +351,12 @@ import {
   type RenderFilter,
 } from '@/lib/render-filter';
 import {
+  applyFilterPlugin,
+  validateFilterPlugin,
+  type FilterPluginManifest,
+} from '@/lib/filter-plugin';
+import { runGpuCpuReferenceCheck } from '@/lib/gpu-filter-reference';
+import {
   multiScaleExportPlan,
   normalizeArtboard,
   normalizeFrame,
@@ -2355,6 +2361,7 @@ export default function Home() {
   const tintedBrushTips = useRef(new Map<string, HTMLCanvasElement>());
   const customFontFileRef = useRef<HTMLInputElement>(null);
   const smartObjectFileRef = useRef<HTMLInputElement>(null);
+  const filterPluginFileRef = useRef<HTMLInputElement>(null);
   const smartFileAction = useRef<'link' | 'replace' | 'relink'>('link');
   const smartFilterPreviewRef = useRef(false);
   const smartFilterFinalTimer = useRef<ReturnType<typeof setTimeout> | null>(
@@ -11950,6 +11957,96 @@ export default function Home() {
       setRecoveryStatus('Version history is unavailable in this browser');
     }
   };
+  const installedFilterPlugin = () => {
+    const saved = localStorage.getItem('pixel-studio-filter-plugin');
+    if (!saved) return null;
+    return validateFilterPlugin(JSON.parse(saved));
+  };
+  const applyInstalledFilterPlugin = async (amount = 100) => {
+    let plugin: FilterPluginManifest;
+    try {
+      const installed = installedFilterPlugin();
+      if (!installed) {
+        setStatus('Load a LibreLayer filter plug-in first');
+        return;
+      }
+      plugin = installed;
+    } catch {
+      localStorage.removeItem('pixel-studio-filter-plugin');
+      setStatus('The installed filter plug-in was invalid and has been removed');
+      return;
+    }
+    const target = targetContext();
+    if (!target || editing === 'mask') {
+      setStatus('Select an unlocked pixel layer first');
+      return;
+    }
+    const canvas = target.ctx.canvas,
+      context = canvas.getContext('2d', { willReadFrequently: true })!,
+      image = context.getImageData(0, 0, canvas.width, canvas.height),
+      original = makeCanvas(canvas.width, canvas.height);
+    original.getContext('2d')!.putImageData(image, 0, 0);
+    setStatus(`Running ${plugin.name} locally…`);
+    try {
+      const result = await applyFilterPlugin(
+        plugin,
+        image.data,
+        image.width,
+        image.height,
+        amount,
+      );
+      context.putImageData(
+        new ImageData(
+          Uint8ClampedArray.from(result.pixels),
+          image.width,
+          image.height,
+        ),
+        0,
+        0,
+      );
+      if (selectionRef.current) {
+        const processed = makeCanvas(canvas.width, canvas.height),
+          mask = selectionMask(doc.w, doc.h, 0, 0),
+          processedContext = processed.getContext('2d')!;
+        processedContext.drawImage(canvas, 0, 0);
+        processedContext.globalCompositeOperation = 'destination-in';
+        processedContext.drawImage(mask, 0, 0);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(original, 0, 0);
+        context.drawImage(processed, 0, 0);
+        processed.width = processed.height = mask.width = mask.height = 1;
+      }
+      snapshot(plugin.name);
+      render();
+      setStatus(
+        `${plugin.name} applied with the ${result.backend === 'wasm' ? 'WebAssembly' : 'CPU'} engine${result.warning ? ' · WebAssembly unavailable, safe fallback used' : ''}`,
+      );
+    } catch (error) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(original, 0, 0);
+      setStatus(
+        error instanceof Error ? error.message : 'The filter plug-in failed safely',
+      );
+    } finally {
+      original.width = original.height = 1;
+    }
+  };
+  const loadFilterPlugin = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (file.size > 1_500_000)
+        throw new Error('Filter plug-ins must be 1.5 MB or smaller.');
+      const plugin = validateFilterPlugin(JSON.parse(await file.text()));
+      localStorage.setItem('pixel-studio-filter-plugin', JSON.stringify(plugin));
+      setStatus(`${plugin.name} ${plugin.pluginVersion} installed locally`);
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : 'The filter plug-in is invalid',
+      );
+    } finally {
+      if (filterPluginFileRef.current) filterPluginFileRef.current.value = '';
+    }
+  };
   recoveryTick.current = (manual = false) => {
     if (
       (!preferences.autosave && !manual) ||
@@ -13632,6 +13729,45 @@ export default function Home() {
                   });
               },
             })),
+            { separator: true },
+            {
+              name: 'Load Filter Plug-in…',
+              action: () => filterPluginFileRef.current?.click(),
+            },
+            {
+              name: 'Run Last Filter Plug-in',
+              action: () => void applyInstalledFilterPlugin(),
+            },
+            {
+              name: 'Remove Filter Plug-in',
+              action: () => {
+                localStorage.removeItem('pixel-studio-filter-plugin');
+                setStatus('Local filter plug-in removed');
+              },
+            },
+            {
+              name: 'Run GPU/CPU Filter Check',
+              action: () => {
+                try {
+                  const checkCanvas = document.createElement('canvas'),
+                    result = runGpuCpuReferenceCheck(checkCanvas);
+                  checkCanvas.width = checkCanvas.height = 1;
+                  setStatus(
+                    !result.supported
+                      ? 'WebGL2 is unavailable · CPU reference filters remain active'
+                      : result.passed
+                        ? `GPU/CPU filter check passed · maximum channel delta ${result.maximumDelta}`
+                        : `GPU/CPU filter mismatch · maximum channel delta ${result.maximumDelta}`,
+                  );
+                } catch (error) {
+                  setStatus(
+                    error instanceof Error
+                      ? error.message
+                      : 'GPU/CPU filter check failed safely',
+                  );
+                }
+              },
+            },
             { name: 'Black & white', action: () => filter('grayscale') },
             { name: 'Invert colors', action: () => filter('invert') },
             { name: 'Sharpen', action: () => filter('sharpen') },
@@ -19542,6 +19678,13 @@ export default function Home() {
         type="file"
         accept="image/png,image/jpeg,image/webp"
         onChange={(event) => void applySmartFile(event.target.files?.[0])}
+      />
+      <input
+        ref={filterPluginFileRef}
+        hidden
+        type="file"
+        accept=".librefilter,application/json"
+        onChange={(event) => void loadFilterPlugin(event.target.files?.[0])}
       />
       <Dialog
         open={selectionRepairOpen !== null}

@@ -87,7 +87,7 @@ export const suiteFeatures: SuiteFeature[] = [
     [204, 'actions', 'Record and play Actions'],
     [205, 'batch', 'Batch processing'],
     [206, 'image-processor', 'Image Processor'],
-    [207, 'scripts-plugins', 'Scripts and plugins'],
+    [207, 'scripts-plugins', 'Scripts and filter plug-ins'],
     [208, 'variables', 'Data-driven graphics and variables'],
     [209, 'export-layers', 'Export layers and artboards'],
     [210, 'print', 'Print settings and color handling'],

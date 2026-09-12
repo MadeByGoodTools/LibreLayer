@@ -1,0 +1,8 @@
+{
+  "format": "librelayer-filter-plugin",
+  "version": 1,
+  "id": "librelayer.example.sharpen",
+  "name": "Example Sharpen",
+  "pluginVersion": "1.0.0",
+  "cpuKernel": [0, -1, 0, -1, 5, -1, 0, -1, 0]
+}

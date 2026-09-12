@@ -138,8 +138,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Reference-quality blur gallery, Lens Blur, Surface Blur, Smart Sharpen, High Pass, and noise reduction.
 - [x] Lens correction, displacement, polar, wave, ripple, spherize, pixelate, and halftone.
 - [x] Oil Paint, lighting, clouds, fibers, Filter Gallery, and custom convolution.
-- [ ] Third-party WASM filter API with deterministic CPU fallback.
-- [ ] GPU/CPU reference-pixel tests.
+- [x] Third-party WASM filter API with deterministic CPU fallback.
+- [x] GPU/CPU reference-pixel tests.
 
 ## 11. Performance and large documents
 
