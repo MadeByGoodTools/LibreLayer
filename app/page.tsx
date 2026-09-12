@@ -73,6 +73,7 @@ import {
 } from '@/lib/tiled-history';
 import { penIntent } from '@/lib/pointer-input';
 import { resolveLinkedFile } from '@/lib/linked-smart-object';
+import { assertAcyclicSmartObjectGraph } from '@/lib/smart-object-graph';
 import {
   checkDimensions,
   checkFileSize,
@@ -384,6 +385,8 @@ type SmartObjectData = {
   filterMask: boolean;
   linkedHandleId?: string;
   linkedStatus?: 'connected' | 'missing';
+  instanceId?: string;
+  dependencies?: string[];
   raw?: {
     assetId: string;
     width: number;
@@ -6333,6 +6336,20 @@ export default function Home() {
       isLocked(meta.id)
     )
       return;
+    const previousInstance = meta.smartObject?.instanceId,
+      instanceId = crypto.randomUUID(),
+      dependencies = previousInstance ? [previousInstance] : [];
+    assertAcyclicSmartObjectGraph([
+      { instanceId, dependencies },
+      ...(meta.smartObject
+        ? [
+            {
+              instanceId: previousInstance,
+              dependencies: meta.smartObject.dependencies,
+            },
+          ]
+        : []),
+    ]);
     patchLayer(
       meta.id,
       {
@@ -6342,11 +6359,53 @@ export default function Home() {
           sourceData: surface.pixels.toDataURL('image/png'),
           filters: [],
           filterMask: false,
+          instanceId,
+          dependencies,
         },
       },
       'Convert to Smart Object',
     );
     setStatus('Embedded Smart Object created; transforms are non-destructive');
+  };
+  const makeSmartObjectIndependent = () => {
+    const meta = selected(),
+      smart = meta?.smartObject;
+    if (!meta || !smart || isLocked(meta.id)) {
+      setStatus('Select an unlocked Smart Object first');
+      return;
+    }
+    patchLayer(
+      meta.id,
+      {
+        smartObject: {
+          ...smart,
+          kind: 'embedded',
+          instanceId: crypto.randomUUID(),
+          dependencies: [],
+          linkedHandleId: undefined,
+          linkedStatus: undefined,
+        },
+      },
+      'Make Smart Object independent',
+    );
+    setStatus('Independent Smart Object created from the current contents');
+  };
+  const duplicateSmartObjectInstance = () => {
+    const smart = selected()?.smartObject;
+    if (!smart) {
+      setStatus('Select a Smart Object first');
+      return;
+    }
+    if (!smart.instanceId) {
+      const meta = selected()!;
+      patchLayer(
+        meta.id,
+        { smartObject: { ...smart, instanceId: crypto.randomUUID() } },
+        'Prepare shared Smart Object',
+      );
+    }
+    duplicate();
+    setStatus('Shared Smart Object instance duplicated');
   };
   async function chooseSmartFile(action: 'link' | 'replace' | 'relink') {
     smartFileAction.current = action;
@@ -6402,42 +6461,74 @@ export default function Home() {
       }
       if (!meta || meta.kind === 'group' || meta.kind === 'adjustment')
         throw Error('Select a pixel or Smart Object layer first');
-      const surface = surfacesRef.current.get(meta.id)!;
-      surface.pixels = pixels;
-      const previous = meta.smartObject;
-      patchLayer(
-        meta.id,
-        {
-          smartObject: {
-            kind:
-              action === 'link' || action === 'relink'
-                ? 'linked'
-                : (previous?.kind ?? 'embedded'),
-            sourceName: file.name,
-            sourceData: pixels.toDataURL('image/png'),
-            filters: previous?.filters ?? [],
-            filterMask: previous?.filterMask ?? false,
-            linkedHandleId:
-              action === 'link' || action === 'relink'
-                ? meta.id
-                : previous?.linkedHandleId,
-            linkedStatus:
-              handle &&
-              (action === 'link' ||
-                action === 'relink' ||
-                previous?.kind === 'linked')
-                ? 'connected'
-                : action === 'link' || action === 'relink'
-                  ? 'missing'
-                  : previous?.linkedStatus,
-          },
-        },
-        action === 'replace'
-          ? 'Replace Smart Object contents'
-          : action === 'relink'
-            ? 'Relink Smart Object'
-            : 'Place linked Smart Object',
+      const previous = meta.smartObject,
+        instanceId = previous?.instanceId ?? crypto.randomUUID(),
+        sourceData = pixels.toDataURL('image/png'),
+        linkedHandleId =
+          action === 'link' || action === 'relink'
+            ? meta.id
+            : previous?.linkedHandleId,
+        linkedStatus =
+          handle &&
+          (action === 'link' ||
+            action === 'relink' ||
+            previous?.kind === 'linked')
+            ? 'connected'
+            : action === 'link' || action === 'relink'
+              ? 'missing'
+              : previous?.linkedStatus,
+        sourceKind =
+          action === 'link' || action === 'relink'
+            ? 'linked'
+            : (previous?.kind ?? 'embedded'),
+        historyLabel =
+          action === 'replace'
+            ? 'Replace Smart Object contents'
+            : action === 'relink'
+              ? 'Relink Smart Object'
+              : 'Place linked Smart Object';
+      for (const layer of layersRef.current) {
+        if (
+          layer.id !== meta.id &&
+          (!previous?.instanceId ||
+            layer.smartObject?.instanceId !== previous.instanceId)
+        )
+          continue;
+        const surface = surfacesRef.current.get(layer.id);
+        if (!surface) continue;
+        const copy = makeCanvas(doc.w, doc.h);
+        copy.getContext('2d')!.drawImage(pixels, 0, 0);
+        surface.pixels.width = surface.pixels.height = 1;
+        surface.pixels = copy;
+      }
+      pixels.width = pixels.height = 1;
+      syncLayers(
+        layersRef.current.map((layer) => {
+          if (
+            layer.id !== meta!.id &&
+            (!previous?.instanceId ||
+              layer.smartObject?.instanceId !== previous.instanceId)
+          )
+            return layer;
+          const existing = layer.smartObject;
+          return {
+            ...layer,
+            smartObject: {
+              kind: sourceKind,
+              sourceName: file.name,
+              sourceData,
+              filters: existing?.filters ?? [],
+              filterMask: existing?.filterMask ?? false,
+              linkedHandleId,
+              linkedStatus,
+              instanceId,
+              dependencies: existing?.dependencies ?? [],
+              raw: undefined,
+            },
+          };
+        }),
       );
+      snapshot(historyLabel);
       if (
         handle &&
         (action === 'link' ||
@@ -9013,6 +9104,11 @@ export default function Home() {
       );
       const surfaces = new Map<string, LayerSurface>(),
         metas: LayerMeta[] = [];
+      assertAcyclicSmartObjectGraph(
+        data.layers.map(
+          (item: { smartObject?: SmartObjectData }) => item.smartObject ?? {},
+        ),
+      );
       const decode = (uri: string) =>
         new Promise<HTMLCanvasElement>((resolve, reject) => {
           if (
@@ -9187,6 +9283,18 @@ export default function Home() {
         const { pixels, mask, ...rawMeta } = item,
           meta: LayerMeta = {
             ...rawMeta,
+            smartObject: rawMeta.smartObject
+              ? {
+                  ...rawMeta.smartObject,
+                  instanceId:
+                    rawMeta.smartObject.instanceId ?? crypto.randomUUID(),
+                  dependencies: rawMeta.smartObject.dependencies ?? [],
+                  linkedStatus:
+                    rawMeta.smartObject.kind === 'linked'
+                      ? 'missing'
+                      : undefined,
+                }
+              : undefined,
             effects: rawMeta.effects
               ? normalizeLayerEffects(rawMeta.effects)
               : undefined,
@@ -12053,6 +12161,14 @@ export default function Home() {
             { name: 'Clear layer effects', action: clearLayerEffects },
             { separator: true },
             { name: 'Convert to Smart Object', action: convertToSmartObject },
+            {
+              name: 'New shared Smart Object instance',
+              action: duplicateSmartObjectInstance,
+            },
+            {
+              name: 'Make Smart Object independent',
+              action: makeSmartObjectIndependent,
+            },
             {
               name: 'Place linked Smart Object…',
               action: () => void chooseSmartFile('link'),

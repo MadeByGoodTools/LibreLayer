@@ -25,6 +25,8 @@ Layer masks support density, feather, overlay, inversion, enable/disable, applic
 
 Smart Objects retain embedded or linked source data, transforms, and editable Smart Filters. When the browser supports file handles, linked sources remember their connection on this browser profile. Use **Refresh** to reread the source and **Relink** after a file moves or a drive is reconnected. A missing or denied link is shown explicitly, while the packaged embedded fallback remains visible and travels inside the `.librelayer` project. Browsers without persistent handles can still place a linked-style object with an embedded fallback, but must use Relink to refresh it.
 
+**New shared Smart Object instance** duplicates the selected Smart Object while keeping its source identity shared; replacing or relinking the source updates every shared instance while their transforms and Smart Filter stacks remain independent. **Make Smart Object independent** embeds the current appearance under a new source identity. LibreLayer records nested source dependencies in the project and refuses cyclic dependency graphs instead of recursively opening or corrupting them.
+
 ## Selecting
 
 Use Marquee (`M`), Lasso (`L`), Magic Wand/Quick Selection (`W`), semantic Subject/People/Sky/Hair/Skin/Clothing/Object selections, Color Range, Focus Range, Similar, or luminosity ranges. New/Add/Subtract/Intersect changes how the next selection combines. Selection refinement includes Grow, Expand, Contract, Smooth, Feather, Border, Transform Selection, Quick Mask, saved selections, and Select and Mask.
