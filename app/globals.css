@@ -4312,6 +4312,48 @@ button {
   border-radius: 10px;
   background: color-mix(in srgb, var(--muted) 45%, transparent);
 }
+.data-driven-studio {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+.data-driven-studio output,
+.dataset-controls > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.dataset-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.dataset-controls label {
+  display: grid;
+  gap: 3px;
+  min-width: min(240px, 100%);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.dataset-controls select {
+  min-height: 31px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+}
+.dataset-controls > span {
+  flex: 1 1 180px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .automation-heading,
 .automation-actions,
 .processor-controls {

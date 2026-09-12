@@ -442,6 +442,9 @@ import {
 } from '@/lib/high-depth';
 import { runStackJob } from '@/lib/stack-job';
 import type { StackMode } from '@/lib/stack-engine';
+import { substituteDataVariables, type DataRecord } from '@/lib/data-driven';
+import { planContactSheet } from '@/lib/contact-sheet';
+import { createStoreZip, type ZipEntry } from '@/lib/zip';
 const Mask = Focus;
 
 type Tool =
@@ -2181,7 +2184,9 @@ export default function Home() {
             p.historyBudgetMb,
           ).budgetMb,
           performanceMode: normalizePerformanceMode(p.performanceMode),
-          scratchLocation: ['browser', 'save-folder'].includes(p.scratchLocation)
+          scratchLocation: ['browser', 'save-folder'].includes(
+            p.scratchLocation,
+          )
             ? p.scratchLocation
             : 'browser',
           scratchQuotaMb: normalizeScratchQuota(p.scratchQuotaMb),
@@ -2240,7 +2245,10 @@ export default function Home() {
         state = permission === 'granted' ? 'connected' : 'permission-needed';
       }
     } catch {
-      name = saveLocationName === 'Downloads' ? 'Remembered folder' : saveLocationName;
+      name =
+        saveLocationName === 'Downloads'
+          ? 'Remembered folder'
+          : saveLocationName;
       state = 'unavailable';
     }
     setSaveLocationName(name);
@@ -2257,7 +2265,9 @@ export default function Home() {
       );
     } catch (error) {
       setScratchStatus(
-        error instanceof Error ? error.message : 'Scratch storage is unavailable',
+        error instanceof Error
+          ? error.message
+          : 'Scratch storage is unavailable',
       );
     }
   };
@@ -2268,10 +2278,14 @@ export default function Home() {
         location === 'save-folder' ? await getDefaultSaveDirectory() : null;
       const count = await cleanScratch(location, directory);
       await refreshScratchStatus();
-      setRecoveryStatus(`${count} temporary scratch ${count === 1 ? 'file' : 'files'} removed`);
+      setRecoveryStatus(
+        `${count} temporary scratch ${count === 1 ? 'file' : 'files'} removed`,
+      );
     } catch (error) {
       setRecoveryStatus(
-        error instanceof Error ? error.message : 'Scratch storage could not be cleaned',
+        error instanceof Error
+          ? error.message
+          : 'Scratch storage could not be cleaned',
       );
     }
   };
@@ -2281,7 +2295,9 @@ export default function Home() {
     setPerformanceCheckStatus('Starting local worker…');
     try {
       const report = await runPerformanceSuite((progress) =>
-        setPerformanceCheckStatus(`${progress}% · testing local tiled workloads`),
+        setPerformanceCheckStatus(
+          `${progress}% · testing local tiled workloads`,
+        ),
       );
       const total = report.results.reduce(
           (sum, result) => sum + result.elapsedMs,
@@ -2293,7 +2309,9 @@ export default function Home() {
       );
     } catch (error) {
       setPerformanceCheckStatus(
-        error instanceof Error ? error.message : 'The local performance check failed.',
+        error instanceof Error
+          ? error.message
+          : 'The local performance check failed.',
       );
     } finally {
       setPerformanceCheckRunning(false);
@@ -2313,7 +2331,11 @@ export default function Home() {
   }, []);
   useEffect(() => {
     void refreshScratchStatus();
-  }, [preferences.scratchLocation, preferences.scratchQuotaMb, saveLocationName]);
+  }, [
+    preferences.scratchLocation,
+    preferences.scratchQuotaMb,
+    saveLocationName,
+  ]);
   const protectLocalStorage = async () => {
     try {
       const protectedStorage = await navigator.storage?.persist?.();
@@ -5198,8 +5220,7 @@ export default function Home() {
                   y: point.y,
                   size: Math.max(1, size * pressureScale),
                   alpha: baseAlpha,
-                  angle:
-                    (brushAngle * Math.PI) / 180 + (tilt ? tiltAngle : 0),
+                  angle: (brushAngle * Math.PI) / 180 + (tilt ? tiltAngle : 0),
                   roundness:
                     Math.max(0.05, brushRoundness / 100) *
                     (tilt ? Math.max(0.18, 1 - tiltMagnitude) : 1),
@@ -7969,19 +7990,21 @@ export default function Home() {
     render();
     if (smartFilterFinalTimer.current)
       clearTimeout(smartFilterFinalTimer.current);
-    smartFilterFinalTimer.current = setTimeout(() => {
-      smartFilterPreviewRef.current = false;
-      smartFilterFinalTimer.current = null;
-      render();
-    },
-    adaptivePerformancePolicy({
-      mode: preferences.performanceMode,
-      documentPixels: doc.w * doc.h,
-      layerCount: layersRef.current.length,
-      deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number })
-        .deviceMemory,
-      hardwareConcurrency: navigator.hardwareConcurrency,
-    }).finalDelayMs);
+    smartFilterFinalTimer.current = setTimeout(
+      () => {
+        smartFilterPreviewRef.current = false;
+        smartFilterFinalTimer.current = null;
+        render();
+      },
+      adaptivePerformancePolicy({
+        mode: preferences.performanceMode,
+        documentPixels: doc.w * doc.h,
+        layerCount: layersRef.current.length,
+        deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number })
+          .deviceMemory,
+        hardwareConcurrency: navigator.hardwareConcurrency,
+      }).finalDelayMs,
+    );
   };
   const moveSmartFilter = (id: string, direction: -1 | 1) => {
     const meta = selected();
@@ -9851,6 +9874,10 @@ export default function Home() {
     label: string,
     restore?: { id: string; saved: boolean; skipPersist: boolean },
     smartObjectSource?: EditorDocument['smartObjectSource'],
+    extras?: Pick<
+      EditorDocument,
+      'paths' | 'artboards' | 'layerComps' | 'savedSelections' | 'feather'
+    >,
   ) => {
     nextLayers = treeOrder(nextLayers);
     requireRoom(
@@ -9874,6 +9901,9 @@ export default function Home() {
         h,
         layers: nextLayers.map((x) => ({ ...x })),
         selectedId: selectedLayer.id,
+        paths: structuredClone(extras?.paths ?? []),
+        artboards: structuredClone(extras?.artboards ?? []),
+        layerComps: structuredClone(extras?.layerComps ?? []),
         surfaces: nextLayers.map((meta) => {
           const s = nextSurfaces.get(meta.id)!;
           return {
@@ -9895,7 +9925,11 @@ export default function Home() {
         historyIndex: 0,
         zoom: Math.min(100, Math.max(20, Math.round((760 / w) * 100))),
         selection: null,
-        paths: [],
+        paths: structuredClone(extras?.paths ?? []),
+        artboards: structuredClone(extras?.artboards ?? []),
+        layerComps: structuredClone(extras?.layerComps ?? []),
+        savedSelections: structuredClone(extras?.savedSelections ?? []),
+        feather: extras?.feather ?? 0,
         smartObjectSource,
       };
     documentStoreRef.current.set(documentId, next);
@@ -10327,7 +10361,10 @@ export default function Home() {
         setSaveLocationHealth(saveLocationStatus(directory.name, 'connected'));
       else if (folderFailure)
         setSaveLocationHealth(
-          saveLocationStatus(directory?.name ?? saveLocationName, 'unavailable'),
+          saveLocationStatus(
+            directory?.name ?? saveLocationName,
+            'unavailable',
+          ),
         );
       return true;
     } catch (e) {
@@ -11240,7 +11277,12 @@ export default function Home() {
   const stackSourcesForLayers = (items: LayerMeta[]) => {
     const canvases = items.map((layer) => {
         const canvas = makeCanvas(doc.w, doc.h);
-        renderLayers(canvas.getContext('2d')!, [layer], surfacesRef.current, doc);
+        renderLayers(
+          canvas.getContext('2d')!,
+          [layer],
+          surfacesRef.current,
+          doc,
+        );
         return canvas;
       }),
       sources = canvases.map(
@@ -11286,7 +11328,8 @@ export default function Home() {
             ),
         },
       );
-      if (result.kind !== 'aligned') throw Error('Alignment result was invalid.');
+      if (result.kind !== 'aligned')
+        throw Error('Alignment result was invalid.');
       const moves = new Map(
         items.map((layer, index) => [layer.id, result.translations[index]]),
       );
@@ -11720,7 +11763,9 @@ export default function Home() {
       setStatus('Portable Camera Raw recipe applied');
     } catch (error) {
       setPsdError(
-        error instanceof Error ? error.message : 'The RAW recipe could not be imported.',
+        error instanceof Error
+          ? error.message
+          : 'The RAW recipe could not be imported.',
       );
     } finally {
       if (rawRecipeFileRef.current) rawRecipeFileRef.current.value = '';
@@ -11743,7 +11788,11 @@ export default function Home() {
             canvas
               .getContext('2d')!
               .putImageData(
-                new ImageData(developed.data, developed.width, developed.height),
+                new ImageData(
+                  developed.data,
+                  developed.width,
+                  developed.height,
+                ),
                 0,
                 0,
               );
@@ -12555,7 +12604,9 @@ export default function Home() {
       plugin = installed;
     } catch {
       localStorage.removeItem('pixel-studio-filter-plugin');
-      setStatus('The installed filter plug-in was invalid and has been removed');
+      setStatus(
+        'The installed filter plug-in was invalid and has been removed',
+      );
       return;
     }
     const target = targetContext();
@@ -12588,7 +12639,9 @@ export default function Home() {
     if (image.data.byteLength >= 4 * 1048576) {
       try {
         scratchDirectory =
-          scratchLocation === 'save-folder' ? await getDefaultSaveDirectory() : null;
+          scratchLocation === 'save-folder'
+            ? await getDefaultSaveDirectory()
+            : null;
         scratchName = await writeScratch(
           jobId,
           new Blob([image.data.slice().buffer]),
@@ -12666,7 +12719,9 @@ export default function Home() {
           await deleteScratch(scratchName, scratchLocation, scratchDirectory);
           void refreshScratchStatus();
         } catch {
-          setRecoveryStatus('A temporary scratch file remains and can be removed in Workspace settings');
+          setRecoveryStatus(
+            'A temporary scratch file remains and can be removed in Workspace settings',
+          );
         }
       }
       original.width = original.height = 1;
@@ -12689,11 +12744,16 @@ export default function Home() {
       if (file.size > 1_500_000)
         throw new Error('Filter plug-ins must be 1.5 MB or smaller.');
       const plugin = validateFilterPlugin(JSON.parse(await file.text()));
-      localStorage.setItem('pixel-studio-filter-plugin', JSON.stringify(plugin));
+      localStorage.setItem(
+        'pixel-studio-filter-plugin',
+        JSON.stringify(plugin),
+      );
       setStatus(`${plugin.name} ${plugin.pluginVersion} installed locally`);
     } catch (error) {
       setStatus(
-        error instanceof Error ? error.message : 'The filter plug-in is invalid',
+        error instanceof Error
+          ? error.message
+          : 'The filter plug-in is invalid',
       );
     } finally {
       if (filterPluginFileRef.current) filterPluginFileRef.current.value = '';
@@ -12822,7 +12882,9 @@ export default function Home() {
       meta = workspace
         ? layersRef.current.find((layer) => layer.id === workspace.layerId)
         : undefined,
-      surface = workspace ? surfacesRef.current.get(workspace.layerId) : undefined;
+      surface = workspace
+        ? surfacesRef.current.get(workspace.layerId)
+        : undefined;
     if (
       !workspace ||
       !meta ||
@@ -12920,14 +12982,16 @@ export default function Home() {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
     const openComposite = (suffix: string, source?: HTMLCanvasElement) => {
-      const canvas = makeCanvas(doc.w, doc.h);
+      const width = source?.width ?? doc.w,
+        height = source?.height ?? doc.h,
+        canvas = makeCanvas(width, height);
       if (source) canvas.getContext('2d')!.drawImage(source, 0, 0);
       else renderLayers(canvas.getContext('2d')!);
       const id = crypto.randomUUID();
       loadImportedDocument(
         `${fileName} — ${suffix}`,
-        doc.w,
-        doc.h,
+        width,
+        height,
         [
           {
             id,
@@ -13282,6 +13346,127 @@ export default function Home() {
         return;
       }
       if (feature.command === 'variables') {
+        let dataRecords:
+          | {
+              __librelayerDataRecords: true;
+              records: { name: string; values: DataRecord }[];
+            }
+          | undefined;
+        try {
+          const value = JSON.parse(options.text) as Partial<{
+            __librelayerDataRecords: true;
+            records: { name: string; values: DataRecord }[];
+          }>;
+          if (
+            value.__librelayerDataRecords === true &&
+            Array.isArray(value.records) &&
+            value.records.length >= 1 &&
+            value.records.length <= 25 &&
+            value.records.every(
+              (record) =>
+                record &&
+                typeof record.name === 'string' &&
+                record.values &&
+                typeof record.values === 'object' &&
+                !Array.isArray(record.values),
+            )
+          )
+            dataRecords = value as typeof dataRecords;
+        } catch {
+          dataRecords = undefined;
+        }
+        if (dataRecords) {
+          const sourceLayers = layersRef.current,
+            sourceSurfaces = surfacesRef.current,
+            roots = sourceLayers
+              .filter((layer) => !layer.parentId)
+              .map((layer) => layer.id),
+            firstRecord = dataRecords.records[0].values;
+          if (
+            !sourceLayers.some(
+              (layer) =>
+                layer.textLayer &&
+                substituteDataVariables(
+                  layer.textLayer.content,
+                  firstRecord,
+                ) !== layer.textLayer.content,
+            )
+          )
+            throw Error(
+              'No editable text layer contains a matching {{column}} variable.',
+            );
+          persistActiveDocument();
+          let substitutions = 0;
+          for (const dataRecord of dataRecords.records) {
+            const plan = planLayerTransfer(sourceLayers, roots, () =>
+                crypto.randomUUID(),
+              ),
+              nextSurfaces = new Map<string, LayerSurface>();
+            for (const [sourceId, nextId] of plan.idMap) {
+              const source = sourceSurfaces.get(sourceId);
+              if (!source) throw Error('A source layer is missing its pixels.');
+              const pixels = makeCanvas(
+                source.pixels.width,
+                source.pixels.height,
+              );
+              pixels.getContext('2d')!.drawImage(source.pixels, 0, 0);
+              let mask: HTMLCanvasElement | undefined;
+              if (source.mask) {
+                mask = makeCanvas(source.mask.width, source.mask.height);
+                mask.getContext('2d')!.drawImage(source.mask, 0, 0);
+              }
+              nextSurfaces.set(nextId, { pixels, mask });
+            }
+            const nextLayers = plan.layers.map((layer) => {
+              if (!layer.textLayer) return layer;
+              const content = substituteDataVariables(
+                layer.textLayer.content,
+                dataRecord.values,
+              );
+              if (content === layer.textLayer.content) return layer;
+              substitutions++;
+              const next = {
+                  ...layer,
+                  textLayer: { ...layer.textLayer, content },
+                },
+                surface = nextSurfaces.get(layer.id)!;
+              surface.pixels.getContext('2d')!.clearRect(0, 0, doc.w, doc.h);
+              drawEditableText(
+                surface.pixels,
+                next.textLayer,
+                paths.find((path) => path.id === next.textLayer.pathId)?.points,
+              );
+              return next;
+            });
+            loadImportedDocument(
+              `${fileName} — ${dataRecord.name}`,
+              doc.w,
+              doc.h,
+              nextLayers,
+              nextSurfaces,
+              'Generate data variant',
+              { id: crypto.randomUUID(), saved: false, skipPersist: true },
+              undefined,
+              {
+                paths,
+                artboards,
+                layerComps: layerComps.map((comp) => ({
+                  ...comp,
+                  states: comp.states.map((state) => ({
+                    ...state,
+                    id: plan.idMap.get(state.id) ?? state.id,
+                  })),
+                })),
+                savedSelections,
+                feather,
+              },
+            );
+          }
+          setStatus(
+            `${dataRecords.records.length} editable data variant${dataRecords.records.length === 1 ? '' : 's'} generated with ${substitutions} text substitution${substitutions === 1 ? '' : 's'}`,
+          );
+          return;
+        }
         const meta = selected();
         if (!meta?.textLayer) {
           setStatus('Select an editable text layer first');
@@ -13302,19 +13487,160 @@ export default function Home() {
         return;
       }
       if (feature.command === 'export-layers') {
-        for (const meta of layersRef.current.filter((x) => x.kind !== 'group'))
-          surfacesRef.current
-            .get(meta.id)
-            ?.pixels.toBlob(
-              (blob) =>
-                blob &&
-                download(
-                  `${meta.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'layer'}.png`,
-                  blob,
-                ),
-              'image/png',
+        const layerItems = layersRef.current.filter(
+            (layer) => layer.kind !== 'group' && layer.kind !== 'adjustment',
+          ),
+          artboardPlan = multiScaleExportPlan(artboards, assetScales),
+          taskCount = layerItems.length + artboardPlan.length;
+        if (!taskCount) {
+          setStatus(
+            'Create a visual layer or enabled artboard before exporting.',
+          );
+          return;
+        }
+        const controller = new AbortController(),
+          jobId = crypto.randomUUID(),
+          entries: ZipEntry[] = [],
+          toBlob = (canvas: HTMLCanvasElement) =>
+            new Promise<Blob>((resolve, reject) =>
+              canvas.toBlob(
+                (blob) =>
+                  blob ? resolve(blob) : reject(Error('PNG encoding failed.')),
+                'image/png',
+              ),
             );
-        setStatus('Editable layers exported as PNG files');
+        activeJobAbort.current?.abort();
+        activeJobAbort.current = controller;
+        setActiveJob({
+          id: jobId,
+          label: 'Export layers and artboards',
+          progress: 0,
+        });
+        try {
+          let completed = 0;
+          for (const [index, meta] of layerItems.entries()) {
+            if (controller.signal.aborted) throw new JobCancelledError();
+            const bounds = layerBounds(meta);
+            if (bounds) {
+              const left = Math.max(0, Math.floor(bounds.left)),
+                top = Math.max(0, Math.floor(bounds.top)),
+                right = Math.min(doc.w, Math.ceil(bounds.right)),
+                bottom = Math.min(doc.h, Math.ceil(bounds.bottom));
+              if (right > left && bottom > top) {
+                const full = makeCanvas(doc.w, doc.h),
+                  output = makeCanvas(right - left, bottom - top);
+                renderLayers(
+                  full.getContext('2d')!,
+                  [{ ...meta, visible: true }],
+                  surfacesRef.current,
+                  doc,
+                );
+                output
+                  .getContext('2d')!
+                  .drawImage(
+                    full,
+                    left,
+                    top,
+                    right - left,
+                    bottom - top,
+                    0,
+                    0,
+                    right - left,
+                    bottom - top,
+                  );
+                entries.push({
+                  name: `layers/${String(index + 1).padStart(3, '0')}-${meta.name.replace(/[^a-z0-9_-]+/gi, '-') || 'layer'}.png`,
+                  data: new Uint8Array(
+                    await (await toBlob(output)).arrayBuffer(),
+                  ),
+                });
+                full.width = full.height = output.width = output.height = 1;
+              }
+            }
+            completed++;
+            setActiveJob((current) =>
+              current?.id === jobId
+                ? {
+                    ...current,
+                    progress: Math.round((completed / taskCount) * 95),
+                  }
+                : current,
+            );
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve()),
+            );
+          }
+          if (artboardPlan.length) {
+            const source = makeCanvas(doc.w, doc.h);
+            renderLayers(source.getContext('2d')!);
+            for (const item of artboardPlan) {
+              if (controller.signal.aborted) throw new JobCancelledError();
+              const artboard = artboards.find(
+                  (candidate) => candidate.id === item.artboardId,
+                )!,
+                output = makeCanvas(item.width, item.height),
+                context = output.getContext('2d')!;
+              context.fillStyle = artboard.background;
+              context.fillRect(0, 0, item.width, item.height);
+              context.imageSmoothingEnabled = true;
+              context.imageSmoothingQuality = 'high';
+              context.drawImage(
+                source,
+                artboard.x,
+                artboard.y,
+                artboard.w,
+                artboard.h,
+                0,
+                0,
+                item.width,
+                item.height,
+              );
+              entries.push({
+                name: `artboards/${item.name}`,
+                data: new Uint8Array(
+                  await (await toBlob(output)).arrayBuffer(),
+                ),
+              });
+              output.width = output.height = 1;
+              completed++;
+              setActiveJob((current) =>
+                current?.id === jobId
+                  ? {
+                      ...current,
+                      progress: Math.round((completed / taskCount) * 95),
+                    }
+                  : current,
+              );
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() => resolve()),
+              );
+            }
+            source.width = source.height = 1;
+          }
+          if (!entries.length)
+            throw Error('The export sources contain no visible pixels.');
+          download(
+            `${fileName.replace(/\.[^.]+$/, '') || 'librelayer'}-assets.zip`,
+            new Blob([createStoreZip(entries) as BlobPart], {
+              type: 'application/zip',
+            }),
+          );
+          setStatus(
+            `${entries.length} layer and artboard assets exported in one ZIP`,
+          );
+        } catch (error) {
+          setStatus(
+            error instanceof JobCancelledError
+              ? 'Layer and artboard export cancelled before download'
+              : error instanceof Error
+                ? error.message
+                : 'Layer and artboard export failed safely',
+          );
+        } finally {
+          if (activeJobAbort.current === controller)
+            activeJobAbort.current = null;
+          setActiveJob((current) => (current?.id === jobId ? null : current));
+        }
         return;
       }
       if (feature.command === 'print') {
@@ -13324,6 +13650,202 @@ export default function Home() {
       }
     }
     if (feature.kind === 'document') {
+      if (feature.command === 'photomerge') {
+        const items = selectedRoots().filter(
+          (layer) =>
+            layer.visible &&
+            layer.kind !== 'group' &&
+            layer.kind !== 'adjustment' &&
+            Boolean(surfacesRef.current.get(layer.id)),
+        );
+        if (items.length < 2) {
+          setStatus(
+            'Select two or more overlapping pixel layers in left-to-right order.',
+          );
+          return;
+        }
+        const controller = new AbortController(),
+          jobId = crypto.randomUUID();
+        activeJobAbort.current?.abort();
+        activeJobAbort.current = controller;
+        setActiveJob({ id: jobId, label: 'Photomerge panorama', progress: 0 });
+        setStatus(
+          'Registering and feathering panorama frames in a background worker…',
+        );
+        try {
+          const result = await runStackJob(
+            'panorama',
+            stackSourcesForLayers(items),
+            doc.w,
+            doc.h,
+            {
+              signal: controller.signal,
+              timeoutMs: 180000,
+              onProgress: (progress) =>
+                setActiveJob((current) =>
+                  current?.id === jobId ? { ...current, progress } : current,
+                ),
+            },
+          );
+          if (result.kind !== 'panorama')
+            throw Error('Panorama output was invalid.');
+          const canvas = makeCanvas(result.width, result.height);
+          canvas
+            .getContext('2d')!
+            .putImageData(
+              new ImageData(
+                Uint8ClampedArray.from(result.pixels),
+                result.width,
+                result.height,
+              ),
+              0,
+              0,
+            );
+          openComposite('Photomerge panorama', canvas);
+          canvas.width = canvas.height = 1;
+          setStatus(
+            `${items.length} frames registered and feathered into a ${result.width} × ${result.height} editable panorama`,
+          );
+        } catch (error) {
+          setStatus(
+            error instanceof JobCancelledError
+              ? 'Photomerge cancelled; source layers were not changed'
+              : error instanceof Error
+                ? error.message
+                : 'Photomerge failed safely',
+          );
+        } finally {
+          if (activeJobAbort.current === controller)
+            activeJobAbort.current = null;
+          setActiveJob((current) => (current?.id === jobId ? null : current));
+        }
+        return;
+      }
+      if (feature.command === 'contact-sheet') {
+        const items = selectedRoots().filter(
+          (layer) =>
+            layer.visible &&
+            layer.kind !== 'group' &&
+            layer.kind !== 'adjustment' &&
+            Boolean(surfacesRef.current.get(layer.id)),
+        );
+        if (items.length < 2) {
+          setStatus(
+            'Select two or more visible pixel layers for a contact sheet.',
+          );
+          return;
+        }
+        const sources = items.flatMap((layer) => {
+          const bounds = layerBounds(layer);
+          if (!bounds) return [];
+          return [
+            {
+              layer,
+              left: Math.max(0, Math.floor(bounds.left)),
+              top: Math.max(0, Math.floor(bounds.top)),
+              right: Math.min(doc.w, Math.ceil(bounds.right)),
+              bottom: Math.min(doc.h, Math.ceil(bounds.bottom)),
+            },
+          ];
+        });
+        if (sources.length < 2) {
+          setStatus(
+            'The selected layers do not contain enough visible pixels.',
+          );
+          return;
+        }
+        const plan = planContactSheet(
+            sources.map((item) => ({
+              width: item.right - item.left,
+              height: item.bottom - item.top,
+              label: item.layer.name,
+            })),
+            {
+              columns: Math.max(
+                1,
+                Math.min(6, Math.round(1 + options.amount / 20)),
+              ),
+              gap: 8 + Math.round(options.secondary * 0.32),
+            },
+          ),
+          controller = new AbortController(),
+          jobId = crypto.randomUUID(),
+          output = makeCanvas(plan.width, plan.height),
+          context = output.getContext('2d')!;
+        activeJobAbort.current?.abort();
+        activeJobAbort.current = controller;
+        setActiveJob({ id: jobId, label: 'Contact sheet', progress: 0 });
+        try {
+          context.fillStyle = options.color;
+          context.fillRect(0, 0, output.width, output.height);
+          const numeric = Number.parseInt(options.color.slice(1), 16),
+            luminance =
+              (((numeric >> 16) & 255) * 0.2126 +
+                ((numeric >> 8) & 255) * 0.7152 +
+                (numeric & 255) * 0.0722) /
+              255;
+          context.fillStyle = luminance > 0.55 ? '#111318' : '#f5f7fa';
+          context.font = '13px system-ui, sans-serif';
+          context.textBaseline = 'middle';
+          for (const [index, source] of sources.entries()) {
+            if (controller.signal.aborted) throw new JobCancelledError();
+            const rendered = makeCanvas(doc.w, doc.h),
+              cell = plan.cells[index];
+            renderLayers(
+              rendered.getContext('2d')!,
+              [{ ...source.layer, visible: true }],
+              surfacesRef.current,
+              doc,
+            );
+            context.drawImage(
+              rendered,
+              source.left,
+              source.top,
+              source.right - source.left,
+              source.bottom - source.top,
+              cell.imageX,
+              cell.imageY,
+              cell.imageWidth,
+              cell.imageHeight,
+            );
+            context.fillText(
+              cell.label,
+              cell.x,
+              cell.y + cell.height + plan.caption / 2,
+              cell.width,
+            );
+            rendered.width = rendered.height = 1;
+            setActiveJob((current) =>
+              current?.id === jobId
+                ? {
+                    ...current,
+                    progress: Math.round(((index + 1) / sources.length) * 95),
+                  }
+                : current,
+            );
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve()),
+            );
+          }
+          openComposite(options.text.trim() || 'Contact sheet', output);
+          output.width = output.height = 1;
+          setStatus(`${sources.length}-image editable contact sheet created`);
+        } catch (error) {
+          output.width = output.height = 1;
+          setStatus(
+            error instanceof JobCancelledError
+              ? 'Contact sheet cancelled; no result document was created'
+              : error instanceof Error
+                ? error.message
+                : 'Contact sheet failed safely',
+          );
+        } finally {
+          if (activeJobAbort.current === controller)
+            activeJobAbort.current = null;
+          setActiveJob((current) => (current?.id === jobId ? null : current));
+        }
+        return;
+      }
       if (
         ['auto-blend', 'focus-stack', 'hdr-merge', 'image-stack'].includes(
           feature.command,
@@ -13337,7 +13859,9 @@ export default function Home() {
             Boolean(surfacesRef.current.get(layer.id)),
         );
         if (items.length < 2) {
-          setStatus(`Select at least two visible pixel layers for ${feature.label}`);
+          setStatus(
+            `Select at least two visible pixel layers for ${feature.label}`,
+          );
           return;
         }
         const command =
@@ -13348,7 +13872,13 @@ export default function Home() {
                 : feature.command === 'hdr-merge'
                   ? 'hdr'
                   : 'statistical',
-          modes: StackMode[] = ['minimum', 'median', 'mean', 'maximum', 'range'],
+          modes: StackMode[] = [
+            'minimum',
+            'median',
+            'mean',
+            'maximum',
+            'range',
+          ],
           mode = modes[Math.min(4, Math.floor(options.secondary / 20))],
           controller = new AbortController(),
           jobId = crypto.randomUUID();
@@ -13372,12 +13902,17 @@ export default function Home() {
                 ),
             },
           );
-          if (result.kind !== 'result') throw Error('Image-stack result was invalid.');
+          if (result.kind !== 'result')
+            throw Error('Image-stack result was invalid.');
           const canvas = makeCanvas(doc.w, doc.h);
           canvas
             .getContext('2d')!
             .putImageData(
-              new ImageData(Uint8ClampedArray.from(result.pixels), doc.w, doc.h),
+              new ImageData(
+                Uint8ClampedArray.from(result.pixels),
+                doc.w,
+                doc.h,
+              ),
               0,
               0,
             );
@@ -13405,11 +13940,7 @@ export default function Home() {
         }
         return;
       }
-      if (
-        ['frame-animation', 'video-timeline'].includes(
-          feature.command,
-        )
-      ) {
+      if (['frame-animation', 'video-timeline'].includes(feature.command)) {
         localStorage.setItem(
           `pixel-studio-${feature.command}`,
           JSON.stringify({
@@ -13822,7 +14353,9 @@ export default function Home() {
         ? undefined
         : (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
     hardwareConcurrency:
-      typeof navigator === 'undefined' ? undefined : navigator.hardwareConcurrency,
+      typeof navigator === 'undefined'
+        ? undefined
+        : navigator.hardwareConcurrency,
   });
   const brushFolders = Array.from(
       new Set(brushTips.map((tip) => tip.folder).filter(Boolean)),

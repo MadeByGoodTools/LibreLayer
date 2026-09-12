@@ -122,11 +122,19 @@ Open **Filter → Professional Studio** to record the tools you run as an editab
 
 The **Image Processor** runs the selected saved Action—or the current draft—over chosen local image files one at a time. Choose PNG, JPEG, or WebP output, quality, optional maximum edge, and a filename suffix. Only pixel-compatible Action steps run in this file workflow; document and layer commands are skipped. Progress and failures are reported, Stop leaves source files unchanged, and the browser may ask permission for multiple downloads.
 
+### Variables, datasets, and asset export
+
+Put placeholders such as `{{name}}` or `{{price}}` in one or more editable text layers. In **Variables and datasets**, open a CSV with a header row, a JSON array of records, or a portable `.libredata` file. Choose a row and generate one variant, or generate the first 25 rows as independent editable document tabs. The imported dataset is validated, saved only in this browser profile, and remains available after reopening. Unknown placeholders stay visible instead of being erased.
+
+**Export layers and artboards** renders visual layers at their visible bounds and every enabled artboard at its selected 1×–4× scales. One ZIP is downloaded only after every PNG succeeds; cancellation or an encoding failure produces no partial archive.
+
 ## Aligning and stacking layers
 
 Select two or more visible pixel layers in the Layers panel. **Layer → Auto-align opaque content** measures image overlap rather than layer bounds, keeps the active layer fixed, and moves the other unlocked layers into registration. **Filter → Professional Studio → Compositing & motion** provides Auto-Blend exposure fusion, Focus Stack, scene-linear HDR Merge with display tone mapping, and Image Stack. Image Stack uses the panel's **Secondary** value to choose minimum (0–19), median (20–39), mean (40–59), maximum (60–79), or range (80–100).
 
 Each stack operation runs in a cancelable background worker and opens its result as a new one-layer editable document. Source documents remain unchanged. Cancellation, timeout, invalid output, or insufficient document memory creates no partial result.
+
+**Photomerge panoramas** registers selected overlapping pixel layers in their Layers-panel order, expands the result bounds, and feather-blends seams in a background worker. **Contact sheets** aspect-fit selected visible pixel layers into a captioned grid; Amount chooses 1–6 columns, Secondary controls spacing, Working color sets the sheet background, and Prompt / name names the result. Both create new editable result tabs without changing their sources.
 
 Current limits are 16,384 pixels per side, 64 megapixels per document, 96 million expanded layer/mask pixels across open tabs, 100 layers, 20 nested groups, and 256 MiB per input file. Close unused documents, reduce history, or lower dimensions when browser memory is constrained.
 

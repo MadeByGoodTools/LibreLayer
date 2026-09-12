@@ -20,9 +20,13 @@ export type SuiteFeature = {
 };
 
 const functionalOverrides = new Set([
+  'variables',
+  'export-layers',
+  'photomerge',
   'hdr-merge',
   'focus-stack',
   'auto-blend',
+  'contact-sheet',
   'image-stack',
 ]);
 

@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { AutomationStudio } from '@/components/automation-studio';
+import { DataDrivenStudio } from '@/components/data-driven-studio';
 import {
   runSuiteSelfTest,
   suiteFeatures,
@@ -123,8 +124,9 @@ export function ProSuiteDialog({
           <Button
             disabled={!plannedSteps.length}
             onClick={() => {
-              plannedSteps.forEach((step) =>
-                void onRun(resolveRecipeFeature(step.command), step.options),
+              plannedSteps.forEach(
+                (step) =>
+                  void onRun(resolveRecipeFeature(step.command), step.options),
               );
               setRecordedSteps((steps) =>
                 [
@@ -172,17 +174,26 @@ export function ProSuiteDialog({
                     variant="outline"
                     onClick={() => {
                       if (
-                        ['actions', 'batch', 'image-processor'].includes(
-                          feature.command,
-                        )
+                        [
+                          'actions',
+                          'batch',
+                          'image-processor',
+                          'variables',
+                        ].includes(feature.command)
                       ) {
                         document
-                          .querySelector('.automation-studio')
+                          .querySelector(
+                            feature.command === 'variables'
+                              ? '.data-driven-studio'
+                              : '.automation-studio',
+                          )
                           ?.scrollIntoView({ block: 'nearest' });
                         setReport(
-                          feature.command === 'actions'
-                            ? 'Use Actions below to edit, save, import, export, and play action sets.'
-                            : 'Use Image Processor below to run an action across selected local files.',
+                          feature.command === 'variables'
+                            ? 'Use Variables and datasets below to import records and generate editable document variants.'
+                            : feature.command === 'actions'
+                              ? 'Use Actions below to edit, save, import, export, and play action sets.'
+                              : 'Use Image Processor below to run an action across selected local files.',
                         );
                         return;
                       }
@@ -221,6 +232,7 @@ export function ProSuiteDialog({
           onRun={onRun}
           context={automationContext}
         />
+        <DataDrivenStudio options={options} onRun={onRun} />
         <div className="pro-suite-footer">
           <input
             ref={importRef}
@@ -235,8 +247,12 @@ export function ProSuiteDialog({
                 if (file.size > 1_000_000)
                   throw Error('Workflow files must be smaller than 1 MB.');
                 const recipe = parseEditRecipe(await file.text());
-                recipe.steps.forEach((step) =>
-                  void onRun(resolveRecipeFeature(step.command), step.options),
+                recipe.steps.forEach(
+                  (step) =>
+                    void onRun(
+                      resolveRecipeFeature(step.command),
+                      step.options,
+                    ),
                 );
                 setRecordedSteps(
                   recipe.steps.map((step) => ({

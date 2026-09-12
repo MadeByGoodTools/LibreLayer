@@ -6,6 +6,7 @@ import {
   focusStack,
   mergeHdrStack,
   statisticalStack,
+  stitchPanorama,
   toneMapHdr,
 } from '../lib/stack-engine.ts';
 
@@ -43,7 +44,9 @@ void test('coarse-to-fine alignment recovers a larger offset', () => {
 });
 
 void test('statistical stack modes return exact reference values', () => {
-  const sources = [10, 40, 100].map((value) => new Uint8ClampedArray(pixel(value)));
+  const sources = [10, 40, 100].map(
+    (value) => new Uint8ClampedArray(pixel(value)),
+  );
   assert.equal(statisticalStack(sources, 1, 1, 'mean')[0], 50);
   assert.equal(statisticalStack(sources, 1, 1, 'median')[0], 40);
   assert.equal(statisticalStack(sources, 1, 1, 'minimum')[0], 10);
@@ -52,7 +55,11 @@ void test('statistical stack modes return exact reference values', () => {
 });
 
 void test('focus stack selects the locally sharper source', () => {
-  const flat = new Uint8ClampedArray([...pixel(50), ...pixel(50), ...pixel(50)]),
+  const flat = new Uint8ClampedArray([
+      ...pixel(50),
+      ...pixel(50),
+      ...pixel(50),
+    ]),
     sharp = new Uint8ClampedArray([...pixel(0), ...pixel(180), ...pixel(0)]),
     result = focusStack([flat, sharp], 3, 1);
   assert.equal(result[4], 180);
@@ -68,11 +75,38 @@ void test('Auto-Blend favors well-exposed detail and preserves alpha', () => {
 });
 
 void test('HDR merge retains scene values until explicit tone mapping', () => {
-  const sources = [new Uint8ClampedArray(pixel(64)), new Uint8ClampedArray(pixel(200))],
+  const sources = [
+      new Uint8ClampedArray(pixel(64)),
+      new Uint8ClampedArray(pixel(200)),
+    ],
     hdr = mergeHdrStack(sources, 1, 1, [-2, 1]);
   assert.ok(hdr instanceof Float32Array);
   assert.ok(hdr[0] > 0);
   const display = toneMapHdr(hdr);
   assert.equal(display.length, 4);
   assert.equal(display[3], 255);
+});
+
+void test('panorama stitching registers ordered overlapping frames and expands bounds', () => {
+  const width = 12,
+    height = 4,
+    scene = new Uint8ClampedArray(16 * height * 4);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < 16; x++)
+      scene.set(pixel((x * 31 + y * 47 + x * y * 11) % 255), (y * 16 + x) * 4);
+  const crop = (start: number) => {
+    const result = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++)
+      result.set(
+        scene.subarray((y * 16 + start) * 4, (y * 16 + start + width) * 4),
+        y * width * 4,
+      );
+    return result;
+  };
+  const result = stitchPanorama([crop(0), crop(4)], width, height);
+  assert.equal(result.translations[1].x, 4);
+  assert.equal(result.translations[1].y, 0);
+  assert.equal(result.width, 16);
+  assert.equal(result.height, 4);
+  assert.equal(result.pixels.length, 16 * 4 * 4);
 });

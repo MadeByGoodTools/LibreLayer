@@ -15,6 +15,7 @@ LibreLayer 0.1.0 is the first open release candidate of the browser-local layere
 - Sequential local Camera Raw batch development: the current recipe processes one selected source at a time, reports progress and individual failures, and can stop safely between stages.
 - Editable, persistent Action sets with conditional steps, portable set/droplet recipes, and a sequential local Image Processor with output sizing, format, quality, progress, failure isolation, and safe stopping.
 - Cancelable background-worker Auto-align, Auto-Blend, focus stack, HDR merge, and five statistical image-stack modes; successful composites open as new editable documents while failures leave sources untouched.
+- Persistent local CSV/JSON datasets with editable text-placeholder variants, single-ZIP layer/artboard assets, captioned contact sheets, and content-registered seam-feathered panoramas.
 - PSD/PSB, image, TIFF, PDF, RAW, editable project, encrypted project, and web-export workflows with format-specific limitations documented in the format matrix.
 - Device-local autosave, recovery, preferences, remembered save handles where the browser permits them, configurable history compaction, and large-document reporting.
 

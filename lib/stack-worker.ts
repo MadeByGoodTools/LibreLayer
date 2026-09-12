@@ -5,12 +5,19 @@ import {
   focusStack,
   mergeHdrStack,
   statisticalStack,
+  stitchPanorama,
   toneMapHdr,
   type StackMode,
 } from './stack-engine';
 
 type Request = {
-  command: 'align' | 'auto-blend' | 'focus' | 'hdr' | 'statistical';
+  command:
+    | 'align'
+    | 'auto-blend'
+    | 'focus'
+    | 'hdr'
+    | 'statistical'
+    | 'panorama';
   sources: Uint8ClampedArray[];
   width: number;
   height: number;
@@ -35,6 +42,15 @@ self.onmessage = (event: MessageEvent<Request>) => {
       self.postMessage({ kind: 'aligned', translations });
       return;
     }
+    if (command === 'panorama') {
+      const panorama = stitchPanorama(sources, width, height);
+      self.postMessage({ kind: 'progress', progress: 95 });
+      self.postMessage(
+        { kind: 'panorama', ...panorama },
+        { transfer: [panorama.pixels.buffer] },
+      );
+      return;
+    }
     const pixels =
       command === 'auto-blend'
         ? autoBlendStack(sources, width, height)
@@ -42,12 +58,14 @@ self.onmessage = (event: MessageEvent<Request>) => {
           ? focusStack(sources, width, height)
           : command === 'hdr'
             ? toneMapHdr(mergeHdrStack(sources, width, height))
-            : statisticalStack(sources, width, height, event.data.mode ?? 'mean');
+            : statisticalStack(
+                sources,
+                width,
+                height,
+                event.data.mode ?? 'mean',
+              );
     self.postMessage({ kind: 'progress', progress: 95 });
-    self.postMessage(
-      { kind: 'result', pixels },
-      { transfer: [pixels.buffer] },
-    );
+    self.postMessage({ kind: 'result', pixels }, { transfer: [pixels.buffer] });
   } catch (error) {
     self.postMessage({
       kind: 'error',

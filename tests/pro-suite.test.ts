@@ -35,9 +35,18 @@ void test('every Professional Studio command exposes a truthful capability level
   );
 });
 
-void test('completed image-stack commands are marked Functional', async () => {
+void test('completed production commands are marked Functional', async () => {
   const { suiteFeatures } = await import('../lib/pro-suite.ts');
-  for (const command of ['hdr-merge', 'focus-stack', 'auto-blend', 'image-stack'])
+  for (const command of [
+    'variables',
+    'export-layers',
+    'photomerge',
+    'hdr-merge',
+    'focus-stack',
+    'auto-blend',
+    'contact-sheet',
+    'image-stack',
+  ])
     assert.equal(
       suiteFeatures.find((feature) => feature.command === command)?.level,
       'Functional',
