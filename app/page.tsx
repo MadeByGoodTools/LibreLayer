@@ -448,6 +448,25 @@ import type { StackMode } from '@/lib/stack-engine';
 import { substituteDataVariables, type DataRecord } from '@/lib/data-driven';
 import { planContactSheet } from '@/lib/contact-sheet';
 import { createStoreZip, type ZipEntry } from '@/lib/zip';
+import {
+  WORKING_DEPTH_LABELS,
+  captureWorkingSurface,
+  cloneWorkingSurface,
+  convertWorkingSurface,
+  deserializeWorkingSurface,
+  normalizeWorkingDepth,
+  placeWorkingSurface,
+  resizeWorkingSurface,
+  serializeWorkingSurface,
+  syncWorkingSurfaceFromRgba8,
+  workingDepthBytesPerPixel,
+  workingSurfaceFromRgba8,
+  workingSurfaceToRgba8,
+  type HighWorkingDepth,
+  type StoredWorkingSurface,
+  type WorkingDepth,
+  type WorkingSurface,
+} from '@/lib/working-depth';
 const Mask = Focus;
 
 type Tool =
@@ -674,7 +693,11 @@ type LayerMeta = {
   fillLayer?: FillLayerRecipe;
   frame?: FrameRecipe;
 };
-type LayerSurface = { pixels: HTMLCanvasElement; mask?: HTMLCanvasElement };
+type LayerSurface = {
+  pixels: HTMLCanvasElement;
+  mask?: HTMLCanvasElement;
+  precision?: WorkingSurface;
+};
 type LayerComp = {
   id: string;
   name: string;
@@ -702,6 +725,7 @@ type Snapshot = {
   named?: boolean;
   w: number;
   h: number;
+  workingDepth?: WorkingDepth;
   layers: LayerMeta[];
   surfaces: HistorySurface[];
   selectedId: string;
@@ -722,6 +746,7 @@ type EditorDocument = {
   name: string;
   saved: boolean;
   doc: { w: number; h: number };
+  workingDepth?: WorkingDepth;
   layers: LayerMeta[];
   surfaces: Map<string, LayerSurface>;
   selectedId: string;
@@ -2666,6 +2691,12 @@ export default function Home() {
     if (next.guides !== view.guides) setSaved(false);
   };
   const [doc, setDoc] = useState({ w: 1200, h: 800 });
+  const [workingDepth, setWorkingDepthState] = useState<WorkingDepth>('8u');
+  const workingDepthRef = useRef<WorkingDepth>('8u');
+  const setWorkingDepth = (depth: WorkingDepth) => {
+    workingDepthRef.current = depth;
+    setWorkingDepthState(depth);
+  };
   const [artboards, setArtboards] = useState<Artboard[]>([]),
     [activeArtboardId, setActiveArtboardId] = useState(''),
     [showArtboards, setShowArtboards] = useState(true),
@@ -2989,13 +3020,41 @@ export default function Home() {
     setSelectedId(selectedRef.current);
   };
   const select = (id: string) => selectMany([id], id);
+  const syncPrecisionSurface = (surface: LayerSurface) => {
+    if (!surface.precision) return 0;
+    if (
+      surface.precision.width !== surface.pixels.width ||
+      surface.precision.height !== surface.pixels.height
+    )
+      throw Error('High-depth backing dimensions no longer match the layer.');
+    const pixels = surface.pixels
+      .getContext('2d', { willReadFrequently: true })!
+      .getImageData(0, 0, surface.pixels.width, surface.pixels.height).data;
+    return syncWorkingSurfaceFromRgba8(surface.precision, pixels);
+  };
+  const createPrecisionBacking = (
+    surface: LayerSurface,
+    depth: HighWorkingDepth,
+  ) => {
+    const pixels = surface.pixels
+      .getContext('2d', { willReadFrequently: true })!
+      .getImageData(0, 0, surface.pixels.width, surface.pixels.height).data;
+    return workingSurfaceFromRgba8(
+      pixels,
+      surface.pixels.width,
+      surface.pixels.height,
+      depth,
+    );
+  };
+  const surfaceMemoryUnits = (surface: LayerSurface) =>
+    surface.pixels.width * surface.pixels.height +
+    (surface.mask ? surface.mask.width * surface.mask.height : 0) +
+    (surface.precision ? surface.precision.data.byteLength / 4 : 0);
   const currentWorkingPixels = () => {
     let pixels = 0;
     const count = (surfaces: Map<string, LayerSurface>) => {
-      for (const s of surfaces.values())
-        pixels +=
-          s.pixels.width * s.pixels.height +
-          (s.mask ? s.mask.width * s.mask.height : 0);
+      for (const surface of surfaces.values())
+        pixels += surfaceMemoryUnits(surface);
     };
     count(surfacesRef.current);
     for (const [id, d] of documentStoreRef.current)
@@ -3382,6 +3441,7 @@ export default function Home() {
         named,
         w: first?.pixels.width ?? 1200,
         h: first?.pixels.height ?? 800,
+        workingDepth: workingDepthRef.current,
         layers: layersRef.current.map((x) => ({ ...x })),
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
@@ -3421,10 +3481,21 @@ export default function Home() {
         surfaces: layersRef.current.map((meta) => {
           const s = surfacesRef.current.get(meta.id)!,
             old = previous?.surfaces.find((x) => x.id === meta.id);
+          if (workingDepthRef.current !== '8u' && !s.precision)
+            s.precision = createPrecisionBacking(
+              s,
+              workingDepthRef.current as HighWorkingDepth,
+            );
+          const precisionChanges = syncPrecisionSurface(s);
           return {
             id: meta.id,
             pixels: captureTiles(s.pixels, old?.pixels),
             mask: s.mask ? captureTiles(s.mask, old?.mask) : undefined,
+            precision: s.precision
+              ? precisionChanges === 0 && old?.precision
+                ? old.precision
+                : cloneWorkingSurface(s.precision)
+              : undefined,
           };
         }),
       };
@@ -3473,10 +3544,17 @@ export default function Home() {
     for (const item of snap.surfaces) {
       const pixels = restoreTiles(item.pixels),
         mask = item.mask ? restoreTiles(item.mask) : undefined;
-      nextMap.set(item.id, { pixels, mask });
+      nextMap.set(item.id, {
+        pixels,
+        mask,
+        precision: item.precision
+          ? cloneWorkingSurface(item.precision)
+          : undefined,
+      });
     }
     surfacesRef.current = nextMap;
     setDoc({ w: snap.w, h: snap.h });
+    setWorkingDepth(snap.workingDepth ?? '8u');
     syncLayers(snap.layers.map((x) => ({ ...x })));
     selectMany(snap.selectedIds ?? [snap.selectedId], snap.selectedId);
     const restoredSelection = snap.selection
@@ -3563,6 +3641,9 @@ export default function Home() {
       map.set(item.id, {
         pixels: restoreTiles(item.pixels),
         mask: item.mask ? restoreTiles(item.mask) : undefined,
+        precision: item.precision
+          ? cloneWorkingSurface(item.precision)
+          : undefined,
       });
     return map;
   };
@@ -3608,6 +3689,7 @@ export default function Home() {
         name,
         saved: false,
         doc: { w: snap.w, h: snap.h },
+        workingDepth: snap.workingDepth ?? '8u',
         layers: branchSnapshot.layers,
         surfaces,
         selectedId: snap.selectedId,
@@ -3946,6 +4028,7 @@ export default function Home() {
       name: fileName,
       saved,
       doc: { ...doc },
+      workingDepth: workingDepthRef.current,
       layers: layersRef.current,
       surfaces: surfacesRef.current,
       selectedId: selectedRef.current,
@@ -3970,14 +4053,25 @@ export default function Home() {
     version: 1,
     width: source.doc.w,
     height: source.doc.h,
+    workingDepth: source.workingDepth ?? '8u',
     layers: structuredClone(source.layers),
     surfaces: source.layers.map((layer) => {
       const surface = source.surfaces.get(layer.id);
       if (!surface) throw Error('Embedded Smart Object pixels are missing');
+      const sourceDepth = source.workingDepth ?? '8u';
+      if (sourceDepth !== '8u' && !surface.precision)
+        surface.precision = createPrecisionBacking(
+          surface,
+          sourceDepth as HighWorkingDepth,
+        );
+      syncPrecisionSurface(surface);
       return {
         id: layer.id,
         pixels: surface.pixels.toDataURL('image/png'),
         mask: surface.mask?.toDataURL('image/png'),
+        workingPixels: surface.precision
+          ? serializeWorkingSurface(surface.precision)
+          : undefined,
       };
     }),
     selectedId: source.selectedId,
@@ -4041,6 +4135,13 @@ export default function Home() {
       parent.surfaces.set(layer.id, {
         pixels: next,
         mask: previous?.mask,
+        precision:
+          (parent.workingDepth ?? '8u') === '8u'
+            ? undefined
+            : createPrecisionBacking(
+                { pixels: next },
+                (parent.workingDepth ?? '8u') as HighWorkingDepth,
+              ),
       });
       if (previous) previous.pixels.width = previous.pixels.height = 1;
     }
@@ -4049,6 +4150,7 @@ export default function Home() {
       label: 'Update Smart Object contents',
       w: parent.doc.w,
       h: parent.doc.h,
+      workingDepth: parent.workingDepth ?? '8u',
       layers: structuredClone(parent.layers),
       selectedId: parent.selectedId,
       selectedIds: [...(parent.selectedIds ?? [parent.selectedId])],
@@ -4061,6 +4163,9 @@ export default function Home() {
           id: layer.id,
           pixels: captureTiles(surface.pixels),
           mask: surface.mask ? captureTiles(surface.mask) : undefined,
+          precision: surface.precision
+            ? captureWorkingSurface(surface.precision)
+            : undefined,
         };
       }),
     };
@@ -4112,6 +4217,7 @@ export default function Home() {
     historyIndex.current = next.historyIndex;
     boundHistory();
     setDoc(next.doc);
+    setWorkingDepth(next.workingDepth ?? '8u');
     setZoom(clampZoom(next.zoom));
     setView(readView(next.view));
     setSelection(next.selection);
@@ -4160,8 +4266,18 @@ export default function Home() {
     h,
     resolution,
     background,
+    workingDepth: nextWorkingDepth,
   }: NewDocumentOptions) => {
-    requireRoom(w, h, w * h);
+    requireRoom(
+      w,
+      h,
+      w *
+        h *
+        (1 +
+          (nextWorkingDepth === '8u'
+            ? 0
+            : workingDepthBytesPerPixel(nextWorkingDepth) / 4)),
+    );
     persistActiveDocument();
     const id = crypto.randomUUID(),
       layerId = crypto.randomUUID(),
@@ -4171,6 +4287,13 @@ export default function Home() {
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, w, h);
     }
+    const surface: LayerSurface = {
+      pixels,
+      precision:
+        nextWorkingDepth === '8u'
+          ? undefined
+          : createPrecisionBacking({ pixels }, nextWorkingDepth),
+    };
     const nextLayers: LayerMeta[] = [
       {
         id: layerId,
@@ -4188,17 +4311,27 @@ export default function Home() {
       label: 'New document',
       w,
       h,
+      workingDepth: nextWorkingDepth,
       layers: nextLayers.map((x) => ({ ...x })),
       selectedId: layerId,
-      surfaces: [{ id: layerId, pixels: captureTiles(pixels) }],
+      surfaces: [
+        {
+          id: layerId,
+          pixels: captureTiles(pixels),
+          precision: surface.precision
+            ? captureWorkingSurface(surface.precision)
+            : undefined,
+        },
+      ],
     };
     const next: EditorDocument = {
       id,
       name,
       saved: false,
       doc: { w, h },
+      workingDepth: nextWorkingDepth,
       layers: nextLayers,
-      surfaces: new Map([[layerId, { pixels }]]),
+      surfaces: new Map([[layerId, surface]]),
       selectedId: layerId,
       history: [snap],
       historyIndex: 0,
@@ -6809,7 +6942,13 @@ export default function Home() {
         mask = makeCanvas(sourceSurface.mask.width, sourceSurface.mask.height);
         mask.getContext('2d')!.drawImage(sourceSurface.mask, 0, 0);
       }
-      copiedSurfaces.set(layer.id, { pixels, mask });
+      copiedSurfaces.set(layer.id, {
+        pixels,
+        mask,
+        precision: sourceSurface.precision
+          ? cloneWorkingSurface(sourceSurface.precision)
+          : undefined,
+      });
     }
     layerClipboardRef.current = {
       documentName: fileName,
@@ -6868,7 +7007,24 @@ export default function Home() {
         mask = makeCanvas(doc.w, doc.h);
         mask.getContext('2d')!.drawImage(sourceSurface.mask, 0, 0);
       }
-      surfacesRef.current.set(layer.id, { pixels, mask });
+      surfacesRef.current.set(layer.id, {
+        pixels,
+        mask,
+        precision: sourceSurface?.precision
+          ? workingDepthRef.current === '8u'
+            ? undefined
+            : sourceSurface.precision.width === pixels.width &&
+                sourceSurface.precision.height === pixels.height
+              ? convertWorkingSurface(
+                  sourceSurface.precision,
+                  workingDepthRef.current as HighWorkingDepth,
+                )
+              : createPrecisionBacking(
+                  { pixels },
+                  workingDepthRef.current as HighWorkingDepth,
+                )
+          : undefined,
+      });
     }
     const insertion = Math.max(
       0,
@@ -7815,6 +7971,9 @@ export default function Home() {
             mask: record.mask
               ? await decode(record.mask, embedded.width, embedded.height)
               : undefined,
+            precision: record.workingPixels
+              ? deserializeWorkingSurface(record.workingPixels)
+              : undefined,
           });
         loadImportedDocument(
           `${smart.sourceName} — Smart Object contents`,
@@ -7825,6 +7984,8 @@ export default function Home() {
           'Open layered Smart Object contents',
           undefined,
           { parentDocumentId, instanceId },
+          undefined,
+          normalizeWorkingDepth(embedded.workingDepth),
         );
         const opened = documentStoreRef.current.get(activeDocumentRef.current);
         if (opened) {
@@ -9723,7 +9884,12 @@ export default function Home() {
     if (!permit(layersRef.current.map((l) => l.id))) return false;
     try {
       const units = [...surfacesRef.current.values()].reduce(
-        (n, s) => n + (s.mask ? 2 : 1),
+        (total, surface) =>
+          total +
+          (surface.mask ? 2 : 1) +
+          (workingDepthRef.current === '8u'
+            ? 0
+            : workingDepthBytesPerPixel(workingDepthRef.current) / 4),
         0,
       );
       requireRoom(w, h, (w * h - doc.w * doc.h) * units);
@@ -9752,14 +9918,35 @@ export default function Home() {
       const old = surfacesRef.current.get(meta.id)!,
         pixels = makeCanvas(nw, nh),
         ctx = pixels.getContext('2d')!;
-      ctx.imageSmoothingEnabled = resampling !== 'nearest';
-      ctx.imageSmoothingQuality =
-        resampling === 'low'
-          ? 'low'
-          : resampling === 'medium'
-            ? 'medium'
-            : 'high';
-      ctx.drawImage(old.pixels, 0, 0, nw, nh);
+      let precision: WorkingSurface | undefined;
+      if (workingDepthRef.current !== '8u') {
+        if (!old.precision)
+          old.precision = createPrecisionBacking(
+            old,
+            workingDepthRef.current as HighWorkingDepth,
+          );
+        syncPrecisionSurface(old);
+        precision = resizeWorkingSurface(
+          old.precision,
+          nw,
+          nh,
+          resampling === 'nearest' ? 'nearest' : 'bilinear',
+        );
+        ctx.putImageData(
+          new ImageData(workingSurfaceToRgba8(precision), nw, nh),
+          0,
+          0,
+        );
+      } else {
+        ctx.imageSmoothingEnabled = resampling !== 'nearest';
+        ctx.imageSmoothingQuality =
+          resampling === 'low'
+            ? 'low'
+            : resampling === 'medium'
+              ? 'medium'
+              : 'high';
+        ctx.drawImage(old.pixels, 0, 0, nw, nh);
+      }
       let mask: HTMLCanvasElement | undefined;
       if (old.mask) {
         mask = makeCanvas(nw, nh);
@@ -9773,7 +9960,7 @@ export default function Home() {
               : 'high';
         mc.drawImage(old.mask, 0, 0, nw, nh);
       }
-      surfacesRef.current.set(meta.id, { pixels, mask });
+      surfacesRef.current.set(meta.id, { pixels, mask, precision });
       meta.x = Math.round(meta.x * rx);
       meta.y = Math.round(meta.y * ry);
     }
@@ -9808,7 +9995,23 @@ export default function Home() {
     for (const meta of layersRef.current) {
       const old = surfacesRef.current.get(meta.id)!,
         pixels = makeCanvas(nw, nh);
-      pixels.getContext('2d')!.drawImage(old.pixels, dx, dy);
+      let precision: WorkingSurface | undefined;
+      if (workingDepthRef.current !== '8u') {
+        if (!old.precision)
+          old.precision = createPrecisionBacking(
+            old,
+            workingDepthRef.current as HighWorkingDepth,
+          );
+        syncPrecisionSurface(old);
+        precision = placeWorkingSurface(old.precision, nw, nh, dx, dy);
+        pixels
+          .getContext('2d')!
+          .putImageData(
+            new ImageData(workingSurfaceToRgba8(precision), nw, nh),
+            0,
+            0,
+          );
+      } else pixels.getContext('2d')!.drawImage(old.pixels, dx, dy);
       let mask: HTMLCanvasElement | undefined;
       if (old.mask) {
         mask = makeCanvas(nw, nh);
@@ -9817,7 +10020,7 @@ export default function Home() {
         mc.fillRect(0, 0, nw, nh);
         mc.drawImage(old.mask, dx, dy);
       }
-      surfacesRef.current.set(meta.id, { pixels, mask });
+      surfacesRef.current.set(meta.id, { pixels, mask, precision });
     }
     setDoc({ w: nw, h: nh });
     setSelection(null);
@@ -9893,16 +10096,14 @@ export default function Home() {
       EditorDocument,
       'paths' | 'artboards' | 'layerComps' | 'savedSelections' | 'feather'
     >,
+    nextWorkingDepth: WorkingDepth = '8u',
   ) => {
     nextLayers = treeOrder(nextLayers);
     requireRoom(
       w,
       h,
       [...nextSurfaces.values()].reduce(
-        (n, s) =>
-          n +
-          s.pixels.width * s.pixels.height +
-          (s.mask ? s.mask.width * s.mask.height : 0),
+        (total, surface) => total + surfaceMemoryUnits(surface),
         0,
       ),
     );
@@ -9914,6 +10115,7 @@ export default function Home() {
         label,
         w,
         h,
+        workingDepth: nextWorkingDepth,
         layers: nextLayers.map((x) => ({ ...x })),
         selectedId: selectedLayer.id,
         paths: structuredClone(extras?.paths ?? []),
@@ -9925,6 +10127,9 @@ export default function Home() {
             id: meta.id,
             pixels: captureTiles(s.pixels),
             mask: s.mask ? captureTiles(s.mask) : undefined,
+            precision: s.precision
+              ? captureWorkingSurface(s.precision)
+              : undefined,
           };
         }),
       },
@@ -9933,6 +10138,7 @@ export default function Home() {
         name,
         saved: restore?.saved ?? true,
         doc: { w, h },
+        workingDepth: nextWorkingDepth,
         layers: nextLayers,
         surfaces: nextSurfaces,
         selectedId: selectedLayer.id,
@@ -10294,10 +10500,19 @@ export default function Home() {
       const savedLayers = [];
       for (const layer of layersRef.current) {
         const surface = surfacesRef.current.get(layer.id)!;
+        if (workingDepthRef.current !== '8u' && !surface.precision)
+          surface.precision = createPrecisionBacking(
+            surface,
+            workingDepthRef.current as HighWorkingDepth,
+          );
+        syncPrecisionSurface(surface);
         savedLayers.push({
           ...layer,
           pixels: await canvasPngDataUrl(surface.pixels),
           mask: surface.mask ? await canvasPngDataUrl(surface.mask) : undefined,
+          workingPixels: surface.precision
+            ? serializeWorkingSurface(surface.precision)
+            : undefined,
         });
       }
       const project = {
@@ -10307,6 +10522,7 @@ export default function Home() {
         name: fileName,
         width: doc.w,
         height: doc.h,
+        workingDepth: workingDepthRef.current,
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
         layerComps: layerCompsRef.current,
@@ -10417,13 +10633,19 @@ export default function Home() {
       )
         throw Error('Invalid project');
       checkDimensions(data.width, data.height);
+      const projectDepth = normalizeWorkingDepth(data.workingDepth);
       requireRoom(
         data.width,
         data.height,
         data.width *
           data.height *
           data.layers.reduce(
-            (n: number, l: { mask?: string }) => n + (l.mask ? 2 : 1),
+            (n: number, l: { mask?: string }) =>
+              n +
+              (l.mask ? 2 : 1) +
+              (projectDepth === '8u'
+                ? 0
+                : workingDepthBytesPerPixel(projectDepth) / 4),
             0,
           ),
       );
@@ -10613,7 +10835,7 @@ export default function Home() {
           !isSmartObjectTransform(item.smartObject.transform)
         )
           throw Error('Invalid Smart Object transform');
-        const { pixels, mask, ...rawMeta } = item,
+        const { pixels, mask, workingPixels, ...rawMeta } = item,
           meta: LayerMeta = {
             ...rawMeta,
             smartObject: rawMeta.smartObject
@@ -10644,9 +10866,39 @@ export default function Home() {
               ? normalizeLayerEffects(rawMeta.effects)
               : undefined,
           };
+        const pixelCanvas = await decode(pixels),
+          precision =
+            projectDepth === '8u'
+              ? undefined
+              : deserializeWorkingSurface(
+                  workingPixels as StoredWorkingSurface,
+                );
+        if (
+          precision &&
+          (precision.depth !== projectDepth ||
+            precision.width !== data.width ||
+            precision.height !== data.height)
+        )
+          throw Error('High-depth layer pixels do not match the document.');
+        if (projectDepth === '8u' && workingPixels !== undefined)
+          throw Error('Unexpected high-depth pixels in an 8-bit document.');
+        if (precision) {
+          const proxy = pixelCanvas
+              .getContext('2d', { willReadFrequently: true })!
+              .getImageData(0, 0, data.width, data.height).data,
+            expected = workingSurfaceToRgba8(precision);
+          if (proxy.length !== expected.length)
+            throw Error('High-depth display proxy has the wrong size.');
+          for (let index = 0; index < proxy.length; index++)
+            if (proxy[index] !== expected[index])
+              throw Error(
+                'High-depth display proxy does not match its backing pixels.',
+              );
+        }
         surfaces.set(meta.id, {
-          pixels: await decode(pixels),
+          pixels: pixelCanvas,
           mask: mask ? await decode(mask) : undefined,
+          precision,
         });
         metas.push(meta);
       }
@@ -10724,6 +10976,9 @@ export default function Home() {
         surfaces,
         'Open layered project',
         restore,
+        undefined,
+        undefined,
+        projectDepth,
       );
       setPaths(importedPaths);
       setArtboards(importedArtboards);
@@ -10793,13 +11048,15 @@ export default function Home() {
       if (Number.isFinite(data.zoom)) setZoom(clampZoom(data.zoom));
       setView(readView(data.view));
       setStatus(
-        restore
+        (restore
           ? 'Workspace restored from this browser profile'
           : unpacked.encrypted
             ? 'Encrypted project unlocked locally — layers and masks restored'
             : unpacked.verified
               ? 'Layered project reopened — integrity verified; layers, masks, paths and comps restored'
-              : 'Legacy layered project reopened — save it again to add integrity protection',
+              : 'Legacy layered project reopened — save it again to add integrity protection') +
+          ' · ' +
+          WORKING_DEPTH_LABELS[projectDepth],
       );
       return true;
     } catch (e) {
@@ -12801,6 +13058,7 @@ export default function Home() {
             d.layers.length,
             d.name,
             d.zoom,
+            d.workingDepth ?? '8u',
             JSON.stringify(d.view ?? {}),
             d.selectedId,
           ].join(':'),
@@ -12825,11 +13083,21 @@ export default function Home() {
         const savedLayers = [];
         for (const layer of d.layers) {
           const surface = d.surfaces.get(layer.id)!;
+          const documentDepth = d.workingDepth ?? '8u';
+          if (documentDepth !== '8u' && !surface.precision)
+            surface.precision = createPrecisionBacking(
+              surface,
+              documentDepth as HighWorkingDepth,
+            );
+          syncPrecisionSurface(surface);
           savedLayers.push({
             ...layer,
             pixels: await canvasPngDataUrl(surface.pixels),
             mask: surface.mask
               ? await canvasPngDataUrl(surface.mask)
+              : undefined,
+            workingPixels: surface.precision
+              ? serializeWorkingSurface(surface.precision)
               : undefined,
           });
         }
@@ -12841,6 +13109,7 @@ export default function Home() {
           saved: d.saved,
           width: d.doc.w,
           height: d.doc.h,
+          workingDepth: d.workingDepth ?? '8u',
           selectedId: d.selectedId,
           selectedIds: d.selectedIds,
           layerComps: d.layerComps,
@@ -14349,6 +14618,72 @@ export default function Home() {
     );
   };
 
+  const convertDocumentWorkingDepth = (nextDepth: WorkingDepth) => {
+    const currentDepth = workingDepthRef.current;
+    if (nextDepth === currentDepth) {
+      setStatus(`Document already uses ${WORKING_DEPTH_LABELS[nextDepth]}`);
+      return;
+    }
+    const ranks: Record<WorkingDepth, number> = {
+      '8u': 0,
+      '16u': 1,
+      '16f': 2,
+      '32f': 3,
+    };
+    if (
+      ranks[nextDepth] < ranks[currentDepth] &&
+      !window.confirm(
+        `Convert this document from ${WORKING_DEPTH_LABELS[currentDepth]} to ${WORKING_DEPTH_LABELS[nextDepth]}? Values outside the target range or precision will be clipped. Undo can restore them.`,
+      )
+    )
+      return;
+    const surfaces = [...surfacesRef.current.values()],
+      currentPrecisionUnits = surfaces.reduce(
+        (total, surface) =>
+          total + (surface.precision?.data.byteLength ?? 0) / 4,
+        0,
+      ),
+      targetPrecisionUnits =
+        nextDepth === '8u'
+          ? 0
+          : surfaces.reduce(
+              (total, surface) =>
+                total +
+                surface.pixels.width *
+                  surface.pixels.height *
+                  (workingDepthBytesPerPixel(nextDepth) / 4),
+              0,
+            ),
+      additional = targetPrecisionUnits - currentPrecisionUnits;
+    if (additional > 0 && !hasRoom(additional)) return;
+    try {
+      const converted = surfaces.map((surface) => {
+        if (surface.precision) syncPrecisionSurface(surface);
+        return nextDepth === '8u'
+          ? undefined
+          : surface.precision
+            ? convertWorkingSurface(surface.precision, nextDepth)
+            : createPrecisionBacking(surface, nextDepth);
+      });
+      surfaces.forEach((surface, index) => {
+        if (converted[index]) surface.precision = converted[index];
+        else delete surface.precision;
+      });
+      setWorkingDepth(nextDepth);
+      snapshot(`Convert to ${WORKING_DEPTH_LABELS[nextDepth]}`);
+      render();
+      setStatus(
+        `Document converted to ${WORKING_DEPTH_LABELS[nextDepth]} · high-depth backing is saved with the layered project`,
+      );
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'The working-depth conversion failed safely.',
+      );
+    }
+  };
+
   const menu = (
     label: string,
     items: {
@@ -14801,6 +15136,30 @@ export default function Home() {
             { name: 'Image Size…', action: resizeImage },
             { name: 'Print resolution…', action: resizeImage },
             { name: 'Canvas Size…', action: resizeCanvas },
+            { separator: true },
+            {
+              name: 'Working depth details',
+              action: () =>
+                setStatus(
+                  `Current working depth: ${WORKING_DEPTH_LABELS[workingDepth]}`,
+                ),
+            },
+            {
+              name: 'Convert to 8-bit integer',
+              action: () => convertDocumentWorkingDepth('8u'),
+            },
+            {
+              name: 'Convert to 16-bit integer',
+              action: () => convertDocumentWorkingDepth('16u'),
+            },
+            {
+              name: 'Convert to 16-bit float',
+              action: () => convertDocumentWorkingDepth('16f'),
+            },
+            {
+              name: 'Convert to 32-bit float',
+              action: () => convertDocumentWorkingDepth('32f'),
+            },
             { separator: true },
             { name: 'Auto enhance', action: () => filter('brightness') },
             {
@@ -17162,7 +17521,8 @@ export default function Home() {
                 ? 'Fill layer'
                 : active?.kind === 'group'
                   ? 'Layer group'
-                  : 'Layer pixels'}
+                  : 'Layer pixels'}{' '}
+          · RGB {WORKING_DEPTH_LABELS[workingDepth]}
         </span>
         <span className="options-hint">
           {active?.locked

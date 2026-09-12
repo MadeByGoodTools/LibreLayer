@@ -9,6 +9,11 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  WORKING_DEPTH_LABELS,
+  workingDepthBytesPerPixel,
+  type WorkingDepth,
+} from '@/lib/working-depth';
 
 export type NewDocumentOptions = {
   name: string;
@@ -16,6 +21,7 @@ export type NewDocumentOptions = {
   h: number;
   resolution: number;
   background: string;
+  workingDepth: WorkingDepth;
 };
 
 type Preset = {
@@ -287,21 +293,29 @@ export function NewDocumentDialog({
   const [w, setW] = useState('1366');
   const [h, setH] = useState('768');
   const [resolution, setResolution] = useState('72');
+  const [workingDepth, setWorkingDepth] = useState<WorkingDepth>('8u');
   const [backgroundMode, setBackgroundMode] = useState('transparent');
   const [customBackground, setCustomBackground] = useState('#ffffff');
   const [selectedPreset, setSelectedPreset] = useState('web-common');
   const [error, setError] = useState('');
-  const valid =
-    Number.isInteger(+w) &&
-    Number.isInteger(+h) &&
-    Number.isInteger(+resolution) &&
-    +w > 0 &&
-    +h > 0 &&
-    +resolution >= 1 &&
-    +resolution <= 1200 &&
-    +w <= 16384 &&
-    +h <= 16384 &&
-    +w * +h <= 64000000;
+  const backingMultiplier =
+      1 +
+      (workingDepth === '8u' ? 0 : workingDepthBytesPerPixel(workingDepth) / 4),
+    maxPixels = Math.min(
+      64_000_000,
+      Math.floor(96_000_000 / backingMultiplier),
+    ),
+    valid =
+      Number.isInteger(+w) &&
+      Number.isInteger(+h) &&
+      Number.isInteger(+resolution) &&
+      +w > 0 &&
+      +h > 0 &&
+      +resolution >= 1 &&
+      +resolution <= 1200 &&
+      +w <= 16384 &&
+      +h <= 16384 &&
+      +w * +h <= maxPixels;
   const megapixels = ((+w * +h) / 1_000_000).toFixed(1);
   const selectPreset = (preset: Preset) => {
     setW(String(preset.w));
@@ -340,6 +354,7 @@ export function NewDocumentDialog({
                   backgroundMode === 'custom'
                     ? customBackground
                     : backgroundMode,
+                workingDepth,
               });
               setError('');
               onOpenChange(false);
@@ -503,6 +518,21 @@ export function NewDocumentDialog({
                 <option value="custom">Custom color</option>
               </select>
             </label>
+            <label className="grid gap-1.5 text-sm font-medium">
+              Working depth
+              <select
+                className="rounded-md border bg-background p-2 font-normal"
+                value={workingDepth}
+                onChange={(event) =>
+                  setWorkingDepth(event.target.value as WorkingDepth)
+                }
+              >
+                <option value="8u">8-bit integer</option>
+                <option value="16u">16-bit integer</option>
+                <option value="16f">16-bit floating point (HDR)</option>
+                <option value="32f">32-bit floating point (HDR)</option>
+              </select>
+            </label>
             {backgroundMode === 'custom' ? (
               <label className="flex items-center justify-between text-sm font-medium">
                 Custom color
@@ -517,7 +547,7 @@ export function NewDocumentDialog({
             <div className="rounded-lg border bg-background p-3 text-sm">
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">Color</span>
-                <span>RGB · 8 bit</span>
+                <span>RGB · {WORKING_DEPTH_LABELS[workingDepth]}</span>
               </div>
               <div className="mt-1 flex justify-between gap-3">
                 <span className="text-muted-foreground">Canvas</span>
@@ -527,7 +557,9 @@ export function NewDocumentDialog({
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              Maximum 16,384 px per side and 64 megapixels total.
+              Maximum 16,384 px per side and{' '}
+              {(maxPixels / 1_000_000).toFixed(1)} megapixels at this working
+              depth.
             </p>
             {!valid ? (
               <p role="alert" className="text-sm text-destructive">

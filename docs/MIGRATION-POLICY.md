@@ -6,6 +6,8 @@ New readers must preserve unknown data where practical and reject an unsupported
 
 Project-schema changes must be additive when possible. A breaking change requires a new format version, fixture coverage for the previous readable version, documented migration behavior, and a release-note entry. Removing the last reader for an older format requires a separately available converter and advance notice.
 
+Current version-2 native projects may include additive `workingDepth` and per-layer `workingPixels` fields. Their absence means an 8-bit integer document, preserving compatibility with earlier version-2 writers. A high-depth document must carry validated high-depth pixels for every layer; malformed, missing, dimension-mismatched, or proxy-mismatched data fails closed instead of silently opening at 8-bit.
+
 PSD/PSB and other exchange formats are governed by the format matrix rather than native-project guarantees. Unsupported external content must produce a compatibility report or explicit flattened-preview choice; it must not be silently discarded.
 
 Each release candidate must pass current and legacy package fixtures, changed-checksum rejection, encrypted-package round-trip, and browser reopen/recovery checks before the supported-version claim changes.

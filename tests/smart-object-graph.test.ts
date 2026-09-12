@@ -27,4 +27,3 @@ void test('direct and indirect Smart Object cycles are rejected', () => {
     /Cyclic/,
   );
 });
-

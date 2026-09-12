@@ -1,7 +1,15 @@
+import {
+  deserializeWorkingSurface,
+  normalizeWorkingDepth,
+  type StoredWorkingSurface,
+  type WorkingDepth,
+} from './working-depth.ts';
+
 export type EmbeddedSurfaceRecord = {
   id: string;
   pixels: string;
   mask?: string;
+  workingPixels?: StoredWorkingSurface;
 };
 
 export type EmbeddedLayerRecord = {
@@ -16,6 +24,7 @@ export type EmbeddedDocumentEnvelope = {
   version: 1;
   width: number;
   height: number;
+  workingDepth?: WorkingDepth;
   layers: EmbeddedLayerRecord[];
   surfaces: EmbeddedSurfaceRecord[];
   selectedId: string;
@@ -36,6 +45,7 @@ export const validateEmbeddedDocument = (
     throw Error('Invalid embedded Smart Object document');
   seen.add(value);
   const data = value as Partial<EmbeddedDocumentEnvelope>;
+  const workingDepth = normalizeWorkingDepth(data.workingDepth);
   if (
     data.version !== 1 ||
     !Number.isInteger(data.width) ||
@@ -92,6 +102,19 @@ export const validateEmbeddedDocument = (
           !surface.mask.startsWith(PNG_PREFIX)))
     )
       throw Error('Invalid embedded Smart Object pixels');
+    if (workingDepth === '8u' && surface.workingPixels !== undefined)
+      throw Error('Unexpected high-depth embedded pixels');
+    if (workingDepth !== '8u') {
+      const precision = deserializeWorkingSurface(
+        surface.workingPixels as StoredWorkingSurface,
+      );
+      if (
+        precision.depth !== workingDepth ||
+        precision.width !== data.width ||
+        precision.height !== data.height
+      )
+        throw Error('Invalid embedded high-depth pixels');
+    }
     surfaceIds.add(surface.id);
   }
   if (surfaceIds.size !== ids.size)

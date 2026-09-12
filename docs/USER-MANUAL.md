@@ -11,6 +11,14 @@ The optional background-removal model is downloaded by the browser on first use 
 - **Restore:** unfinished tabs restore automatically when enabled under Workspace & presets. File → Recover documents lists recovery copies; File → Version history lists dated versions.
 - **Install:** the browser menu or File → Install LibreLayer can add an app-like shortcut. The product remains a web app.
 
+### Working depth
+
+New documents can use **8-bit integer**, **16-bit integer**, **16-bit floating point**, or **32-bit floating point** RGB working data. The active depth is always shown in the contextual task bar. Use **Image → Convert to…** to change it; conversion is a complete undoable document operation, and floating-point modes retain values above display white for later high-dynamic-range processing.
+
+LibreLayer keeps a high-depth backing surface for every editable layer while using the browser canvas as its color-managed display proxy. Pixel edits update only the channels that visibly changed, so untouched sub-8-bit and HDR channel values remain intact. High-depth backing is included in local recovery, history accounting, copied layers, embedded Smart Objects, and `.librelayer` project files. Image Size and Canvas Size operate directly on that backing rather than routing it through an 8-bit resize.
+
+Browser memory limits are stricter at higher depths: the New Document dialog shows the current per-document maximum before creation, and open-document checks account for both display proxies and high-depth buffers. Some effects and exchange formats still use the display-rendering path; keep the native `.librelayer` file as the editable master and consult the format matrix before relying on a high-depth interchange round trip.
+
 ## Workspace
 
 The application menu and options bar run across the top, tools are on the left, the canvas is central, and Layers/Channels/Paths/History share the right dock. Panels can be docked or floated and the layout is stored on the browser profile. `Tab` hides or shows panels. `Ctrl/⌘+K` searches every registered command.

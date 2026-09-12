@@ -27,4 +27,3 @@ void test('secondary touch contacts are reserved for viewport gestures', () => {
     'draw',
   );
 });
-

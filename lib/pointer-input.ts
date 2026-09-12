@@ -14,4 +14,3 @@ export const penIntent = (sample: PointerInputSample): PenIntent => {
   if (sample.button === 2 || (sample.buttons & 2) !== 0) return 'sample';
   return 'draw';
 };
-

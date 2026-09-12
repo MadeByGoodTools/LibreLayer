@@ -14,6 +14,7 @@ LibreLayer is a free, open-source layered image editor that runs in the browser.
 - Brushes, selections, crop, transforms, clone, heal, fill, gradients, and filters
 - Per-channel curves, levels, color balance, HSL, color grading, and blend modes
 - PSD and PSB import, common image formats, editable LibreLayer projects, and web export
+- Native 8-bit integer, 16-bit integer, 16-bit half-float, and 32-bit float working documents with high-depth layer backing, depth conversion, undo/redo, recovery, and project round-trip
 - Layered 8/16/32-bit RGB PSD/PSB import with explicit display-working conversion for high-depth sources
 - Color-managed TIFF export with embedded sRGB, Display P3, Adobe RGB, or ProPhoto RGB profiles and print-resolution metadata
 - Bayer and X-Trans camera RAW development from sensor data with seven selectable demosaic recipes, camera/embedded-DNG profile paths, selectable white-balance sources, live wide-gamut controls, separate luma/chroma denoise, hot-pixel and banding repair, metadata-matched local optics profiles, re-editable RAW Smart Objects, device-local source recovery, and genuine 16-bit TIFF master export

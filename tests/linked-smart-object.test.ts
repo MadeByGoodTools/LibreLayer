@@ -36,4 +36,3 @@ void test('missing and denied links fail explicitly', async () => {
     /not granted/,
   );
 });
-

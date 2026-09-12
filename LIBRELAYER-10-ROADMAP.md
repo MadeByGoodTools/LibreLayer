@@ -104,7 +104,7 @@ This is the release ledger for closing the remaining gap with a professional des
 
 - [x] Bayer/X-Trans RAW decode, editable RAW recipes, live development, and 16-bit master export.
 - [x] Floating-point combined adjustment processing before display quantization.
-- [ ] True 16-bit integer, half-float, and 32-bit float working documents.
+- [x] True 16-bit integer, half-float, and 32-bit float working documents, including depth conversion, history, recovery, embedded documents, and native-project round-trip.
 - [ ] Float render textures and no forced 8-bit intermediate canvas.
 - [x] Camera/DNG color-matrix and embedded-profile paths, dual-illuminant DNG handling through LibRaw, plus as-shot, automatic, daylight, and tungsten white balance sources.
 - [x] Seven selectable LibRaw demosaic recipes, including AHD, DCB, DHT, and modified AHD, verified by reopening real Bayer DNG and Fujifilm X-Trans sensor files.

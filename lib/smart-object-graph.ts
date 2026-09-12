@@ -28,4 +28,3 @@ export function assertAcyclicSmartObjectGraph(nodes: SmartObjectGraphNode[]) {
   };
   for (const id of graph.keys()) visit(id);
 }
-

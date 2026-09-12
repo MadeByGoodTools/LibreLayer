@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateEmbeddedDocument } from '../lib/embedded-smart-object.ts';
+import {
+  serializeWorkingSurface,
+  workingSurfaceFromRgba8,
+} from '../lib/working-depth.ts';
 
 const png = 'data:image/png;base64,AAAA';
 const valid = () => ({
@@ -60,5 +64,44 @@ void test('embedded documents reject recursive and excessive nesting', () => {
   assert.throws(
     () => validateEmbeddedDocument(nested),
     /Invalid embedded Smart Object document/,
+  );
+});
+
+void test('embedded documents validate and retain matching high-depth pixels', () => {
+  const workingPixels = serializeWorkingSurface(
+    workingSurfaceFromRgba8(new Uint8ClampedArray(24 * 16 * 4), 24, 16, '16f'),
+  );
+  const data = {
+    ...valid(),
+    workingDepth: '16f' as const,
+    surfaces: [{ id: 'art', pixels: png, workingPixels }],
+  };
+  assert.equal(validateEmbeddedDocument(data), data);
+});
+
+void test('embedded documents reject missing, mismatched, or unexpected high-depth pixels', () => {
+  const workingPixels = serializeWorkingSurface(
+    workingSurfaceFromRgba8(new Uint8ClampedArray(24 * 16 * 4), 24, 16, '32f'),
+  );
+  assert.throws(
+    () => validateEmbeddedDocument({ ...valid(), workingDepth: '16u' }),
+    /Invalid stored high-depth surface/,
+  );
+  assert.throws(
+    () =>
+      validateEmbeddedDocument({
+        ...valid(),
+        workingDepth: '16u',
+        surfaces: [{ id: 'art', pixels: png, workingPixels }],
+      }),
+    /Invalid embedded high-depth pixels/,
+  );
+  assert.throws(
+    () =>
+      validateEmbeddedDocument({
+        ...valid(),
+        surfaces: [{ id: 'art', pixels: png, workingPixels }],
+      }),
+    /Unexpected high-depth embedded pixels/,
   );
 });
