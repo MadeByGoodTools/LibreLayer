@@ -4,7 +4,7 @@ import {
   hydrateRecoveryJson,
   packRecoveryJson,
   type RecoveryAsset,
-} from './recovery-codec';
+} from './recovery-codec.ts';
 
 export type RecoveryRecord = {
   id: string;
@@ -13,11 +13,29 @@ export type RecoveryRecord = {
   json: string;
 };
 
-type StoredRecoveryRecord = Omit<RecoveryRecord, 'json'> & {
+export type StoredRecoveryRecord = Omit<RecoveryRecord, 'json'> & {
   json?: string;
   manifest?: string | Blob;
   encoding?: 'plain' | 'gzip';
   assetIds?: string[];
+};
+
+type StoredVersionRecord = StoredRecoveryRecord & {
+  documentId: string;
+  reason: VersionRecord['reason'];
+};
+
+export type RecoveryIssue = {
+  id: string;
+  name: string;
+  updated: number;
+  message: string;
+  repairVersionUpdated?: number;
+};
+
+export type RecoveryAudit = {
+  records: RecoveryRecord[];
+  issues: RecoveryIssue[];
 };
 
 type RecoveryTransaction = {
@@ -219,10 +237,17 @@ async function writeOne(storeName: string, value: unknown): Promise<void> {
 }
 
 export async function recoveryRecords(): Promise<RecoveryRecord[]> {
+  const records = await readStoredRecords('documents');
+  return hydrateStoredRecords(records);
+}
+
+async function readStoredRecords(
+  storeName: 'documents' | 'versions',
+): Promise<StoredRecoveryRecord[]> {
   const db = await openDatabase();
-  const records = await new Promise<StoredRecoveryRecord[]>((resolve, reject) => {
-    const tx = db.transaction('documents', 'readonly'),
-      request = tx.objectStore('documents').getAll();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly'),
+      request = tx.objectStore(storeName).getAll();
     tx.oncomplete = () => {
       db.close();
       resolve(request.result as StoredRecoveryRecord[]);
@@ -232,7 +257,6 @@ export async function recoveryRecords(): Promise<RecoveryRecord[]> {
       reject(tx.error);
     };
   });
-  return hydrateStoredRecords(records);
 }
 
 export const saveRecovery = (record: RecoveryRecord) =>
@@ -383,23 +407,103 @@ async function hydrateStoredRecords(records: StoredRecoveryRecord[]) {
   return Promise.all(
     records
       .sort((a, b) => b.updated - a.updated)
-      .map(async (record) => {
-        const { manifest, encoding, assetIds: _assetIds, ...metadata } = record;
-        if (!manifest) {
-          if (typeof metadata.json !== 'string')
-            throw new Error('A recovery record has no document data.');
-          return metadata as RecoveryRecord;
-        }
-        const compact = await decompressRecoveryManifest(
-          manifest,
-          encoding ?? 'plain',
-        );
-        return {
-          ...metadata,
-          json: await hydrateRecoveryJson(compact, assetMap),
-        } as RecoveryRecord;
-      }),
+      .map((record) => hydrateStoredRecord(record, assetMap)),
   );
+}
+
+async function hydrateStoredRecord(
+  record: StoredRecoveryRecord,
+  assetMap: Map<string, RecoveryAsset>,
+) {
+  const { manifest, encoding, assetIds: _assetIds, ...metadata } = record;
+  if (!manifest) {
+    if (typeof metadata.json !== 'string')
+      throw new Error('A recovery record has no document data.');
+    return metadata as RecoveryRecord;
+  }
+  const compact = await decompressRecoveryManifest(
+    manifest,
+    encoding ?? 'plain',
+  );
+  return {
+    ...metadata,
+    json: await hydrateRecoveryJson(compact, assetMap),
+  } as RecoveryRecord;
+}
+
+export async function newestReadableRecovery(
+  records: StoredRecoveryRecord[],
+  assets: Map<string, RecoveryAsset>,
+) {
+  for (const record of [...records].sort((a, b) => b.updated - a.updated)) {
+    try {
+      return await hydrateStoredRecord(record, assets);
+    } catch {
+      // A corrupt newer candidate must not prevent an older intact recovery.
+    }
+  }
+  return null;
+}
+
+export async function auditRecoveryStorage(): Promise<RecoveryAudit> {
+  const documents = await readStoredRecords('documents'),
+    versions = (await readStoredRecords('versions')) as StoredVersionRecord[],
+    all = [...documents, ...versions],
+    assets = await recoveryAssetsByIds(all.flatMap((record) => record.assetIds ?? [])),
+    healthyVersions = new Map<string, VersionRecord[]>(),
+    records: RecoveryRecord[] = [],
+    issues: RecoveryIssue[] = [];
+  for (const stored of versions.sort((a, b) => b.updated - a.updated)) {
+    try {
+      const version = (await hydrateStoredRecord(stored, assets)) as VersionRecord,
+        list = healthyVersions.get(stored.documentId) ?? [];
+      list.push(version);
+      healthyVersions.set(stored.documentId, list);
+    } catch {
+      // Damaged versions are ignored as repair sources and never overwrite data.
+    }
+  }
+  for (const stored of documents.sort((a, b) => b.updated - a.updated)) {
+    try {
+      records.push(await hydrateStoredRecord(stored, assets));
+    } catch (error) {
+      issues.push({
+        id: stored.id,
+        name: stored.name,
+        updated: stored.updated,
+        message:
+          error instanceof Error ? error.message : 'Recovery data is damaged.',
+        repairVersionUpdated: healthyVersions.get(stored.id)?.[0]?.updated,
+      });
+    }
+  }
+  return { records, issues };
+}
+
+export async function repairRecoveryFromVersion(
+  documentId: string,
+): Promise<RecoveryRecord> {
+  const versions = (await readStoredRecords('versions')) as StoredVersionRecord[],
+    candidates = versions
+      .filter((record) => record.documentId === documentId)
+      .sort((a, b) => b.updated - a.updated),
+    assets = await recoveryAssetsByIds(
+      candidates.flatMap((record) => record.assetIds ?? []),
+    );
+  const version = (await newestReadableRecovery(
+    candidates,
+    assets,
+  )) as VersionRecord | null;
+  if (!version)
+    throw new Error('No intact version is available for this recovery copy.');
+  const repaired: RecoveryRecord = {
+    id: documentId,
+    name: version.name,
+    updated: Date.now(),
+    json: version.json,
+  };
+  await saveRecovery(repaired);
+  return repaired;
 }
 
 export async function compactRecoveryAssets() {

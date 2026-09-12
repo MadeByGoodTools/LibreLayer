@@ -1291,6 +1291,28 @@ button {
 .smart-transform-controls select {
   width: 100%;
 }
+
+.recovery-issue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--destructive) 48%, var(--border));
+  border-radius: 8px;
+}
+
+.recovery-issue div,
+.recovery-issue strong,
+.recovery-issue small {
+  display: block;
+  min-width: 0;
+}
+
+.recovery-issue small {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+}
 .property-slider {
   display: flex;
   flex-direction: column;

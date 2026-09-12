@@ -106,6 +106,7 @@ import {
   shortcutLabel,
 } from '@/lib/editor-shortcuts';
 import {
+  auditRecoveryStorage,
   clearDefaultSaveDirectory,
   brushTipRecords,
   deleteBrushTip,
@@ -117,6 +118,7 @@ import {
   loadWorkspaceState,
   recentFiles,
   recoveryRecords,
+  repairRecoveryFromVersion,
   recoverInterruptedRecoveryTransactions,
   rememberRecentFile,
   saveRecovery,
@@ -132,6 +134,7 @@ import {
   type LocalFileHandle,
   type RecentFileRecord,
   type RecoveryRecord,
+  type RecoveryIssue,
   type VersionRecord,
   versionRecords,
 } from '@/lib/recovery';
@@ -2079,6 +2082,7 @@ export default function Home() {
   const [exportRawLoading, setExportRawLoading] = useState(false);
   const [pagedFile, setPagedFile] = useState<File | null>(null);
   const [recoveries, setRecoveries] = useState<RecoveryRecord[] | null>(null),
+    [recoveryIssues, setRecoveryIssues] = useState<RecoveryIssue[]>([]),
     [versions, setVersions] = useState<VersionRecord[] | null>(null),
     [recent, setRecent] = useState<RecentFileRecord[]>([]),
     [recoveryStatus, setRecoveryStatus] = useState(''),
@@ -12176,7 +12180,13 @@ export default function Home() {
   };
   const showRecoveries = async () => {
     try {
-      setRecoveries(await recoveryRecords());
+      const audit = await auditRecoveryStorage();
+      setRecoveries(audit.records);
+      setRecoveryIssues(audit.issues);
+      if (audit.issues.length)
+        setRecoveryStatus(
+          `${audit.issues.length} damaged recovery ${audit.issues.length === 1 ? 'copy needs' : 'copies need'} attention`,
+        );
     } catch {
       setRecoveryStatus('Recovery storage is unavailable in this browser');
     }
@@ -20767,13 +20777,69 @@ export default function Home() {
                     return;
                   try {
                     await deleteRecovery(record.id);
-                    setRecoveries(await recoveryRecords());
+                    const audit = await auditRecoveryStorage();
+                    setRecoveries(audit.records);
+                    setRecoveryIssues(audit.issues);
                   } catch {
                     setRecoveryStatus('Could not delete this recovery copy');
                   }
                 }}
               >
                 Remove
+              </Button>
+            </div>
+          ))}
+          {recoveryIssues.map((issue) => (
+            <div key={issue.id} className="recovery-issue" role="alert">
+              <div>
+                <strong>{issue.name} · damaged recovery</strong>
+                <small>
+                  {issue.message}
+                  {issue.repairVersionUpdated
+                    ? ` · intact version from ${new Date(issue.repairVersionUpdated).toLocaleString()} available`
+                    : ' · no intact version available'}
+                </small>
+              </div>
+              <Button
+                variant="outline"
+                disabled={!issue.repairVersionUpdated}
+                onClick={async () => {
+                  try {
+                    await repairRecoveryFromVersion(issue.id);
+                    const audit = await auditRecoveryStorage();
+                    setRecoveries(audit.records);
+                    setRecoveryIssues(audit.issues);
+                    setRecoveryStatus(
+                      `${issue.name} repaired from its newest intact version`,
+                    );
+                  } catch (error) {
+                    setRecoveryStatus(
+                      error instanceof Error
+                        ? error.message
+                        : 'Recovery repair failed safely',
+                    );
+                  }
+                }}
+              >
+                Repair from version
+              </Button>
+              <Button
+                variant="ghost"
+                aria-label={`Remove damaged recovery ${issue.name}`}
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `Remove the damaged recovery copy of ${issue.name}? Intact dated versions are not removed.`,
+                    )
+                  )
+                    return;
+                  await deleteRecovery(issue.id);
+                  const audit = await auditRecoveryStorage();
+                  setRecoveries(audit.records);
+                  setRecoveryIssues(audit.issues);
+                }}
+              >
+                Remove damaged copy
               </Button>
             </div>
           ))}
