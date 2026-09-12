@@ -12,6 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { AutomationStudio } from '@/components/automation-studio';
 import { DataDrivenStudio } from '@/components/data-driven-studio';
+import { PluginStudio } from '@/components/plugin-studio';
+import type { FilterPluginManifest } from '@/lib/filter-plugin';
+import type { PluginExporter } from '@/lib/plugin-platform';
 import {
   runSuiteSelfTest,
   suiteFeatures,
@@ -32,11 +35,18 @@ export function ProSuiteDialog({
   onClose,
   onRun,
   automationContext,
+  onApplyPluginFilter,
+  onPluginExport,
 }: {
   open: boolean;
   onClose: () => void;
   onRun: (feature: SuiteFeature, options: SuiteOptions) => Promise<void> | void;
   automationContext: AutomationContext;
+  onApplyPluginFilter: (
+    manifest: FilterPluginManifest,
+    amount: number,
+  ) => Promise<boolean> | boolean;
+  onPluginExport: (exporter: PluginExporter) => Promise<void> | void;
 }) {
   const groups = [...new Set(suiteFeatures.map((x) => x.group))];
   const [amount, setAmount] = useState(50),
@@ -179,21 +189,26 @@ export function ProSuiteDialog({
                           'batch',
                           'image-processor',
                           'variables',
+                          'scripts-plugins',
                         ].includes(feature.command)
                       ) {
                         document
                           .querySelector(
                             feature.command === 'variables'
                               ? '.data-driven-studio'
-                              : '.automation-studio',
+                              : feature.command === 'scripts-plugins'
+                                ? '.plugin-studio'
+                                : '.automation-studio',
                           )
                           ?.scrollIntoView({ block: 'nearest' });
                         setReport(
                           feature.command === 'variables'
                             ? 'Use Variables and datasets below to import records and generate editable document variants.'
-                            : feature.command === 'actions'
-                              ? 'Use Actions below to edit, save, import, export, and play action sets.'
-                              : 'Use Image Processor below to run an action across selected local files.',
+                            : feature.command === 'scripts-plugins'
+                              ? 'Use Local plug-in studio below to install versioned, permission-gated panels, filters, and exporters.'
+                              : feature.command === 'actions'
+                                ? 'Use Actions below to edit, save, import, export, and play action sets.'
+                                : 'Use Image Processor below to run an action across selected local files.',
                         );
                         return;
                       }
@@ -233,6 +248,10 @@ export function ProSuiteDialog({
           context={automationContext}
         />
         <DataDrivenStudio options={options} onRun={onRun} />
+        <PluginStudio
+          onApplyFilter={onApplyPluginFilter}
+          onExport={onPluginExport}
+        />
         <div className="pro-suite-footer">
           <input
             ref={importRef}

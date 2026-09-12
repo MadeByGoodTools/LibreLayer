@@ -27,9 +27,7 @@ void test('validates and copies a constrained filter manifest', () => {
 });
 
 void test('CPU fallback is deterministic, amount-aware, and preserves alpha', () => {
-  const source = new Uint8ClampedArray([
-    10, 20, 30, 40, 100, 110, 120, 130,
-  ]);
+  const source = new Uint8ClampedArray([10, 20, 30, 40, 100, 110, 120, 130]);
   assert.deepEqual(
     applyCpuFilterPlugin(source, 2, 1, identity.cpuKernel, 100),
     source,
@@ -50,10 +48,9 @@ void test('CPU fallback is deterministic, amount-aware, and preserves alpha', ()
 
 void test('runs a valid isolated WebAssembly module when available', async () => {
   const wasmModule = Uint8Array.from([
-    0, 97, 115, 109, 1, 0, 0, 0, 1, 9, 1, 96, 5, 127, 127, 127, 127,
-    127, 0, 3, 2, 1, 0, 5, 3, 1, 0, 1, 7, 20, 2, 6, 109, 101, 109,
-    111, 114, 121, 2, 0, 7, 112, 114, 111, 99, 101, 115, 115, 0, 0, 10,
-    4, 1, 2, 0, 11,
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 9, 1, 96, 5, 127, 127, 127, 127, 127, 0, 3,
+    2, 1, 0, 5, 3, 1, 0, 1, 7, 20, 2, 6, 109, 101, 109, 111, 114, 121, 2, 0, 7,
+    112, 114, 111, 99, 101, 115, 115, 0, 0, 10, 4, 1, 2, 0, 11,
   ]);
   const source = new Uint8ClampedArray([9, 8, 7, 6]);
   const result = await applyFilterPlugin(
@@ -95,4 +92,23 @@ void test('CPU filter jobs report bounded monotonic progress through completion'
     ),
     true,
   );
+});
+
+void test('validates and applies restricted JavaScript channel expressions', async () => {
+  const manifest = validateFilterPlugin({
+    ...identity,
+    javascript: {
+      red: 'clamp(r + 10)',
+      green: 'mix(g, r, amount)',
+      blue: 'b',
+    },
+  });
+  const result = await applyFilterPlugin(
+    manifest,
+    new Uint8ClampedArray([40, 20, 10, 200]),
+    1,
+    1,
+    100,
+  );
+  assert.deepEqual([...result.pixels], [50, 40, 10, 200]);
 });

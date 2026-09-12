@@ -4277,6 +4277,111 @@ button {
   flex: 1;
   color: var(--muted-foreground);
 }
+.plugin-studio {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 5%, var(--background));
+}
+.plugin-studio-heading,
+.plugin-detail > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.plugin-studio-heading > div,
+.plugin-detail > header > div {
+  display: grid;
+  min-width: 0;
+}
+.plugin-studio-heading span,
+.plugin-detail header span,
+.plugin-empty,
+.plugin-status {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.plugin-studio-body {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.28fr) minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+.plugin-studio nav {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+.plugin-studio nav button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: inherit;
+  text-align: left;
+}
+.plugin-studio nav button[data-active='true'] {
+  border-color: var(--primary);
+  box-shadow: inset 3px 0 var(--primary);
+}
+.plugin-detail {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+.plugin-permissions,
+.plugin-contributions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.plugin-permissions small {
+  padding: 2px 6px;
+  border: 1px solid #347a59;
+  border-radius: 999px;
+  color: #83d5aa;
+}
+.plugin-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.plugin-control {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(90px, 2fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.plugin-control > input:not([type='checkbox']) {
+  min-width: 0;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+}
+.plugin-checkbox {
+  display: flex;
+}
+.plugin-status {
+  min-height: 18px;
+}
 .local-edit-plan {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -4385,7 +4490,10 @@ button {
 }
 .automation-steps li {
   display: grid;
-  grid-template-columns: auto minmax(120px, 1fr) minmax(145px, auto) auto auto auto auto;
+  grid-template-columns: auto minmax(120px, 1fr) minmax(
+      145px,
+      auto
+    ) auto auto auto auto;
   align-items: center;
   gap: 5px;
   min-height: 31px;
@@ -4433,6 +4541,10 @@ button {
   .pro-suite-controls,
   .pro-feature-grid {
     grid-template-columns: 1fr 1fr;
+  }
+  .plugin-studio-body,
+  .plugin-controls {
+    grid-template-columns: 1fr;
   }
 }
 

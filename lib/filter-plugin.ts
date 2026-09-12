@@ -1,3 +1,5 @@
+import { compilePixelExpression } from './safe-expression.ts';
+
 export const FILTER_PLUGIN_FORMAT = 'librelayer-filter-plugin';
 export const FILTER_PLUGIN_VERSION = 1;
 export const MAX_FILTER_PLUGIN_WASM_BYTES = 1024 * 1024;
@@ -8,8 +10,24 @@ export type FilterPluginManifest = {
   id: string;
   name: string;
   pluginVersion: string;
-  cpuKernel: [number, number, number, number, number, number, number, number, number];
+  cpuKernel: [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
   wasmBase64?: string;
+  javascript?: {
+    red: string;
+    green: string;
+    blue: string;
+    alpha?: string;
+  };
 };
 
 export type FilterPluginResult = {
@@ -52,9 +70,36 @@ export const validateFilterPlugin = (value: unknown): FilterPluginManifest => {
   if (
     manifest.wasmBase64 !== undefined &&
     (typeof manifest.wasmBase64 !== 'string' ||
-      manifest.wasmBase64.length > Math.ceil((MAX_FILTER_PLUGIN_WASM_BYTES * 4) / 3) + 4)
+      manifest.wasmBase64.length >
+        Math.ceil((MAX_FILTER_PLUGIN_WASM_BYTES * 4) / 3) + 4)
   )
     throw new Error('The WebAssembly module is too large.');
+  let javascript: FilterPluginManifest['javascript'];
+  if (manifest.javascript !== undefined) {
+    if (!manifest.javascript || typeof manifest.javascript !== 'object')
+      throw new Error('The JavaScript channel expressions are invalid.');
+    const channels = manifest.javascript as Record<string, unknown>;
+    for (const channel of ['red', 'green', 'blue'])
+      if (
+        typeof channels[channel] !== 'string' ||
+        !channels[channel] ||
+        channels[channel].length > 240
+      )
+        throw new Error(`The JavaScript ${channel} expression is invalid.`);
+    if (
+      channels.alpha !== undefined &&
+      (typeof channels.alpha !== 'string' ||
+        !channels.alpha ||
+        channels.alpha.length > 240)
+    )
+      throw new Error('The JavaScript alpha expression is invalid.');
+    javascript = {
+      red: channels.red as string,
+      green: channels.green as string,
+      blue: channels.blue as string,
+      ...(channels.alpha ? { alpha: channels.alpha as string } : {}),
+    };
+  }
   return {
     format: FILTER_PLUGIN_FORMAT,
     version: FILTER_PLUGIN_VERSION,
@@ -63,6 +108,7 @@ export const validateFilterPlugin = (value: unknown): FilterPluginManifest => {
     pluginVersion,
     cpuKernel: [...manifest.cpuKernel] as FilterPluginManifest['cpuKernel'],
     ...(manifest.wasmBase64 ? { wasmBase64: manifest.wasmBase64 } : {}),
+    ...(javascript ? { javascript } : {}),
   };
 };
 
@@ -78,7 +124,54 @@ const decodeBase64 = (encoded: string) => {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 };
 
-const clampByte = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+const clampByte = (value: number) =>
+  Math.max(0, Math.min(255, Math.round(value)));
+
+const applyJavascriptFilterPlugin = (
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  channels: NonNullable<FilterPluginManifest['javascript']>,
+  amount: number,
+  onProgress?: (progress: number) => void,
+) => {
+  const red = compilePixelExpression(channels.red),
+    green = compilePixelExpression(channels.green),
+    blue = compilePixelExpression(channels.blue),
+    alpha = channels.alpha ? compilePixelExpression(channels.alpha) : null,
+    output = new Uint8ClampedArray(source.length),
+    mix = Math.max(0, Math.min(1, amount / 100)),
+    progressStride = Math.max(1, Math.floor(height / 20));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4,
+        variables = {
+          r: source[offset],
+          g: source[offset + 1],
+          b: source[offset + 2],
+          a: source[offset + 3],
+          x,
+          y,
+          width,
+          height,
+          amount: mix,
+        },
+        calculated = [
+          red(variables),
+          green(variables),
+          blue(variables),
+          alpha ? alpha(variables) : variables.a,
+        ];
+      for (let channel = 0; channel < 4; channel++)
+        output[offset + channel] = clampByte(
+          source[offset + channel] * (1 - mix) + calculated[channel] * mix,
+        );
+    }
+    if (y % progressStride === 0 || y === height - 1)
+      onProgress?.(Math.round(((y + 1) / height) * 100));
+  }
+  return output;
+};
 
 export const applyCpuFilterPlugin = (
   source: Uint8ClampedArray,
@@ -157,6 +250,18 @@ export const applyFilterPlugin = async (
 ): Promise<FilterPluginResult> => {
   const manifest = validateFilterPlugin(manifestValue),
     original = new Uint8ClampedArray(source);
+  if (manifest.javascript)
+    return {
+      pixels: applyJavascriptFilterPlugin(
+        original,
+        width,
+        height,
+        manifest.javascript,
+        amount,
+        onProgress,
+      ),
+      backend: 'cpu',
+    };
   if (manifest.wasmBase64)
     try {
       onProgress?.(20);

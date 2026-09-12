@@ -185,7 +185,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Editable actions, sets, conditionals, batch, Image Processor, and saved droplets.
 - [x] Variables, datasets, layer/artboard export, contact sheets, panorama, HDR merge, and focus stack.
 - [x] Auto-align, Auto-Blend, image stacks, and statistical modes.
-- [ ] Sandboxed JavaScript/WASM plugin manifest, permissions, panels, filters, exporters, and versioning.
+- [x] Sandboxed JavaScript/WASM plugin manifest, permissions, panels, filters, exporters, and versioning.
 - [ ] Trusted local script console, headless worker, deterministic replay, and optional local CLI.
 
 ## 16. History, saving, and recovery

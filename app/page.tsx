@@ -402,6 +402,7 @@ import {
   validateFilterPlugin,
   type FilterPluginManifest,
 } from '@/lib/filter-plugin';
+import type { PluginExporter } from '@/lib/plugin-platform';
 import {
   JobCancelledError,
   JobWatchdogError,
@@ -9825,7 +9826,8 @@ export default function Home() {
   const exportImage = useCallback(
     (
       type: 'image/png' | 'image/jpeg' | 'image/webp',
-      ext: 'png' | 'jpg' | 'webp',
+      ext: string,
+      quality = 0.92,
     ) => {
       let source = makeCanvas(doc.w, doc.h);
       renderLayers(source.getContext('2d')!);
@@ -9856,7 +9858,7 @@ export default function Home() {
           );
         },
         type,
-        0.92,
+        Math.max(0, Math.min(1, quality)),
       );
     },
     [doc, fileName],
@@ -9865,6 +9867,15 @@ export default function Home() {
     () => exportImage('image/png', 'png'),
     [exportImage],
   );
+  const exportWithPlugin = (exporter: PluginExporter) => {
+    const mime =
+      exporter.format === 'png'
+        ? 'image/png'
+        : exporter.format === 'jpeg'
+          ? 'image/jpeg'
+          : 'image/webp';
+    exportImage(mime, exporter.extension, exporter.quality ?? 0.92);
+  };
   const loadImportedDocument = (
     name: string,
     w: number,
@@ -12593,26 +12604,14 @@ export default function Home() {
     if (!saved) return null;
     return validateFilterPlugin(JSON.parse(saved));
   };
-  const applyInstalledFilterPlugin = async (amount = 100) => {
-    let plugin: FilterPluginManifest;
-    try {
-      const installed = installedFilterPlugin();
-      if (!installed) {
-        setStatus('Load a LibreLayer filter plug-in first');
-        return;
-      }
-      plugin = installed;
-    } catch {
-      localStorage.removeItem('pixel-studio-filter-plugin');
-      setStatus(
-        'The installed filter plug-in was invalid and has been removed',
-      );
-      return;
-    }
+  const applyPluginFilterManifest = async (
+    plugin: FilterPluginManifest,
+    amount = 100,
+  ) => {
     const target = targetContext();
     if (!target || editing === 'mask') {
       setStatus('Select an unlocked pixel layer first');
-      return;
+      return false;
     }
     const canvas = target.ctx.canvas,
       context = canvas.getContext('2d', { willReadFrequently: true })!,
@@ -12701,6 +12700,7 @@ export default function Home() {
       setStatus(
         `${plugin.name} applied with the ${result.backend === 'wasm' ? 'WebAssembly' : 'CPU'} engine${result.warning ? ' · WebAssembly unavailable, safe fallback used' : ''}`,
       );
+      return true;
     } catch (error) {
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(original, 0, 0);
@@ -12713,6 +12713,7 @@ export default function Home() {
               ? error.message
               : 'The filter plug-in failed safely',
       );
+      return false;
     } finally {
       if (scratchName) {
         try {
@@ -12736,6 +12737,21 @@ export default function Home() {
       } catch {
         localStorage.removeItem('librelayer-active-job');
       }
+    }
+  };
+  const applyInstalledFilterPlugin = async (amount = 100) => {
+    try {
+      const installed = installedFilterPlugin();
+      if (!installed) {
+        setStatus('Load a LibreLayer filter plug-in first');
+        return;
+      }
+      await applyPluginFilterManifest(installed, amount);
+    } catch {
+      localStorage.removeItem('pixel-studio-filter-plugin');
+      setStatus(
+        'The installed filter plug-in was invalid and has been removed',
+      );
     }
   };
   const loadFilterPlugin = async (file?: File) => {
@@ -13333,16 +13349,9 @@ export default function Home() {
         return;
       }
       if (feature.command === 'scripts-plugins') {
-        try {
-          const script = JSON.parse(options.text);
-          if (typeof script !== 'object') throw Error();
-          localStorage.setItem('pixel-studio-script', JSON.stringify(script));
-          setStatus('Validated safe JSON script installed');
-        } catch {
-          setStatus(
-            'Enter a JSON object in Prompt / name to install a safe local script',
-          );
-        }
+        setStatus(
+          'Use Local plug-in studio for permission-gated panels, filters, and exporters',
+        );
         return;
       }
       if (feature.command === 'variables') {
@@ -21328,6 +21337,8 @@ export default function Home() {
         open={proSuiteOpen}
         onClose={() => setProSuiteOpen(false)}
         onRun={runProFeature}
+        onApplyPluginFilter={applyPluginFilterManifest}
+        onPluginExport={exportWithPlugin}
         automationContext={{
           width: doc.w,
           height: doc.h,

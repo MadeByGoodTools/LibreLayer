@@ -103,6 +103,12 @@ Professional Studio's Specialty Filters include Lens Correction, Displacement Ma
 
 Creative filters include Oil Paint, Lighting Effects, Clouds, Fibers, Filter Gallery, and Custom Convolution. Lighting uses the working color and Secondary positions its light horizontally. Clouds and Fibers are seeded by Secondary, so the same settings reproduce the same pixels. For Custom Convolution, enter nine comma- or space-separated coefficients in **Prompt / name**; an empty or invalid-length entry uses a standard sharpen kernel, while unsafe kernel strengths are rejected without changing the layer.
 
+### Local plug-ins
+
+Open **Filter → Professional Studio → Automation & production → Scripts and filter plug-ins** to jump to Local plug-in studio. Install a `.libreplugin` manifest to add a permission-gated panel, filter, or PNG/JPEG/WebP exporter. The studio shows the exact access granted to each plug-in and keeps its controls in the current browser profile. Equal or newer versions upgrade in place; an older version is rejected unless the current copy is removed first.
+
+JavaScript filter contributions are restricted per-channel expressions, not arbitrary page code. They cannot access the DOM, browser storage, local files, properties, imports, or the network. JavaScript, WebAssembly, and CPU filters run on copied pixels in the filter worker; cancellation, failure, and timeout leave the document unchanged. Successful filters respect the active selection and produce one normal Undo/Redo state. See [PLUGIN-PLATFORM.md](PLUGIN-PLATFORM.md) for the manifest, permissions, size limits, expression language, and exporter contract.
+
 ## Saving and export
 
 - **Editable master:** File → Save layered project (`Ctrl/⌘+S`) writes `.librelayer`. Password-protected projects use local AES-256-GCM encryption; losing the password makes the file unrecoverable.

@@ -20,6 +20,7 @@ export type SuiteFeature = {
 };
 
 const functionalOverrides = new Set([
+  'scripts-plugins',
   'variables',
   'export-layers',
   'photomerge',
