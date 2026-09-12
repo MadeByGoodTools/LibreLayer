@@ -3851,6 +3851,13 @@ button {
   border-radius: 7px;
   box-shadow: 0 14px 36px #000a;
 }
+
+.brush-renderer-status {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .brush-dynamics label {
   justify-content: space-between;
 }

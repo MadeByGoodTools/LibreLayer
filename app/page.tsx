@@ -300,6 +300,10 @@ import {
   symmetryStrokePoints,
   type BrushSymmetry,
 } from '@/lib/brush-engine';
+import {
+  GpuBrushRenderer,
+  type BrushRendererBackend,
+} from '@/lib/gpu-brush-renderer';
 import { correctRedEyePixels, highFrequencyPixels } from '@/lib/retouch-engine';
 import {
   contentAwareFill,
@@ -2530,6 +2534,7 @@ export default function Home() {
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
   const historyBrushBuffer = useRef<HTMLCanvasElement | null>(null);
   const gesturePaintTool = useRef<'brush' | 'eraser' | null>(null);
+  const brushRenderer = useRef<GpuBrushRenderer | null>(null);
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
   const brushPresetFileRef = useRef<HTMLInputElement>(null);
@@ -2667,6 +2672,17 @@ export default function Home() {
     [brushFolder, setBrushFolder] = useState('all'),
     [brushFavoritesOnly, setBrushFavoritesOnly] = useState(false);
   const [paintMode, setPaintMode] = useState<'brush' | 'pencil'>('brush');
+  const [brushRendererBackend, setBrushRendererBackend] =
+    useState<BrushRendererBackend>('canvas2d');
+  useEffect(() => {
+    const renderer = new GpuBrushRenderer();
+    brushRenderer.current = renderer;
+    setBrushRendererBackend(renderer.backend);
+    return () => {
+      renderer.dispose();
+      if (brushRenderer.current === renderer) brushRenderer.current = null;
+    };
+  }, []);
   const [color, setColor] = useState('#171717');
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
   const [zoom, setZoom] = useState(68);
@@ -5109,6 +5125,60 @@ export default function Home() {
               brushDistanceSinceDab.current,
             );
           brushDistanceSinceDab.current = stroke.distanceSinceLastDab;
+          const renderer = brushRenderer.current,
+            accelerated =
+              renderer &&
+              editing === 'pixels' &&
+              paintMode === 'brush' &&
+              brushSourceMode === 'color' &&
+              !activeBrushTipId &&
+              !dualBrush &&
+              !mixerBrush &&
+              !wetEdges &&
+              brushTexture === 0 &&
+              brushScatter === 0 &&
+              sizeJitter === 0 &&
+              hueJitter === 0 &&
+              opacityJitter === 0 &&
+              flowJitter === 0;
+          if (accelerated && stroke.points.length) {
+            const baseAlpha =
+                (((opacity / 100) * flow) / 100) *
+                pressureAlpha *
+                (airbrushBuildUp ? 0.2 : 1),
+              dabs = stroke.points.flatMap((sourcePoint) =>
+                symmetryStrokePoints(
+                  sourcePoint,
+                  doc.w,
+                  doc.h,
+                  brushSymmetry,
+                  radialSymmetryCount,
+                ).map((point) => ({
+                  x: point.x,
+                  y: point.y,
+                  size: Math.max(1, size * pressureScale),
+                  alpha: baseAlpha,
+                  angle:
+                    (brushAngle * Math.PI) / 180 + (tilt ? tiltAngle : 0),
+                  roundness:
+                    Math.max(0.05, brushRoundness / 100) *
+                    (tilt ? Math.max(0.18, 1 - tiltMagnitude) : 1),
+                })),
+              ),
+              tiles = renderer.render(dabs, {
+                color: paint === 'white' ? '#ffffff' : paint,
+                hardness: hardness / 100,
+              });
+            ctx.save();
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+            for (const tile of tiles) {
+              ctx.drawImage(tile.canvas, tile.x, tile.y);
+              tile.canvas.width = tile.canvas.height = 1;
+            }
+            ctx.restore();
+            return;
+          }
           ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = (((opacity / 100) * flow) / 100) * pressureAlpha;
           for (const sourcePoint of stroke.points)
@@ -14433,6 +14503,14 @@ export default function Home() {
                 <details className="brush-dynamics">
                   <summary>Brush dynamics</summary>
                   <div>
+                    <p
+                      className="brush-renderer-status"
+                      aria-label={`Brush renderer ${brushRendererBackend}`}
+                    >
+                      {brushRendererBackend === 'webgl2'
+                        ? 'GPU subpixel renderer active'
+                        : 'Canvas renderer fallback active'}
+                    </p>
                     <section
                       className="brush-library"
                       aria-label="Brush library"
