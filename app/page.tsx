@@ -314,6 +314,11 @@ import {
   validateEmbeddedDocument,
   type EmbeddedDocumentEnvelope,
 } from '@/lib/embedded-smart-object';
+import {
+  filterGraphKey,
+  VersionedRenderCache,
+  type FilterGraphQuality,
+} from '@/lib/smart-filter-cache';
 import { normalizeToolbar, visibleToolbarIds } from '@/lib/toolbar-config';
 import {
   adjustHighDepth,
@@ -375,6 +380,7 @@ type SavedPath = {
 type SavedSelection = { id: string; name: string; mask: string };
 type SmartFilter = {
   id: string;
+  version?: number;
   name: 'Blur' | 'Sharpen' | 'Brightness';
   amount: number;
   opacity: number;
@@ -391,6 +397,7 @@ type SmartObjectData = {
   linkedStatus?: 'connected' | 'missing';
   instanceId?: string;
   dependencies?: string[];
+  sourceVersion?: number;
   embeddedDocument?: EmbeddedDocumentData;
   raw?: {
     assetId: string;
@@ -697,6 +704,12 @@ const makeCanvas = (w: number, h: number) => {
   c.height = h;
   return c;
 };
+const smartFilterRenderCache = new VersionedRenderCache<HTMLCanvasElement>(
+  24_000_000,
+  (canvas) => {
+    canvas.width = canvas.height = 1;
+  },
+);
 
 const canvasBlob = (canvas: HTMLCanvasElement) =>
   new Promise<Blob>((resolve, reject) =>
@@ -1254,6 +1267,7 @@ const drawLayer = (
   surface: LayerSurface,
   w: number,
   h: number,
+  quality: FilterGraphQuality = 'final',
 ) => {
   let source =
     layer.kind === 'fill' && layer.fillLayer
@@ -1291,45 +1305,75 @@ const drawLayer = (
     if (source !== surface.pixels) source.width = source.height = 1;
     source = temp;
   }
-  for (const smartFilter of layer.smartObject?.filters ?? []) {
-    if (!smartFilter.enabled) continue;
-    const filtered =
-        smartFilter.name === 'Sharpen'
-          ? sharpenCanvasTiled(source, smartFilter.amount)
-          : makeCanvas(w, h),
-      fc = filtered.getContext('2d')!;
-    if (smartFilter.name !== 'Sharpen') {
-      fc.filter =
-        smartFilter.name === 'Blur'
-          ? `blur(${Math.max(0, smartFilter.amount)}px)`
-          : `brightness(${100 + smartFilter.amount}%)`;
-      fc.drawImage(source, 0, 0);
-    }
-    if (
-      layer.smartObject?.filterMask &&
-      layer.hasMask &&
-      layer.maskEnabled &&
-      surface.mask
-    ) {
-      const alpha = maskToAlpha(
-        surface.mask,
-        layer.maskDensity,
-        layer.maskFeather,
-      );
-      fc.globalCompositeOperation = 'destination-in';
-      fc.filter = 'none';
-      fc.drawImage(alpha, 0, 0);
-      alpha.width = alpha.height = 1;
-    }
-    const combined = makeCanvas(w, h),
-      cc = combined.getContext('2d')!;
-    cc.drawImage(source, 0, 0);
-    cc.globalAlpha = smartFilter.opacity / 100;
-    cc.globalCompositeOperation = smartFilter.blend as GlobalCompositeOperation;
-    cc.drawImage(filtered, 0, 0);
+  const smartObject = layer.smartObject,
+    activeSmartFilters = smartObject?.filters.filter((filter) => filter.enabled) ?? [],
+    cacheable =
+      !!smartObject &&
+      !!activeSmartFilters.length &&
+      !smartObject.filterMask &&
+      !!smartObject.instanceId,
+    cacheKey = cacheable
+      ? filterGraphKey({
+          instanceId: smartObject.instanceId!,
+          sourceVersion: smartObject.sourceVersion ?? 1,
+          width: w,
+          height: h,
+          quality,
+          filters: smartObject.filters,
+        })
+      : '',
+    cached = cacheable ? smartFilterRenderCache.get(cacheKey) : undefined;
+  if (cached) {
+    const copy = makeCanvas(w, h);
+    copy.getContext('2d')!.drawImage(cached, 0, 0);
     if (source !== surface.pixels) source.width = source.height = 1;
-    filtered.width = filtered.height = 1;
-    source = combined;
+    source = copy;
+  } else {
+    for (const smartFilter of activeSmartFilters) {
+      const filtered =
+          smartFilter.name === 'Sharpen'
+            ? sharpenCanvasTiled(source, smartFilter.amount)
+            : makeCanvas(w, h),
+        fc = filtered.getContext('2d')!;
+      if (smartFilter.name !== 'Sharpen') {
+        fc.filter =
+          smartFilter.name === 'Blur'
+            ? `blur(${Math.max(0, smartFilter.amount)}px)`
+            : `brightness(${100 + smartFilter.amount}%)`;
+        fc.drawImage(source, 0, 0);
+      }
+      if (
+        smartObject?.filterMask &&
+        layer.hasMask &&
+        layer.maskEnabled &&
+        surface.mask
+      ) {
+        const alpha = maskToAlpha(
+          surface.mask,
+          layer.maskDensity,
+          layer.maskFeather,
+        );
+        fc.globalCompositeOperation = 'destination-in';
+        fc.filter = 'none';
+        fc.drawImage(alpha, 0, 0);
+        alpha.width = alpha.height = 1;
+      }
+      const combined = makeCanvas(w, h),
+        cc = combined.getContext('2d')!;
+      cc.drawImage(source, 0, 0);
+      cc.globalAlpha = smartFilter.opacity / 100;
+      cc.globalCompositeOperation =
+        smartFilter.blend as GlobalCompositeOperation;
+      cc.drawImage(filtered, 0, 0);
+      if (source !== surface.pixels) source.width = source.height = 1;
+      filtered.width = filtered.height = 1;
+      source = combined;
+    }
+    if (cacheable) {
+      const stored = makeCanvas(w, h);
+      stored.getContext('2d')!.drawImage(source, 0, 0);
+      smartFilterRenderCache.set(cacheKey, stored, w * h);
+    }
   }
   const graded = colorGradedCanvas(source, layer.colorGrade, w, h);
   if (graded !== source) {
@@ -2021,6 +2065,18 @@ export default function Home() {
   const customFontFileRef = useRef<HTMLInputElement>(null);
   const smartObjectFileRef = useRef<HTMLInputElement>(null);
   const smartFileAction = useRef<'link' | 'replace' | 'relink'>('link');
+  const smartFilterPreviewRef = useRef(false);
+  const smartFilterFinalTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  useEffect(
+    () => () => {
+      if (smartFilterFinalTimer.current)
+        clearTimeout(smartFilterFinalTimer.current);
+      smartFilterRenderCache.clear();
+    },
+    [],
+  );
   const clipboardRef = useRef<{
     pixels: HTMLCanvasElement;
     x: number;
@@ -2419,6 +2475,7 @@ export default function Home() {
     stack = layersRef.current,
     surfaceMap = surfacesRef.current,
     size = doc,
+    quality: FilterGraphQuality = 'final',
   ) => {
     const visible = (layer: LayerMeta) =>
       layer.visible && !ancestors(stack, layer.id).some((p) => !p.visible);
@@ -2459,6 +2516,7 @@ export default function Home() {
         surface,
         size.w,
         size.h,
+        quality,
       );
       return appearance;
     };
@@ -2483,6 +2541,7 @@ export default function Home() {
         surface,
         size.w,
         size.h,
+        quality,
       );
       if (layer.clipping) {
         const baseId = clippingBaseId(siblings, layer.id),
@@ -2584,7 +2643,13 @@ export default function Home() {
     if (out.width !== doc.w) out.width = doc.w;
     if (out.height !== doc.h) out.height = doc.h;
     const ctx = out.getContext('2d', { willReadFrequently: true })!;
-    renderLayers(ctx);
+    renderLayers(
+      ctx,
+      layersRef.current,
+      surfacesRef.current,
+      doc,
+      smartFilterPreviewRef.current ? 'preview' : 'final',
+    );
     const activeLayer = layersRef.current.find(
         (layer) => layer.id === selectedRef.current,
       ),
@@ -3363,6 +3428,7 @@ export default function Home() {
               ...layer.smartObject,
               sourceData,
               embeddedDocument,
+              sourceVersion: (layer.smartObject.sourceVersion ?? 1) + 1,
             },
           }
         : layer,
@@ -3686,6 +3752,7 @@ export default function Home() {
       !surface ||
       isLocked(meta.id) ||
       meta.kind === 'group' ||
+      (meta.smartObject && editing !== 'mask') ||
       ((meta.kind === 'adjustment' || meta.kind === 'fill') &&
         editing !== 'mask')
     )
@@ -6512,6 +6579,7 @@ export default function Home() {
           filters: [],
           filterMask: false,
           instanceId,
+          sourceVersion: 1,
           dependencies,
         },
       },
@@ -6674,6 +6742,7 @@ export default function Home() {
               linkedHandleId,
               linkedStatus,
               instanceId,
+              sourceVersion: (existing?.sourceVersion ?? 1) + 1,
               dependencies: existing?.dependencies ?? [],
               raw: undefined,
             },
@@ -6910,6 +6979,7 @@ export default function Home() {
             ...meta.smartObject.filters,
             {
               id: crypto.randomUUID(),
+              version: 1,
               name,
               amount: name === 'Blur' ? 4 : 20,
               opacity: 100,
@@ -6963,7 +7033,12 @@ export default function Home() {
           ...meta.smartObject,
           filters: meta.smartObject.filters.map((item) =>
             item.id === filter.id
-              ? { ...item, opacity: opacityValue, blend }
+              ? {
+                  ...item,
+                  opacity: opacityValue,
+                  blend,
+                  version: (item.version ?? 1) + 1,
+                }
               : item,
           ),
         },
@@ -6980,18 +7055,33 @@ export default function Home() {
   ) => {
     const meta = selected();
     if (!meta?.smartObject || isLocked(meta.id)) return;
+    smartFilterPreviewRef.current = true;
     patchLayer(
       meta.id,
       {
         smartObject: {
           ...meta.smartObject,
           filters: meta.smartObject.filters.map((filter) =>
-            filter.id === id ? { ...filter, ...patch } : filter,
+            filter.id === id
+              ? {
+                  ...filter,
+                  ...patch,
+                  version: (filter.version ?? 1) + 1,
+                }
+              : filter,
           ),
         },
       },
       record,
     );
+    render();
+    if (smartFilterFinalTimer.current)
+      clearTimeout(smartFilterFinalTimer.current);
+    smartFilterFinalTimer.current = setTimeout(() => {
+      smartFilterPreviewRef.current = false;
+      smartFilterFinalTimer.current = null;
+      render();
+    }, 140);
   };
   const moveSmartFilter = (id: string, direction: -1 | 1) => {
     const meta = selected();
@@ -9528,7 +9618,14 @@ export default function Home() {
                   ...rawMeta.smartObject,
                   instanceId:
                     rawMeta.smartObject.instanceId ?? crypto.randomUUID(),
+                  sourceVersion: rawMeta.smartObject.sourceVersion ?? 1,
                   dependencies: rawMeta.smartObject.dependencies ?? [],
+                  filters: (rawMeta.smartObject.filters ?? []).map(
+                    (filter: SmartFilter) => ({
+                      ...filter,
+                      version: filter.version ?? 1,
+                    }),
+                  ),
                   linkedStatus:
                     rawMeta.smartObject.kind === 'linked'
                       ? 'missing'
@@ -10396,6 +10493,9 @@ export default function Home() {
         kind: 'embedded',
         sourceName: rawDevelop.name,
         sourceData: pixels.toDataURL('image/png'),
+        instanceId: target?.smartObject?.instanceId ?? crypto.randomUUID(),
+        sourceVersion: (target?.smartObject?.sourceVersion ?? 0) + 1,
+        dependencies: target?.smartObject?.dependencies ?? [],
         filters: target?.smartObject?.filters ?? [],
         filterMask: target?.smartObject?.filterMask ?? false,
         raw: {

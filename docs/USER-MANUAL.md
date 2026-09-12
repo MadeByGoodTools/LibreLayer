@@ -29,6 +29,8 @@ Smart Objects retain embedded or linked source data, transforms, and editable Sm
 
 For an embedded Smart Object, choose **Edit contents** in Layers or **Layer > Edit Smart Object contents**. Its layered source opens in a linked document tab. Each source edit synchronizes back to every shared instance, adds an undoable history state to the parent, and stores the complete source layer tree inside the `.librelayer` project. Opening the same source again switches to its existing tab. Linked-file Smart Objects remain controlled by Refresh, Relink, and Replace so LibreLayer never silently overwrites an external file.
 
+Smart Filter sliders use a separately cached live-preview pass while you adjust them, followed by a full-quality render after the control settles. Source and filter parameter versions are stored in the project and form part of the cache key, so replacing source pixels, reopening older projects, or changing filter order and settings cannot reuse a stale result. The bounded local cache automatically releases its least-recently-used renders.
+
 ## Selecting
 
 Use Marquee (`M`), Lasso (`L`), Magic Wand/Quick Selection (`W`), semantic Subject/People/Sky/Hair/Skin/Clothing/Object selections, Color Range, Focus Range, Similar, or luminosity ranges. New/Add/Subtract/Intersect changes how the next selection combines. Selection refinement includes Grow, Expand, Contract, Smooth, Feather, Border, Transform Selection, Quick Mask, saved selections, and Select and Mask.

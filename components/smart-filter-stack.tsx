@@ -50,6 +50,7 @@ export function SmartFilterStack({
           {filterMask ? 'Edit filter mask' : 'Add filter mask'}
         </button>
       </header>
+      <p>Versioned live preview · full-quality result cached locally</p>
       <div className="smart-filter-add">
         {(['Blur', 'Sharpen', 'Brightness'] as const).map((name) => (
           <Button
