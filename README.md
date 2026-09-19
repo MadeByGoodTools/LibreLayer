@@ -121,7 +121,7 @@ pnpm lint
 pnpm test:release
 ```
 
-`pnpm test:release` runs the complete type, lint, core, large-document performance, visual, production dependency-audit, and build gate used by continuous integration.
+`pnpm test:release` runs the complete type, lint, core, large-document performance, PSD round-trip, visual, production dependency-audit, and build gate used by continuous integration.
 
 ## File compatibility
 

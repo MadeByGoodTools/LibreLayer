@@ -123,6 +123,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
 - [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.
 - [ ] External Photoshop round-trip laboratory and visual-difference thresholds.
+  - [x] Automated local PSD round-trip gate with strict layer-structure and zero-delta pixel thresholds, plus an external-fixture command and provenance-aware JSON report.
+  - [ ] Independently create and verify the fixture set in current Adobe Photoshop releases on macOS and Windows.
 
 ## 9. Smart Objects and Smart Filters
 

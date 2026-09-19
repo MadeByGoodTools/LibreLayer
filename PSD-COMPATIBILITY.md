@@ -25,3 +25,9 @@
 - TypeScript no-emit check and production build passed.
 
 These are editor/library round-trip tests, not independent validation in Adobe Photoshop. Full PSD import/export remain partial in the 300-feature checklist.
+
+## Repeatable round-trip laboratory
+
+`pnpm test:psd-lab` now gates every release with a deterministic layered RGB fixture. It compares the complete layer-tree signature (names, order, groups, bounds, blends, opacity, clipping and masks) and applies explicit lossless visual thresholds: maximum channel delta 0, mean absolute channel delta 0 and changed-pixel ratio 0.
+
+An operator can run the same gate against an externally created file with `pnpm test:psd-lab -- --file /absolute/path/to/fixture.psd`. The JSON report labels that run as externally supplied, but the fixture's authoring application and version must be recorded separately. This makes real Photoshop-produced fixtures measurable without claiming that the bundled deterministic fixture came from Photoshop.
