@@ -86,6 +86,36 @@ void test('ag-psd preserves the editable native effect records', () => {
   assert.deepEqual(psdEffectsToLayerEffects(native), expected);
 });
 
+void test('ag-psd serializes a sparse single-effect recipe without undefined records', () => {
+  const imageData = { width: 2, height: 2, data: new Uint8ClampedArray(16) },
+    expected = {
+      ...defaultLayerEffects(),
+      dropShadow: false,
+      outerGlow: true,
+      color: '#3264c8',
+      opacity: 72,
+      size: 14,
+      contour: 'smooth' as const,
+    },
+    native = layerEffectsToPsd(expected);
+  assert.ok(native);
+  assert.equal(
+    Object.values(native).some((value) => value === undefined),
+    false,
+  );
+  const restored = readPsd(
+    writePsd({
+      width: 2,
+      height: 2,
+      imageData,
+      children: [{ name: 'Glow', imageData, effects: native }],
+    }),
+    { useImageData: true },
+  ).children?.[0]?.effects;
+  assert.equal(supportedPsdEffects(restored), true);
+  assert.deepEqual(psdEffectsToLayerEffects(restored), expected);
+});
+
 void test('unsupported or lossy effect records fail closed', () => {
   assert.equal(
     layerEffectsToPsd({ ...completeRecipe(), patternOverlay: true }),

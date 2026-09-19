@@ -122,7 +122,7 @@ export function layerEffectsToPsd(
       useGlobalLight: effects.useGlobalLight,
       contour: contourToPsd(effects.contour),
     };
-  return {
+  const result: LayerEffectsInfo = {
     disabled: false,
     scale: effects.scale / 100,
     dropShadow: effects.dropShadow
@@ -218,6 +218,9 @@ export function layerEffectsToPsd(
         ]
       : undefined,
   };
+  return Object.fromEntries(
+    Object.entries(result).filter(([, value]) => value !== undefined),
+  ) as LayerEffectsInfo;
 }
 
 type Candidate = Partial<

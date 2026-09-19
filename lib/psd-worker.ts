@@ -22,6 +22,7 @@ import { unsupportedPsdTextReasons } from './psd-text';
 import { supportedPsdAdjustment } from './psd-adjustment';
 import { supportedPsdEffects } from './psd-effects';
 import { supportedPsdSmartObject } from './psd-smart-object';
+import { supportedPsdBlendIf } from './psd-compositing';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -95,15 +96,15 @@ function decode(buffer: ArrayBuffer) {
         (layer.mask.right ?? 0) - (layer.mask.left ?? 0),
         (layer.mask.bottom ?? 0) - (layer.mask.top ?? 0),
       );
+    if (layer.vectorMask || layer.vectorStroke)
+      warnings.add('Unsupported vector content');
     if (
-      layer.clipping ||
-      layer.vectorMask ||
-      layer.vectorStroke ||
-      (layer.fillOpacity !== undefined && layer.fillOpacity !== 1)
+      layer.fillOpacity !== undefined &&
+      (!Number.isFinite(layer.fillOpacity) ||
+        layer.fillOpacity < 0 ||
+        layer.fillOpacity > 1)
     )
-      warnings.add(
-        'Smart objects, clipping, vector content or adjustment layers',
-      );
+      warnings.add('Invalid layer fill opacity');
     if (layer.effects && !supportedPsdEffects(layer.effects))
       warnings.add('Unsupported or non-lossless layer effects');
     if (
@@ -125,23 +126,13 @@ function decode(buffer: ArrayBuffer) {
       warnings.add('Unsupported noise-gradient or pattern fill layer');
     if (layer.realMask || layer.knockout || layer.artboard)
       warnings.add('Additional masks, knockout blending or artboards');
-    const ranges = layer.blendingRanges;
-    if (
-      ranges &&
-      [
-        ranges.compositeGrayBlendSource,
-        ranges.compositeGraphBlendDestinationRange,
-        ...ranges.ranges.flatMap((r) => [r.sourceRange, r.destRange]),
-      ].some((range) => range.some((v, i) => v !== [0, 0, 255, 255][i]))
-    )
-      warnings.add('Blend If ranges');
+    if (!supportedPsdBlendIf(layer.blendingRanges))
+      warnings.add('Multiple-channel or invalid Blend If ranges');
     if (
       layer.children &&
-      ((layer.opacity ?? 1) !== 1 ||
-        layer.mask ||
-        (layer.blendMode ?? 'pass through') !== 'pass through')
+      !['pass through', 'normal'].includes(layer.blendMode ?? 'pass through')
     )
-      warnings.add('Isolated, masked or translucent layer groups');
+      warnings.add('Unsupported layer-group blend mode');
     if (!layer.children && !supported.has(layer.blendMode ?? 'normal'))
       warnings.add('Unsupported blend modes');
     if (
@@ -176,7 +167,10 @@ function decode(buffer: ArrayBuffer) {
     name: layer.name,
     hidden: layer.hidden,
     opacity: layer.opacity,
+    fillOpacity: layer.fillOpacity,
     blendMode: layer.blendMode,
+    clipping: layer.clipping,
+    blendingRanges: layer.blendingRanges,
     left: layer.left,
     top: layer.top,
     opened: layer.opened,

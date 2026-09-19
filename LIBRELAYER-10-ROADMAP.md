@@ -126,6 +126,7 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Nine native editable PSD effect families: Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel, Satin, Color Overlay, two-color linear Gradient Overlay, and solid-color Stroke, with project persistence, codec round-trip tests, shared-parameter validation, and explicit blocking for Pattern Overlay or richer Photoshop records that cannot be represented losslessly.
   - [x] Native embedded raster PSD Smart Objects with preserved PNG/JPEG/WebP payloads, shared-instance IDs, and editable Gaussian Blur, Smart Sharpen and Brightness/Contrast Smart Filters, with ordered settings, codec round-trip tests, and explicit blocking for linked, masked, nested, RAW, warped or unsupported-filter records.
 - [ ] Exact clipping, knockout, Blend If, group, comp, channel, path, guide, metadata, and ICC fidelity.
+  - [x] Native PSD clipping stacks, fill opacity, single-channel gray/RGB Blend If, pass-through/isolated groups, translucent groups, and raster-masked groups, with codec round-trip tests and explicit blocking for simultaneous active Blend If channels or knockout modes that cannot yet be represented losslessly.
 - [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
 - [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.
 - [ ] External Photoshop round-trip laboratory and visual-difference thresholds.

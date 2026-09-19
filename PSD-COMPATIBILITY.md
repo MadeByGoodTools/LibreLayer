@@ -3,14 +3,14 @@
 ## Supported scope
 
 - PSD and PSB in 8-, 16- or 32-bit RGB. Supported high-depth layers are preserved structurally and tone-mapped into the current 8-bit browser working canvas; Photoshop ICC conversion is not implemented.
-- Raster layer names, order, visibility, whole-percent opacity, supported Canvas blend modes, masks and pass-through groups.
+- Raster layer names, order, visibility, whole-percent opacity and fill opacity, supported Canvas blend modes, masks, native clipping stacks, pass-through or isolated groups, translucent/masked groups, and one editable gray, red, green, or blue Blend If channel per layer. Photoshop files with simultaneous non-default Blend If ranges on multiple channels are reported instead of silently simplified.
 - Native editable point and paragraph text with one character and paragraph style, including font, size, color, faux bold/italic, scale, tracking, kerning, leading, baseline shift, alignment, simple warp, underline, strike, small caps, ligatures and direction. The rendered bitmap is included for visual fallback. Vertical, path-based and mixed-style type is reported as unsupported and opens only through the explicit saved-composite choice.
 - Native editable solid-color and two-color linear-gradient fill layers retain color, angle, scale, offset and rendered fallback. Noise-gradient and pattern fill layers are explicitly blocked from layered export and reported on import until their native PSD recipes are supported.
 - Native editable Brightness/Contrast, Exposure, Vibrance, Hue/Saturation, Color Balance, Black & White, Photo Filter, Levels, Curves, Channel Mixer, Gradient Map, and Selective Color adjustment layers retain their supported values and masks. Combined LibreLayer recipes and other Photoshop adjustment families are explicitly blocked or reported until each can be represented without losing settings.
 - Native editable Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel, Satin, Color Overlay, two-color linear Gradient Overlay, and solid-color Stroke effects retain their shared colors, opacity, size, distance, angle, global-light choice, scale and supported contour. Multiple Photoshop instances, incompatible per-effect settings, advanced effect parameters and Pattern Overlay are explicitly blocked or reported instead of being simplified silently.
 - Native embedded raster Smart Objects retain their PNG, JPEG or WebP source payload and shared-instance identifier. Gaussian Blur, Smart Sharpen and Brightness/Contrast Smart Filters retain their amount, opacity, blend mode, enabled state and order. Linked, masked, nested-document, Camera Raw, warped or unsupported-filter Smart Objects are explicitly blocked or reported until all of their source semantics can be retained.
 - Mask offsets, default outside color and disabled state.
-- Layered PSD export preserves supported raster structure and masks; transforms and pixel adjustments are baked into pixels. Native .pixelstudio saving remains the editable master.
+- Layered PSD export preserves supported raster structure, masks, clipping, fill opacity, single-channel Blend If, and pass-through/isolated group compositing; transforms and pixel adjustments are baked into pixels. Native .librelayer saving remains the editable master.
 - Flattened PSD export writes the current composite as one pixel layer.
 - Unsupported layer features trigger a choice to open the PSD's saved composite instead of silently approximating editable layers. Original files are never overwritten.
 - Live adjustment layers and blurred masks block layered export with guidance to use flattened PSD or native saving.
@@ -28,6 +28,7 @@
 - Oversized 90,000×90,000 header: rejected with size-limit dialog; current document retained.
 - File / Export flattened PSD: exactly one raster layer, pixel bytes match current composite.
 - Native paragraph-text fixture: LibreLayer text metadata serialized through the PSD codec and reopened with content, font and box type intact; production-browser QA created the same editable text layer with its real character controls and no runtime errors.
+- Native compositing fixture: clipping, fill opacity, gray/RGB single-channel Blend If ranges, isolated-group opacity, group fill and raster group masks survive codec round trip; simultaneous active Blend If channels fail closed.
 - TypeScript no-emit check and production build passed.
 
 These are editor/library round-trip tests, not independent validation in Adobe Photoshop. Full PSD import/export remain partial in the 300-feature checklist.

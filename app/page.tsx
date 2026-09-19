@@ -154,6 +154,12 @@ import {
 } from '@/lib/psd-adjustment';
 import { layerEffectsToPsd, psdEffectsToLayerEffects } from '@/lib/psd-effects';
 import { psdToSmartObject, smartObjectToPsd } from '@/lib/psd-smart-object';
+import {
+  blendIfToPsd,
+  portableFillOpacityToPsd,
+  psdBlendIfToPortable,
+  psdFillOpacityToPortable,
+} from '@/lib/psd-compositing';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -10995,7 +11001,15 @@ export default function Home() {
           name: node.name || 'PSD layer',
           visible: !node.hidden,
           opacity: Math.round((node.opacity ?? 1) * 100),
+          fill: psdFillOpacityToPortable(node.fillOpacity),
           blend: blend in blendLabels ? blend : 'source-over',
+          clipping: node.clipping,
+          blendIf: psdBlendIfToPortable(node.blendingRanges),
+          groupIsolation: node.children
+            ? (node.blendMode ?? 'pass through') === 'pass through'
+              ? 'pass-through'
+              : 'isolated'
+            : undefined,
           x: 0,
           y: 0,
           hasMask: !!mask,
@@ -11095,10 +11109,7 @@ export default function Home() {
           (l.effects && !layerEffectsToPsd(l.effects)) ||
           (l.smartObject && !smartObjectToPsd(l.smartObject, doc.w, doc.h)) ||
           (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
-          l.clipping ||
-          l.blendIf ||
           l.blendSpace === 'linear' ||
-          l.groupIsolation === 'isolated' ||
           (l.knockout !== undefined && l.knockout !== 'none') ||
           l.blend in extraBlends ||
           !!l.vectorMask ||
@@ -11110,7 +11121,7 @@ export default function Home() {
       )
     ) {
       setPsdError(
-        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, pattern fills or effects, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
+        'Layered PSD export cannot preserve these extended blend modes, deep or shallow knockout, pattern fills, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
       );
       return;
     }
@@ -11128,6 +11139,43 @@ export default function Home() {
         string,
         NonNullable<ReturnType<typeof smartObjectToPsd>>['linkedFile']
       >();
+      const buildMask = (l: LayerMeta): PsdLayer['mask'] => {
+        const s = surfacesRef.current.get(l.id);
+        if (!l.hasMask || !s?.mask) return undefined;
+        const canvas = makeCanvas(doc.w, doc.h),
+          ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, doc.w, doc.h);
+        drawLayer(
+          ctx,
+          {
+            ...l,
+            opacity: 100,
+            fill: 100,
+            blend: 'source-over',
+            hasMask: false,
+            brightness: 100,
+            contrast: 100,
+            saturation: 100,
+            blur: 0,
+          },
+          { pixels: s.mask },
+          doc.w,
+          doc.h,
+        );
+        const mask: PsdLayer['mask'] = {
+          left: 0,
+          top: 0,
+          right: doc.w,
+          bottom: doc.h,
+          defaultColor: 0,
+          disabled: !l.maskEnabled,
+          imageData: ctx.getImageData(0, 0, doc.w, doc.h),
+        };
+        canvas.width = 1;
+        canvas.height = 1;
+        return mask;
+      };
       const build = (parentId?: string): PsdLayer[] =>
         layersRef.current
           .filter((l) => l.parentId === parentId)
@@ -11137,7 +11185,13 @@ export default function Home() {
                 name: l.name,
                 hidden: !l.visible,
                 opened: !l.collapsed,
-                blendMode: 'pass through',
+                opacity: l.opacity / 100,
+                fillOpacity: portableFillOpacityToPsd(l.fill),
+                clipping: l.clipping,
+                blendingRanges: blendIfToPsd(l.blendIf),
+                blendMode:
+                  l.groupIsolation === 'isolated' ? 'normal' : 'pass through',
+                mask: buildMask(l),
                 children: build(l.id),
               };
             const smartObject = l.smartObject
@@ -11164,41 +11218,7 @@ export default function Home() {
               doc.w,
               doc.h,
             );
-            let mask: PsdLayer['mask'];
-            if (l.hasMask && s.mask) {
-              const canvas = makeCanvas(doc.w, doc.h),
-                ctx = canvas.getContext('2d')!;
-              ctx.fillStyle = 'black';
-              ctx.fillRect(0, 0, doc.w, doc.h);
-              drawLayer(
-                ctx,
-                {
-                  ...l,
-                  opacity: 100,
-                  fill: 100,
-                  blend: 'source-over',
-                  hasMask: false,
-                  brightness: 100,
-                  contrast: 100,
-                  saturation: 100,
-                  blur: 0,
-                },
-                { pixels: s.mask },
-                doc.w,
-                doc.h,
-              );
-              mask = {
-                left: 0,
-                top: 0,
-                right: doc.w,
-                bottom: doc.h,
-                defaultColor: 0,
-                disabled: !l.maskEnabled,
-                imageData: ctx.getImageData(0, 0, doc.w, doc.h),
-              };
-              canvas.width = 1;
-              canvas.height = 1;
-            }
+            const mask = buildMask(l);
             const layerImage = pixels
               .getContext('2d')!
               .getImageData(0, 0, doc.w, doc.h);
@@ -11208,6 +11228,9 @@ export default function Home() {
               name: l.name,
               hidden: !l.visible,
               opacity: l.opacity / 100,
+              fillOpacity: portableFillOpacityToPsd(l.fill),
+              clipping: l.clipping,
+              blendingRanges: blendIfToPsd(l.blendIf),
               transparencyProtected: l.locked,
               blendMode: (l.blend === 'source-over'
                 ? 'normal'
