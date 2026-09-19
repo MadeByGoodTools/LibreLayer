@@ -484,11 +484,11 @@ import {
 } from '@/lib/working-depth';
 import {
   COLOR_PROFILES,
-  convertRgba,
   normalizeColorProfile,
   type ColorProfileId,
   type RenderingIntent,
 } from '@/lib/color-management';
+import { runColorProfileJob } from '@/lib/color-profile-job';
 const Mask = Focus;
 
 type Tool =
@@ -15215,7 +15215,7 @@ export default function Home() {
     }
   };
 
-  const applyDocumentColorProfile = (options: {
+  const applyDocumentColorProfile = async (options: {
     operation: ColorProfileOperation;
     target: ColorProfileId;
     intent: RenderingIntent;
@@ -15236,56 +15236,112 @@ export default function Home() {
       setStatus(`${targetName} assigned · pixel values were not changed`);
       return;
     }
+    const controller = new AbortController(),
+      jobId = crypto.randomUUID(),
+      surfaces = [...surfacesRef.current.values()];
+    activeJobAbort.current?.abort();
+    activeJobAbort.current = controller;
+    setActiveJob({
+      id: jobId,
+      label: `Convert to ${targetName}`,
+      progress: 0,
+    });
+    setColorProfileDialog(null);
+    setStatus(`Converting document to ${targetName} in a background worker…`);
     try {
-      const convertedSurfaces = [...surfacesRef.current.values()].map(
-        (surface) => {
-          const context = surface.pixels.getContext('2d', {
+      localStorage.setItem(
+        'librelayer-active-job',
+        JSON.stringify({
+          id: jobId,
+          label: `Convert to ${targetName}`,
+          started: Date.now(),
+        }),
+      );
+    } catch {
+      // Conversion remains cancelable if browser storage is unavailable.
+    }
+    try {
+      const convertedSurfaces: {
+        surface: LayerSurface;
+        precision?: WorkingSurface;
+        image: ImageData;
+        backend: 'worker' | 'cooperative-main-thread';
+      }[] = [];
+      for (
+        let surfaceIndex = 0;
+        surfaceIndex < surfaces.length;
+        surfaceIndex++
+      ) {
+        const surface = surfaces[surfaceIndex],
+          context = surface.pixels.getContext('2d', {
             willReadFrequently: true,
-          })!;
-          if (surface.precision) {
-            syncPrecisionSurface(surface);
-            const converted = convertRgba(
+          })!,
+          updateProgress = (progress: number) =>
+            setActiveJob((current) =>
+              current?.id === jobId
+                ? {
+                    ...current,
+                    progress: Math.round(
+                      ((surfaceIndex + progress / 100) / surfaces.length) * 100,
+                    ),
+                  }
+                : current,
+            );
+        if (surface.precision) {
+          syncPrecisionSurface(surface);
+          const result = await runColorProfileJob(
               workingSurfaceToFloat32(surface.precision),
               source,
               options.target,
               options.intent,
               options.blackPointCompensation,
-            ) as Float32Array;
-            const precision = workingSurfaceFromFloat32(
-                converted,
-                surface.precision.width,
-                surface.precision.height,
-                surface.precision.depth,
-              ),
-              image = new ImageData(
-                workingSurfaceToRgba8(precision),
-                surface.pixels.width,
-                surface.pixels.height,
-              );
-            return { surface, precision, image };
-          }
-          const sourceImage = context.getImageData(
-              0,
-              0,
-              surface.pixels.width,
-              surface.pixels.height,
+              { signal: controller.signal, onProgress: updateProgress },
+            ),
+            precision = workingSurfaceFromFloat32(
+              result.pixels as Float32Array,
+              surface.precision.width,
+              surface.precision.height,
+              surface.precision.depth,
             ),
             image = new ImageData(
-              new Uint8ClampedArray(
-                convertRgba(
-                  sourceImage.data,
-                  source,
-                  options.target,
-                  options.intent,
-                  options.blackPointCompensation,
-                ),
-              ),
-              sourceImage.width,
-              sourceImage.height,
+              workingSurfaceToRgba8(precision),
+              surface.pixels.width,
+              surface.pixels.height,
             );
-          return { surface, image };
-        },
-      );
+          convertedSurfaces.push({
+            surface,
+            precision,
+            image,
+            backend: result.backend,
+          });
+          continue;
+        }
+        const sourceImage = context.getImageData(
+            0,
+            0,
+            surface.pixels.width,
+            surface.pixels.height,
+          ),
+          result = await runColorProfileJob(
+            sourceImage.data,
+            source,
+            options.target,
+            options.intent,
+            options.blackPointCompensation,
+            { signal: controller.signal, onProgress: updateProgress },
+          ),
+          image = new ImageData(
+            new Uint8ClampedArray(result.pixels),
+            sourceImage.width,
+            sourceImage.height,
+          );
+        convertedSurfaces.push({
+          surface,
+          image,
+          backend: result.backend,
+        });
+      }
+      if (controller.signal.aborted) throw new JobCancelledError();
       for (const converted of convertedSurfaces) {
         if (converted.precision)
           converted.surface.precision = converted.precision;
@@ -15297,15 +15353,22 @@ export default function Home() {
       snapshot(`Convert to ${targetName}`);
       render();
       setStatus(
-        `Document converted to ${targetName} · ${options.intent.replaceAll('-', ' ')}${options.blackPointCompensation ? ' · black-point compensation' : ''}`,
+        `Document converted to ${targetName} · ${options.intent.replaceAll('-', ' ')}${options.blackPointCompensation ? ' · black-point compensation' : ''} · ${convertedSurfaces.every((item) => item.backend === 'worker') ? 'background worker' : 'cooperative fallback'}`,
       );
     } catch (error) {
-      setPsdError(
-        error instanceof Error
-          ? error.message
-          : 'The document color conversion failed safely.',
+      setStatus(
+        error instanceof JobCancelledError
+          ? 'Color conversion cancelled; the document was not changed'
+          : error instanceof Error
+            ? error.message
+            : 'The document color conversion failed safely.',
       );
     } finally {
+      try {
+        localStorage.removeItem('librelayer-active-job');
+      } catch {}
+      if (activeJobAbort.current === controller) activeJobAbort.current = null;
+      setActiveJob((current) => (current?.id === jobId ? null : current));
       setColorProfileDialog(null);
     }
   };

@@ -4,6 +4,7 @@ import {
   COLOR_PROFILES,
   convertColor,
   convertRgba,
+  convertRgbaChunked,
   normalizeColorProfile,
   normalizeRenderingIntent,
 } from '../lib/color-management.ts';
@@ -63,4 +64,48 @@ void test('floating-point conversion retains extended range for high-depth docum
   assert.ok(output instanceof Float32Array);
   assert.equal(output[3], 0.75);
   assert.ok(output.every(Number.isFinite));
+});
+
+void test('chunked conversion matches the reference path and reports progress', async () => {
+  const source = new Uint8ClampedArray(20_000 * 4);
+  for (let index = 0; index < source.length; index++)
+    source[index] = (index * 47) % 256;
+  const progress: number[] = [],
+    expected = convertRgba(source, 'srgb', 'display-p3', 'perceptual', true),
+    output = await convertRgbaChunked(
+      source,
+      'srgb',
+      'display-p3',
+      'perceptual',
+      true,
+      {
+        chunkPixels: 4096,
+        onProgress: (value) => progress.push(value),
+      },
+    );
+  assert.deepEqual(output, expected);
+  assert.equal(progress.at(-1), 100);
+  assert.ok(progress.length > 1);
+  assert.ok(
+    progress.every((value, index) => !index || value >= progress[index - 1]),
+  );
+});
+
+void test('chunked conversion cancels without changing its source', async () => {
+  const source = new Float32Array([0.25, 0.5, 0.75, 1]),
+    untouched = new Float32Array(source),
+    controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    convertRgbaChunked(
+      source,
+      'srgb',
+      'prophoto-rgb',
+      'relative-colorimetric',
+      true,
+      { signal: controller.signal },
+    ),
+    /cancelled/,
+  );
+  assert.deepEqual(source, untouched);
 });

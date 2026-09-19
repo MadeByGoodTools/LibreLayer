@@ -6,6 +6,8 @@ Auto-align, Auto-Blend, focus stack, HDR merge, panorama stitching, and statisti
 
 HDR merge is the exception to the display-buffer result format: its worker returns a transferable scene-linear `Float32Array` without tone mapping or 8-bit conversion. The editor validates its dimensions and opens it transactionally as a new 32-bit float document. SDR tone mapping and HDR highlight presentation happen only in the display path.
 
+Full-document color-profile conversion also uses a dedicated worker. Each editable surface is copied and processed in bounded pixel chunks, so the status bar can report progress and **Cancel** can terminate the current worker. Converted surfaces stay outside the document until every layer completes; cancellation, a watchdog timeout, or a worker error therefore leaves the document profile and all pixels unchanged. Browsers that cannot construct the worker use the same chunked converter cooperatively on the main thread, yielding between chunks and preserving the same atomic commit rule.
+
 ## Transaction sequence
 
 1. LibreLayer validates the installed filter and active layer.

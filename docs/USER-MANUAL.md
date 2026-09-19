@@ -95,6 +95,8 @@ Use nondestructive adjustment layers whenever an edit may need revisiting. Avail
 
 Built-in and imported `.cube` LUTs preview live. Histograms, waveform, RGB parade, and vectorscope help evaluate tone and color. CMYK and grayscale proof modes are previews only; they do not convert the document profile.
 
+**Image → Assign Profile** changes how existing RGB values are interpreted without rewriting layer pixels. **Image → Convert to Profile** translates every editable layer between sRGB, Display P3, Adobe RGB (1998), and ProPhoto RGB with Relative Colorimetric, Perceptual, Saturation, or Absolute Colorimetric intent and optional black-point compensation. Conversion preserves masks and alpha, retains 16/32-bit backing data, runs in a cancelable worker with status-bar progress, and commits one atomic Undo/Redo state only after every layer succeeds. The selected profile survives tabs, history, Smart Objects, recovery, and layered project reopening. Arbitrary external ICC profile import and non-RGB document modes remain outside this built-in matrix-profile workflow.
+
 For 16-bit half-float and 32-bit float documents, **View → HDR display preview** can use an extended-range Float16 canvas on compatible HDR browsers and displays. **Automatic** enables extended highlights only when the browser reports HDR support, **SDR tone-mapped preview** provides a consistent bounded fallback, and **Highlight clipping map** marks scene values above display white. The chosen preview mode is saved with device-local preferences. The document's scene-linear samples are not changed by any preview mode.
 
 ## Camera Raw

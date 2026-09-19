@@ -261,3 +261,49 @@ export function convertRgba(
   }
   return output;
 }
+
+export async function convertRgbaChunked(
+  pixels: Uint8ClampedArray | Float32Array,
+  source: ColorProfileId,
+  target: ColorProfileId,
+  intent: RenderingIntent = 'relative-colorimetric',
+  blackPointCompensation = true,
+  options: {
+    chunkPixels?: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: number) => void;
+  } = {},
+) {
+  const output =
+      pixels instanceof Float32Array
+        ? new Float32Array(pixels)
+        : new Uint8ClampedArray(pixels),
+    divisor = pixels instanceof Float32Array ? 1 : 255,
+    chunkChannels =
+      Math.max(1024, Math.min(1_048_576, options.chunkPixels ?? 65_536)) * 4;
+  for (let start = 0; start < pixels.length; start += chunkChannels) {
+    if (options.signal?.aborted)
+      throw new DOMException('The operation was cancelled.', 'AbortError');
+    const end = Math.min(pixels.length, start + chunkChannels);
+    for (let index = start; index < end; index += 4) {
+      const converted = convertColor(
+        [
+          pixels[index] / divisor,
+          pixels[index + 1] / divisor,
+          pixels[index + 2] / divisor,
+        ],
+        source,
+        target,
+        intent,
+        blackPointCompensation,
+      );
+      output[index] = converted[0] * divisor;
+      output[index + 1] = converted[1] * divisor;
+      output[index + 2] = converted[2] * divisor;
+    }
+    options.onProgress?.(Math.round((end / pixels.length) * 100));
+    if (end < pixels.length)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  return output;
+}
