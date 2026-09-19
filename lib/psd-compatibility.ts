@@ -6,6 +6,7 @@ export type PsdCompatibilityReport = {
   dimensions: string;
   sourceDepth: number;
   workingDepth: number;
+  colorMode: PsdImport['colorMode'];
   pixelLayers: number;
   groups: number;
   masks: number;
@@ -33,15 +34,12 @@ export function createPsdCompatibilityReport(
     fileName,
     dimensions: `${data.width} × ${data.height}`,
     sourceDepth: data.bitDepth,
-    workingDepth: 8,
+    workingDepth: data.bitDepth === 1 ? 8 : data.bitDepth,
+    colorMode: data.colorMode,
     pixelLayers,
     groups,
     masks,
     warnings: [...data.warnings],
-    status: data.warnings.length
-      ? 'flattened'
-      : data.bitDepth > 8
-        ? 'converted'
-        : 'preserved',
+    status: data.warnings.length ? 'flattened' : 'preserved',
   };
 }

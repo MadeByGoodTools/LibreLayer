@@ -2,7 +2,7 @@
 
 ## Supported scope
 
-- PSD and PSB in 8-, 16- or 32-bit RGB. Supported high-depth layers are preserved structurally and tone-mapped into the current 8-bit browser working canvas; Photoshop ICC conversion is not implemented.
+- PSD and PSB import for bitmap, grayscale, indexed color, and 8-, 16- or 32-bit RGB. Supported 16/32-bit raster layers retain their original integer/float samples in LibreLayer's high-depth working surfaces while an 8-bit display proxy keeps browser rendering responsive. Photoshop ICC conversion and native high-depth PSD writing are not implemented yet.
 - Raster layer names, order, visibility, whole-percent opacity and fill opacity, supported Canvas blend modes, masks, native clipping stacks, pass-through or isolated groups, translucent/masked groups, and simultaneous editable gray, red, green, and blue Blend If ranges per layer.
 - Document resolution, ruler guides, grid spacing, and visibility/position Layer Comps remain editable. Layer Comps that capture appearance changes are reported instead of being imported or exported with missing state.
 - Supported document metadata remains attached through PSD import/export, native project saves, browser recovery, and document switching: XMP packets, pixel aspect ratio, global effect angle/altitude, print scale, and the untagged-profile flag. Malformed or excessive values trigger the saved-composite path instead of being silently normalized.
@@ -20,7 +20,7 @@
 
 ## Limits
 
-256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK, Lab, indexed color, IPTC/EXIF resource blocks, print-profile payloads, and full Photoshop metadata fidelity are not supported.
+256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK, Lab, IPTC/EXIF resource blocks, print-profile payloads, and full Photoshop metadata fidelity are not supported.
 
 ## Verified locally in the browser
 

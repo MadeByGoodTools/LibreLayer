@@ -1,12 +1,13 @@
-import type { ImageResources, Layer, LinkedFile, Psd } from 'ag-psd';
+import type { ImageResources, Layer, LinkedFile, PixelData, Psd } from 'ag-psd';
 import PsdWorker from './psd-worker?worker';
 import { pixelTransfers } from './pixel-transfers';
 export type PsdImport = {
   width: number;
   height: number;
-  bitDepth: number;
+  bitDepth: 1 | 8 | 16 | 32;
+  colorMode: 'bitmap' | 'grayscale' | 'indexed' | 'rgb';
   warnings: string[];
-  children: Layer[];
+  children: PsdLayerImport[];
   linkedFiles?: LinkedFile[];
   imageResources?: Pick<
     ImageResources,
@@ -20,6 +21,10 @@ export type PsdImport = {
     | 'printScale'
     | 'iccUntaggedProfile'
   >;
+};
+export type PsdLayerImport = Layer & {
+  precisionData?: PixelData;
+  children?: PsdLayerImport[];
 };
 export function processPsd<T>(
   request:

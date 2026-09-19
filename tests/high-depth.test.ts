@@ -24,12 +24,12 @@ import {
 import { BUILT_IN_LUTS } from '../lib/builtin-luts.ts';
 import { readSupportedPsdHeader } from '../lib/psd-header.ts';
 
-function psdHeader(bitDepth: number, colorMode = 3) {
+function psdHeader(bitDepth: number, colorMode = 3, channels = 3) {
   const bytes = new ArrayBuffer(26),
     view = new DataView(bytes);
   view.setUint32(0, 0x38425053);
   view.setUint16(4, 1);
-  view.setUint16(12, 3);
+  view.setUint16(12, channels);
   view.setUint32(14, 2);
   view.setUint32(18, 3);
   view.setUint16(22, bitDepth);
@@ -40,7 +40,20 @@ function psdHeader(bitDepth: number, colorMode = 3) {
 void test('PSD header validation accepts supported high-depth RGB sources', () => {
   assert.equal(readSupportedPsdHeader(psdHeader(16)).bitDepth, 16);
   assert.equal(readSupportedPsdHeader(psdHeader(32)).bitDepth, 32);
-  assert.throws(() => readSupportedPsdHeader(psdHeader(16, 4)), /RGB/);
+  assert.equal(readSupportedPsdHeader(psdHeader(1, 0, 1)).colorMode, 'bitmap');
+  assert.equal(
+    readSupportedPsdHeader(psdHeader(16, 1, 1)).colorMode,
+    'grayscale',
+  );
+  assert.equal(readSupportedPsdHeader(psdHeader(8, 2, 1)).colorMode, 'indexed');
+  assert.throws(
+    () => readSupportedPsdHeader(psdHeader(16, 4, 4)),
+    /color mode/,
+  );
+  assert.throws(
+    () => readSupportedPsdHeader(psdHeader(16, 2, 1)),
+    /Unsupported/,
+  );
 });
 
 void test('16-bit conversion retains values between adjacent 8-bit steps', () => {

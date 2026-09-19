@@ -29,6 +29,7 @@ import {
   supportedPsdLayerComps,
 } from './psd-document-structure';
 import { supportedPsdShapeLayer } from './psd-shape';
+import type { PsdLayerImport } from './psd-transfer';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -155,10 +156,7 @@ function decode(buffer: ArrayBuffer) {
   };
   psd.children?.forEach((layer) => inspect(layer));
   if (
-    !supportedPsdLayerComps(
-      psd.imageResources?.layerComps,
-      psd.children ?? [],
-    )
+    !supportedPsdLayerComps(psd.imageResources?.layerComps, psd.children ?? [])
   )
     warnings.add('Unsupported appearance-based or malformed layer comps');
   if (!supportedPsdDocumentView(psd.imageResources))
@@ -170,7 +168,8 @@ function decode(buffer: ArrayBuffer) {
       ? new ImageData(precisionToDisplayRgba(data), data.width, data.height)
       : undefined;
   if (warnings.size || !psd.children?.length) {
-    const imageData = displayData(getCompositeImageData(psd));
+    const compositePixels = getCompositeImageData(psd),
+      imageData = displayData(compositePixels);
     if (!imageData)
       throw Error(
         'This PSD needs a saved composite preview. Resave a copy with Maximize Compatibility enabled.',
@@ -179,58 +178,69 @@ function decode(buffer: ArrayBuffer) {
       width: psd.width,
       height: psd.height,
       bitDepth,
+      colorMode: header.colorMode,
       warnings: [...warnings],
-      children: [{ name: 'PSD composite', imageData }],
+      children: [
+        {
+          name: 'PSD composite',
+          imageData,
+          precisionData:
+            bitDepth === 16 || bitDepth === 32 ? compositePixels : undefined,
+        },
+      ],
     };
   }
-  const convert = (layer: Layer): Layer => ({
-    name: layer.name,
-    hidden: layer.hidden,
-    opacity: layer.opacity,
-    fillOpacity: layer.fillOpacity,
-    blendMode: layer.blendMode,
-    clipping: layer.clipping,
-    blendingRanges: layer.blendingRanges,
-    left: layer.left,
-    top: layer.top,
-    opened: layer.opened,
-    id: layer.id,
-    comps: layer.comps,
-    transparencyProtected: layer.transparencyProtected,
-    text: layer.text,
-    vectorFill: layer.vectorFill,
-    vectorMask: layer.vectorMask,
-    vectorStroke: layer.vectorStroke,
-    vectorOrigination: layer.vectorOrigination,
-    adjustment: layer.adjustment,
-    effects: layer.effects,
-    placedLayer: layer.placedLayer,
-    children: layer.children?.map(convert),
-    imageData: layer.children
-      ? undefined
-      : displayData(getLayerImageData(layer)),
-    mask: layer.mask
-      ? {
-          left: layer.mask.left,
-          top: layer.mask.top,
-          defaultColor: layer.mask.defaultColor,
-          disabled: layer.mask.disabled,
-          positionRelativeToLayer: layer.mask.positionRelativeToLayer,
-          imageData: displayData(getLayerMaskImageData(layer)),
-        }
-      : undefined,
-  });
+  const convert = (layer: Layer): PsdLayerImport => {
+    const layerPixels = layer.children ? undefined : getLayerImageData(layer);
+    return {
+      name: layer.name,
+      hidden: layer.hidden,
+      opacity: layer.opacity,
+      fillOpacity: layer.fillOpacity,
+      blendMode: layer.blendMode,
+      clipping: layer.clipping,
+      blendingRanges: layer.blendingRanges,
+      left: layer.left,
+      top: layer.top,
+      opened: layer.opened,
+      id: layer.id,
+      comps: layer.comps,
+      transparencyProtected: layer.transparencyProtected,
+      text: layer.text,
+      vectorFill: layer.vectorFill,
+      vectorMask: layer.vectorMask,
+      vectorStroke: layer.vectorStroke,
+      vectorOrigination: layer.vectorOrigination,
+      adjustment: layer.adjustment,
+      effects: layer.effects,
+      placedLayer: layer.placedLayer,
+      children: layer.children?.map(convert),
+      imageData: displayData(layerPixels),
+      precisionData:
+        bitDepth === 16 || bitDepth === 32 ? layerPixels : undefined,
+      mask: layer.mask
+        ? {
+            left: layer.mask.left,
+            top: layer.mask.top,
+            defaultColor: layer.mask.defaultColor,
+            disabled: layer.mask.disabled,
+            positionRelativeToLayer: layer.mask.positionRelativeToLayer,
+            imageData: displayData(getLayerMaskImageData(layer)),
+          }
+        : undefined,
+    };
+  };
   return {
     width: psd.width,
     height: psd.height,
     bitDepth,
+    colorMode: header.colorMode,
     warnings: [],
     children: psd.children.map(convert),
     linkedFiles: psd.linkedFiles,
     imageResources: psd.imageResources
       ? {
-          gridAndGuidesInformation:
-            psd.imageResources.gridAndGuidesInformation,
+          gridAndGuidesInformation: psd.imageResources.gridAndGuidesInformation,
           resolutionInfo: psd.imageResources.resolutionInfo,
           layerComps: psd.imageResources.layerComps,
           xmpMetadata: psd.imageResources.xmpMetadata,

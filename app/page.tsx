@@ -176,7 +176,11 @@ import {
   supportedPortableShape,
   type PortableShapeLayer,
 } from '@/lib/psd-shape';
-import { processPsd, type PsdImport } from '@/lib/psd-transfer';
+import {
+  processPsd,
+  type PsdImport,
+  type PsdLayerImport,
+} from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
   EncryptedProjectPasswordRequired,
@@ -11137,7 +11141,7 @@ export default function Home() {
   const importPsdResult = (name: string, data: PsdImport) => {
     setPsdReport(createPsdCompatibilityReport(name, data));
     let units = 0;
-    const inspectUnits = (nodes: PsdLayer[]) =>
+    const inspectUnits = (nodes: PsdLayerImport[]) =>
       nodes.forEach((n) => {
         units += n.mask ? 2 : 1;
         if (n.children) inspectUnits(n.children);
@@ -11162,7 +11166,36 @@ export default function Home() {
         );
       return canvas;
     };
-    const walk = (nodes: PsdLayer[], parentId?: string) => {
+    const importedDepth: WorkingDepth =
+        data.bitDepth === 16 ? '16u' : data.bitDepth === 32 ? '32f' : '8u',
+      precisionSurface = (
+        pixels: PsdLayerImport['precisionData'],
+        left: number,
+        top: number,
+      ) => {
+        if (!pixels || importedDepth === '8u') return undefined;
+        if (importedDepth === '16u' && !(pixels.data instanceof Uint16Array))
+          throw Error('The PSD 16-bit layer pixels could not be retained.');
+        if (importedDepth === '32f' && !(pixels.data instanceof Float32Array))
+          throw Error('The PSD 32-bit layer pixels could not be retained.');
+        const source: WorkingSurface =
+          importedDepth === '16u'
+            ? {
+                version: 1,
+                depth: '16u',
+                width: pixels.width,
+                height: pixels.height,
+                data: new Uint16Array(pixels.data as Uint16Array),
+              }
+            : workingSurfaceFromFloat32(
+                new Float32Array(pixels.data as Float32Array),
+                pixels.width,
+                pixels.height,
+                '32f',
+              );
+        return placeWorkingSurface(source, data.width, data.height, left, top);
+      };
+    const walk = (nodes: PsdLayerImport[], parentId?: string) => {
       for (const node of nodes) {
         const id = crypto.randomUUID(),
           pixels = makeCanvas(data.width, data.height);
@@ -11252,7 +11285,15 @@ export default function Home() {
           visible: !node.hidden,
           comps: node.comps,
         });
-        nextSurfaces.set(id, { pixels, mask });
+        nextSurfaces.set(id, {
+          pixels,
+          mask,
+          precision: precisionSurface(
+            node.precisionData,
+            node.left ?? 0,
+            node.top ?? 0,
+          ),
+        });
         if (node.children) walk(node.children, id);
       }
     };
@@ -11304,13 +11345,15 @@ export default function Home() {
         view: importedView,
         psdMetadata: psdDocumentMetadata(data.imageResources),
       },
+      importedDepth,
+      data.bitDepth === 32,
     );
     setStatus(
       data.warnings.length
         ? `Opened saved ${data.bitDepth}-bit PSD composite as one 8-bit working layer`
         : data.bitDepth > 8
-          ? `${data.bitDepth}-bit PSD opened — supported layers preserved as editable 8-bit working layers`
-          : 'PSD opened — raster layers, opacity, blend modes and masks preserved',
+          ? `${data.bitDepth}-bit ${data.colorMode.toUpperCase()} PSD opened with high-depth editable layer pixels`
+          : `${data.colorMode[0].toUpperCase()}${data.colorMode.slice(1)} PSD opened — layers and editable structure preserved`,
     );
   };
   const openPsd = async (file: File) => {
