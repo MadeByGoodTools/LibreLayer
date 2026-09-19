@@ -3050,6 +3050,9 @@ export default function Home() {
     const renderer = new GpuBrushRenderer();
     brushRenderer.current = renderer;
     setBrushRendererBackend(renderer.backend);
+    void renderer.ready.then((backend) => {
+      if (brushRenderer.current === renderer) setBrushRendererBackend(backend);
+    });
     return () => {
       renderer.dispose();
       if (brushRenderer.current === renderer) brushRenderer.current = null;
@@ -16873,9 +16876,11 @@ export default function Home() {
                       className="brush-renderer-status"
                       aria-label={`Brush renderer ${brushRendererBackend}`}
                     >
-                      {brushRendererBackend === 'webgl2'
-                        ? 'WebGL2 pooled texture renderer active'
-                        : 'Canvas renderer fallback active'}
+                      {brushRendererBackend === 'webgpu'
+                        ? 'WebGPU brush renderer active'
+                        : brushRendererBackend === 'webgl2'
+                          ? 'WebGL2 pooled texture renderer active'
+                          : 'Canvas renderer fallback active'}
                     </p>
                     <section
                       className="brush-library"

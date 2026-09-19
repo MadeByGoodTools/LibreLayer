@@ -1,6 +1,6 @@
 import { BoundedResourcePool } from './render-target-pool.ts';
 
-export type BrushRendererBackend = 'webgl2' | 'canvas2d';
+export type BrushRendererBackend = 'webgpu' | 'webgl2' | 'canvas2d';
 
 export type BrushDab = {
   x: number;
@@ -29,6 +29,101 @@ type WebGlRenderTarget = {
   width: number;
   height: number;
 };
+
+type WebGpuBuffer = { destroy(): void };
+type WebGpuRenderPipeline = { getBindGroupLayout(index: number): unknown };
+type WebGpuDevice = {
+  createShaderModule(options: { code: string }): unknown;
+  createRenderPipeline(options: {
+    layout: 'auto';
+    vertex: {
+      module: unknown;
+      entryPoint: string;
+      buffers: Array<{
+        arrayStride: number;
+        stepMode?: 'vertex' | 'instance';
+        attributes: Array<{
+          shaderLocation: number;
+          offset: number;
+          format: 'float32' | 'float32x2';
+        }>;
+      }>;
+    };
+    fragment: {
+      module: unknown;
+      entryPoint: string;
+      targets: Array<{
+        format: string;
+        blend: {
+          color: {
+            operation: 'add';
+            srcFactor: 'one';
+            dstFactor: 'one-minus-src-alpha';
+          };
+          alpha: {
+            operation: 'add';
+            srcFactor: 'one';
+            dstFactor: 'one-minus-src-alpha';
+          };
+        };
+      }>;
+    };
+    primitive: { topology: 'triangle-list' };
+  }): WebGpuRenderPipeline;
+  createBuffer(options: { size: number; usage: number }): WebGpuBuffer;
+  createBindGroup(options: {
+    layout: unknown;
+    entries: Array<{ binding: number; resource: { buffer: WebGpuBuffer } }>;
+  }): unknown;
+  createCommandEncoder(): {
+    beginRenderPass(options: {
+      colorAttachments: Array<{
+        view: unknown;
+        clearValue: { r: number; g: number; b: number; a: number };
+        loadOp: 'clear';
+        storeOp: 'store';
+      }>;
+    }): {
+      setPipeline(pipeline: WebGpuRenderPipeline): void;
+      setVertexBuffer(slot: number, buffer: WebGpuBuffer): void;
+      setBindGroup(index: number, group: unknown): void;
+      draw(vertices: number, instances: number): void;
+      end(): void;
+    };
+    finish(): unknown;
+  };
+  queue: {
+    writeBuffer(
+      buffer: WebGpuBuffer,
+      offset: number,
+      data: ArrayBufferView,
+    ): void;
+    submit(commands: unknown[]): void;
+    onSubmittedWorkDone(): Promise<void>;
+  };
+  lost: Promise<unknown>;
+};
+type WebGpuCanvasContext = {
+  configure(options: {
+    device: WebGpuDevice;
+    format: string;
+    alphaMode: 'premultiplied';
+  }): void;
+  unconfigure(): void;
+  getCurrentTexture(): { createView(): unknown };
+};
+type WebGpuNavigator = Navigator & {
+  gpu?: {
+    requestAdapter(): Promise<{
+      requestDevice(): Promise<WebGpuDevice>;
+    } | null>;
+    getPreferredCanvasFormat(): string;
+  };
+};
+
+const WEBGPU_VERTEX_BUFFER = 0x0020,
+  WEBGPU_UNIFORM_BUFFER = 0x0040,
+  WEBGPU_COPY_DST = 0x0008;
 
 const gpuTargetDimension = (value: number) =>
   Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
@@ -84,6 +179,70 @@ void main() {
   float alpha = coverage * v_alpha;
   out_color = vec4(u_color * alpha, alpha);
 }`;
+
+const WEBGPU_SHADER = `
+struct Uniforms {
+  resolution: vec2<f32>,
+  origin: vec2<f32>,
+  color: vec4<f32>,
+  hardness: f32,
+}
+
+struct VertexInput {
+  @location(0) corner: vec2<f32>,
+  @location(1) center: vec2<f32>,
+  @location(2) radius: vec2<f32>,
+  @location(3) angle: f32,
+  @location(4) alpha: f32,
+}
+
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) local: vec2<f32>,
+  @location(1) alpha: f32,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+@vertex
+fn vertexMain(input: VertexInput) -> VertexOutput {
+  let c = cos(input.angle);
+  let s = sin(input.angle);
+  let scaled = input.corner * input.radius;
+  let rotated = vec2<f32>(
+    scaled.x * c - scaled.y * s,
+    scaled.x * s + scaled.y * c
+  );
+  let pixel = input.center - uniforms.origin + rotated;
+  let clip = vec2<f32>(
+    pixel.x / uniforms.resolution.x * 2.0 - 1.0,
+    1.0 - pixel.y / uniforms.resolution.y * 2.0
+  );
+  var output: VertexOutput;
+  output.position = vec4<f32>(clip, 0.0, 1.0);
+  output.local = input.corner;
+  output.alpha = input.alpha;
+  return output;
+}
+
+@fragment
+fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
+  let distanceFromCenter = length(input.local);
+  if (distanceFromCenter > 1.0) {
+    discard;
+  }
+  var coverage = 1.0;
+  if (uniforms.hardness < 0.999) {
+    coverage = 1.0 - smoothstep(
+      uniforms.hardness,
+      1.0,
+      distanceFromCenter
+    );
+  }
+  let alpha = coverage * input.alpha;
+  return vec4<f32>(uniforms.color.rgb * alpha, alpha);
+}
+`;
 
 const finiteDab = (dab: BrushDab) =>
   Number.isFinite(dab.x) &&
@@ -183,14 +342,23 @@ const createProgram = (gl: WebGL2RenderingContext) => {
 
 export class GpuBrushRenderer {
   canvas: HTMLCanvasElement;
-  readonly backend: BrushRendererBackend;
-  lastRenderPath: 'webgl2-pooled' | 'canvas2d-texture-fallback' | 'canvas2d' =
-    'canvas2d';
+  backend: BrushRendererBackend;
+  readonly ready: Promise<BrushRendererBackend>;
+  lastRenderPath:
+    | 'webgpu-canvas'
+    | 'webgl2-pooled'
+    | 'canvas2d-texture-fallback'
+    | 'canvas2d' = 'canvas2d';
   private gl: WebGL2RenderingContext | null = null;
   private program: WebGLProgram | null = null;
   private cornerBuffer: WebGLBuffer | null = null;
   private instanceBuffer: WebGLBuffer | null = null;
   private gpuTargetPool: BoundedResourcePool<WebGlRenderTarget> | null = null;
+  private webGpuCanvas: HTMLCanvasElement | null = null;
+  private webGpuContext: WebGpuCanvasContext | null = null;
+  private webGpuDevice: WebGpuDevice | null = null;
+  private webGpuPipeline: WebGpuRenderPipeline | null = null;
+  private disposed = false;
   private readonly tilePool = new BoundedResourcePool<HTMLCanvasElement>(
     64 * 1024 * 1024,
     (canvas) => {
@@ -249,6 +417,122 @@ export class GpuBrushRenderer {
       this.gpuTargetPool = null;
       this.backend = 'canvas2d';
     }
+    this.ready = this.initializeWebGpu();
+  }
+
+  private async initializeWebGpu(): Promise<BrushRendererBackend> {
+    try {
+      const gpu = (navigator as WebGpuNavigator).gpu,
+        adapter = await gpu?.requestAdapter();
+      if (!gpu || !adapter || this.disposed) return this.backend;
+      const device = (await adapter.requestDevice()) as unknown as WebGpuDevice,
+        canvas = document.createElement('canvas'),
+        context = canvas.getContext('webgpu') as WebGpuCanvasContext | null;
+      if (!context || this.disposed) return this.backend;
+      const format = gpu.getPreferredCanvasFormat(),
+        shaderModule = device.createShaderModule({ code: WEBGPU_SHADER }),
+        pipeline = device.createRenderPipeline({
+          layout: 'auto',
+          vertex: {
+            module: shaderModule,
+            entryPoint: 'vertexMain',
+            buffers: [
+              {
+                arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
+                attributes: [
+                  { shaderLocation: 0, offset: 0, format: 'float32x2' },
+                ],
+              },
+              {
+                arrayStride: 6 * Float32Array.BYTES_PER_ELEMENT,
+                stepMode: 'instance',
+                attributes: [
+                  { shaderLocation: 1, offset: 0, format: 'float32x2' },
+                  {
+                    shaderLocation: 2,
+                    offset: 2 * Float32Array.BYTES_PER_ELEMENT,
+                    format: 'float32x2',
+                  },
+                  {
+                    shaderLocation: 3,
+                    offset: 4 * Float32Array.BYTES_PER_ELEMENT,
+                    format: 'float32',
+                  },
+                  {
+                    shaderLocation: 4,
+                    offset: 5 * Float32Array.BYTES_PER_ELEMENT,
+                    format: 'float32',
+                  },
+                ],
+              },
+            ],
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: 'fragmentMain',
+            targets: [
+              {
+                format,
+                blend: {
+                  color: {
+                    operation: 'add',
+                    srcFactor: 'one',
+                    dstFactor: 'one-minus-src-alpha',
+                  },
+                  alpha: {
+                    operation: 'add',
+                    srcFactor: 'one',
+                    dstFactor: 'one-minus-src-alpha',
+                  },
+                },
+              },
+            ],
+          },
+          primitive: { topology: 'triangle-list' },
+        });
+      context.configure({ device, format, alphaMode: 'premultiplied' });
+      this.webGpuCanvas = canvas;
+      this.webGpuContext = context;
+      this.webGpuDevice = device;
+      this.webGpuPipeline = pipeline;
+      const bounds = { x: 0, y: 0, width: 16, height: 16 },
+        sample = {
+          x: 8,
+          y: 8,
+          size: 8,
+          alpha: 1,
+          angle: 0,
+          roundness: 1,
+        };
+      this.renderWebGpu([sample], bounds, '#ffffff', 1);
+      await device.queue.onSubmittedWorkDone();
+      const copy = document.createElement('canvas');
+      copy.width = copy.height = 16;
+      copy.getContext('2d')!.drawImage(canvas, 0, 0);
+      const alpha = copy
+        .getContext('2d', { willReadFrequently: true })!
+        .getImageData(8, 8, 1, 1).data[3];
+      copy.width = copy.height = 1;
+      if (alpha < 240) throw new Error('WebGPU brush self-test failed.');
+      if (this.disposed) return this.backend;
+      this.backend = 'webgpu';
+      void device.lost.then(() => this.disableWebGpu());
+    } catch {
+      this.disableWebGpu();
+    }
+    return this.backend;
+  }
+
+  private disableWebGpu() {
+    if (this.backend === 'webgpu')
+      this.backend = this.gl ? 'webgl2' : 'canvas2d';
+    this.webGpuContext?.unconfigure();
+    if (this.webGpuCanvas)
+      this.webGpuCanvas.width = this.webGpuCanvas.height = 1;
+    this.webGpuCanvas = null;
+    this.webGpuContext = null;
+    this.webGpuDevice = null;
+    this.webGpuPipeline = null;
   }
 
   private resize(width: number, height: number) {
@@ -398,6 +682,98 @@ export class GpuBrushRenderer {
     }
   }
 
+  private renderWebGpu(
+    dabs: BrushDab[],
+    bounds: BrushTileBounds,
+    color: string,
+    hardness: number,
+  ) {
+    const device = this.webGpuDevice!,
+      context = this.webGpuContext!,
+      pipeline = this.webGpuPipeline!,
+      canvas = this.webGpuCanvas!,
+      corners = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+      instances = new Float32Array(dabs.length * 6);
+    for (let index = 0; index < dabs.length; index++) {
+      const dab = dabs[index],
+        at = index * 6,
+        radius = dab.size / 2;
+      instances.set(
+        [
+          dab.x,
+          dab.y,
+          radius,
+          radius * Math.max(0.05, Math.min(1, dab.roundness)),
+          dab.angle,
+          Math.max(0, Math.min(1, dab.alpha)),
+        ],
+        at,
+      );
+    }
+    const [red, green, blue] = parseHex(color),
+      uniforms = new Float32Array([
+        bounds.width,
+        bounds.height,
+        bounds.x,
+        bounds.y,
+        red,
+        green,
+        blue,
+        1,
+        Math.max(0, Math.min(1, hardness)),
+        0,
+        0,
+        0,
+      ]),
+      cornerBuffer = device.createBuffer({
+        size: corners.byteLength,
+        usage: WEBGPU_VERTEX_BUFFER | WEBGPU_COPY_DST,
+      }),
+      instanceBuffer = device.createBuffer({
+        size: instances.byteLength,
+        usage: WEBGPU_VERTEX_BUFFER | WEBGPU_COPY_DST,
+      }),
+      uniformBuffer = device.createBuffer({
+        size: uniforms.byteLength,
+        usage: WEBGPU_UNIFORM_BUFFER | WEBGPU_COPY_DST,
+      });
+    if (canvas.width !== bounds.width) canvas.width = bounds.width;
+    if (canvas.height !== bounds.height) canvas.height = bounds.height;
+    device.queue.writeBuffer(cornerBuffer, 0, corners);
+    device.queue.writeBuffer(instanceBuffer, 0, instances);
+    device.queue.writeBuffer(uniformBuffer, 0, uniforms);
+    const group = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+      }),
+      encoder = device.createCommandEncoder(),
+      pass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: context.getCurrentTexture().createView(),
+            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            loadOp: 'clear',
+            storeOp: 'store',
+          },
+        ],
+      });
+    pass.setPipeline(pipeline);
+    pass.setVertexBuffer(0, cornerBuffer);
+    pass.setVertexBuffer(1, instanceBuffer);
+    pass.setBindGroup(0, group);
+    pass.draw(6, dabs.length);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    void device.queue
+      .onSubmittedWorkDone()
+      .catch(() => this.disableWebGpu())
+      .finally(() => {
+        cornerBuffer.destroy();
+        instanceBuffer.destroy();
+        uniformBuffer.destroy();
+      });
+  }
+
   private renderWebGl(
     dabs: BrushDab[],
     bounds: BrushTileBounds,
@@ -488,10 +864,41 @@ export class GpuBrushRenderer {
         );
       copy.width = bounds.width;
       copy.height = bounds.height;
-      let gpuTarget: WebGlRenderTarget | null = null;
-      if (this.backend === 'webgl2') {
+      let gpuTarget: WebGlRenderTarget | null = null,
+        rendered = false;
+      if (this.backend === 'webgpu' && this.webGpuCanvas && this.webGpuDevice) {
         try {
-          gpuTarget = this.gpuTargetPool!.acquire(poolKey, bytes, () =>
+          this.renderWebGpu(
+            group,
+            bounds,
+            options.color,
+            Math.max(0, Math.min(1, options.hardness)),
+          );
+          const copyContext = copy.getContext('2d', {
+            willReadFrequently: true,
+          })!;
+          copyContext.clearRect(0, 0, bounds.width, bounds.height);
+          copyContext.drawImage(this.webGpuCanvas, 0, 0);
+          const sample = group[0],
+            sampleX = Math.max(
+              0,
+              Math.min(bounds.width - 1, Math.round(sample.x - bounds.x)),
+            ),
+            sampleY = Math.max(
+              0,
+              Math.min(bounds.height - 1, Math.round(sample.y - bounds.y)),
+            ),
+            alpha = copyContext.getImageData(sampleX, sampleY, 1, 1).data[3];
+          if (!alpha) throw new Error('WebGPU brush tile validation failed.');
+          this.lastRenderPath = 'webgpu-canvas';
+          rendered = true;
+        } catch {
+          this.disableWebGpu();
+        }
+      }
+      if (!rendered && this.gl && this.gpuTargetPool) {
+        try {
+          gpuTarget = this.gpuTargetPool.acquire(poolKey, bytes, () =>
             this.createGpuTarget(bounds.width, bounds.height),
           );
           this.renderWebGl(
@@ -516,7 +923,9 @@ export class GpuBrushRenderer {
           );
           this.lastRenderPath = 'canvas2d-texture-fallback';
         }
-      } else {
+        rendered = true;
+      }
+      if (!rendered) {
         this.resize(bounds.width, bounds.height);
         this.renderCanvas2d(
           group,
@@ -543,6 +952,8 @@ export class GpuBrushRenderer {
   }
 
   dispose() {
+    this.disposed = true;
+    this.disableWebGpu();
     this.tilePool.clear();
     this.gpuTargetPool?.clear();
     if (this.gl) {

@@ -145,8 +145,9 @@ This is the release ledger for closing the remaining gap with a professional des
 ## 11. Performance and large documents
 
 - [x] Bounded dimensions, tiled adjustment passes, worker-based PSD processing, autosave, and storage reporting.
-- [ ] WebGPU renderer with WebGL2/CPU fallback.
+- [x] WebGPU renderer with WebGL2/CPU fallback.
   - [x] Invert and grayscale edits use a real WebGPU compute renderer with transparent WebGL2 and deterministic CPU fallback.
+  - [x] Eligible brush strokes use instanced WebGPU canvas rendering with per-tile alpha validation, pooled WebGL2 textures, and Canvas2D fallback.
 - [ ] OffscreenCanvas workers and WASM SIMD/threaded operations.
   - [x] Full-document profile conversion runs as an atomic, cancelable, progress-reporting Web Worker job with chunked cooperative fallback and crash journal.
   - [x] Reference, distortion, and creative render filters run as cancelable, progress-reporting background jobs with transferred OffscreenCanvas bitmaps and an array fallback.
