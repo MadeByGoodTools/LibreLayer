@@ -1,4 +1,17 @@
-export type ExportFormat = 'png' | 'jpeg' | 'webp' | 'tiff' | 'pdf';
+export type ExportFormat =
+  | 'png'
+  | 'jpeg'
+  | 'webp'
+  | 'animated-webp'
+  | 'avif'
+  | 'jxl'
+  | 'heic'
+  | 'jpeg2000'
+  | 'exr'
+  | 'hdr'
+  | 'eps'
+  | 'tiff'
+  | 'pdf';
 export type ExportColorSpace =
   | 'srgb'
   | 'display-p3'
@@ -18,6 +31,7 @@ export type HighPrecisionRawSource = {
   image: RawLinearImage;
   settings: RawDevelopSettings;
 };
+export type LayeredTiffPage = { name: string; image: ImageData };
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const ascii = (value: string) => new TextEncoder().encode(value);
@@ -264,7 +278,7 @@ function encodeTiffParts(
   profile: Uint8Array,
   resolution: number,
 ) {
-  const software = nullTerminated('LibreLayer 1.0');
+  const software = nullTerminated('LibreLayer 0.5');
   const entries: TiffEntry[] = [
     { tag: 256, type: 4, count: 1, data: u32([width]) },
     { tag: 257, type: 4, count: 1, data: u32([height]) },
@@ -341,6 +355,96 @@ export function encodeTiff(
       resolution,
     ),
   ).buffer;
+}
+
+/** Encode visible editor layers as named TIFF pages without flattening them. */
+export function encodeLayeredTiff(
+  pages: LayeredTiffPage[],
+  options: TiffOptions = {},
+): ArrayBuffer {
+  if (!pages.length || pages.length > 100)
+    throw Error('Layered TIFF export supports 1 to 100 layers.');
+  const colorSpace = options.colorSpace ?? 'srgb',
+    resolution = options.resolution ?? 300,
+    profile = createIccProfile(colorSpace),
+    software = nullTerminated('LibreLayer 0.5'),
+    prepared = pages.map((page, index) => {
+      checkDimensions(page.image.width, page.image.height);
+      if (!page.name || page.name.length > 255)
+        throw Error(`Layer ${index + 1} needs a name up to 255 characters.`);
+      const pixels = new Uint8Array(
+          convertRgbaColorSpace(page.image.data, colorSpace),
+        ),
+        pageName = nullTerminated(page.name),
+        entries: TiffEntry[] = [
+          { tag: 256, type: 4, count: 1, data: u32([page.image.width]) },
+          { tag: 257, type: 4, count: 1, data: u32([page.image.height]) },
+          { tag: 258, type: 3, count: 4, data: u16([8, 8, 8, 8]) },
+          { tag: 259, type: 3, count: 1, data: u16([1]) },
+          { tag: 262, type: 3, count: 1, data: u16([2]) },
+          { tag: 273, type: 4, count: 1, data: u32([0]) },
+          { tag: 274, type: 3, count: 1, data: u16([1]) },
+          { tag: 277, type: 3, count: 1, data: u16([4]) },
+          { tag: 278, type: 4, count: 1, data: u32([page.image.height]) },
+          { tag: 279, type: 4, count: 1, data: u32([pixels.length]) },
+          { tag: 282, type: 5, count: 1, data: rational(resolution) },
+          { tag: 283, type: 5, count: 1, data: rational(resolution) },
+          { tag: 284, type: 3, count: 1, data: u16([1]) },
+          { tag: 285, type: 2, count: pageName.length, data: pageName },
+          { tag: 296, type: 3, count: 1, data: u16([2]) },
+          { tag: 305, type: 2, count: software.length, data: software },
+          { tag: 338, type: 3, count: 1, data: u16([2]) },
+          { tag: 339, type: 3, count: 4, data: u16([1, 1, 1, 1]) },
+          { tag: 34675, type: 7, count: profile.length, data: profile },
+        ];
+      entries.sort((left, right) => left.tag - right.tag);
+      const ifdSize = 2 + entries.length * 12 + 4,
+        externalSize = entries.reduce(
+          (sum, entry) =>
+            sum + (entry.data.length > 4 ? pad4(entry.data).length : 0),
+          0,
+        );
+      return { entries, pixels, ifdSize, externalSize };
+    });
+  validateResolution(resolution);
+  let cursor = 8;
+  const offsets = prepared.map((page) => {
+    const start = cursor;
+    cursor += page.ifdSize + page.externalSize + page.pixels.length;
+    return start;
+  });
+  const output = new Uint8Array(cursor),
+    view = new DataView(output.buffer);
+  output.set([0x49, 0x49]);
+  view.setUint16(2, 42, true);
+  view.setUint32(4, offsets[0], true);
+  prepared.forEach((page, pageIndex) => {
+    const ifdOffset = offsets[pageIndex];
+    view.setUint16(ifdOffset, page.entries.length, true);
+    let externalOffset = ifdOffset + page.ifdSize;
+    const pixelOffset = externalOffset + page.externalSize;
+    page.entries.forEach((entry, entryIndex) => {
+      const offset = ifdOffset + 2 + entryIndex * 12;
+      view.setUint16(offset, entry.tag, true);
+      view.setUint16(offset + 2, entry.type, true);
+      view.setUint32(offset + 4, entry.count, true);
+      if (entry.tag === 273) view.setUint32(offset + 8, pixelOffset, true);
+      else if (entry.data.length <= 4) output.set(entry.data, offset + 8);
+      else {
+        view.setUint32(offset + 8, externalOffset, true);
+        const padded = pad4(entry.data);
+        output.set(padded, externalOffset);
+        externalOffset += padded.length;
+      }
+    });
+    view.setUint32(
+      ifdOffset + 2 + page.entries.length * 12,
+      offsets[pageIndex + 1] ?? 0,
+      true,
+    );
+    output.set(page.pixels, pixelOffset);
+  });
+  return output.buffer;
 }
 
 /** Export a RAW master without passing through the browser's 8-bit canvas. */

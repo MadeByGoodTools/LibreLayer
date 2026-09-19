@@ -15,10 +15,11 @@ Current release: **LibreLayer 0.5 — Deep Canvas Update**. Version 1.0 remains 
 - Layer masks, vector masks, channels, paths, clipping, linking, and lock controls
 - Brushes, selections, crop, transforms, clone, heal, fill, gradients, and filters
 - Per-channel curves, levels, color balance, HSL, color grading, and blend modes
-- PSD and PSB import, common image formats, editable LibreLayer projects, and web export
+- PSD/PSB import and export with native shapes, paths, saved channels, Layer Comps, knockout, multi-channel Blend If, exact ICC/resource preservation, and explicit unsupported-content reporting
 - Native 8-bit integer, 16-bit integer, 16-bit half-float, and 32-bit float working documents with high-depth layer backing, depth conversion, undo/redo, recovery, and project round-trip
 - Float16 layer, group, mask, adjustment, Smart Object, Smart Filter, blend, transform, and effect compositing on supported browsers, with final-only HDR/display conversion and precision-preserving Copy/Paste, Merge, and Flatten operations
-- Layered 8/16/32-bit RGB PSD/PSB import with explicit display-working conversion for high-depth sources
+- Bitmap, indexed, grayscale, CMYK, Lab, and layered 8/16/32-bit RGB PSD/PSB import, plus true 16/32-bit flattened PSD/PSB export from high-depth working documents
+- Layered TIFF import/export; SVG path/primitives/arcs; PDF and EPS; animated WebP; AVIF, JPEG XL, JPEG 2000, HEIC/HEIF, Radiance HDR, and single-part Float32 OpenEXR workflows with format-specific limits documented in the matrix
 - Color-managed TIFF export with embedded sRGB, Display P3, Adobe RGB, or ProPhoto RGB profiles and print-resolution metadata
 - Bayer and X-Trans camera RAW development from sensor data with seven selectable demosaic recipes, camera/embedded-DNG profile paths, selectable white-balance sources, live wide-gamut controls, separate luma/chroma denoise, hot-pixel and banding repair, metadata-matched local optics profiles, re-editable RAW Smart Objects, device-local source recovery, and genuine 16-bit TIFF master export
 - A reproducible real-camera RAW release matrix covers every advertised family (CR2, CR3, NEF, ARW, DNG, RAF/X-Trans, ORF, and RW2) with hash-pinned public-domain fixtures; run `pnpm test:raw-matrix` to download the local test cache and verify full 16-bit decode output

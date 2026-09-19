@@ -153,11 +153,14 @@ void test('visibility and position layer comps round-trip through PSD records', 
   ]);
 });
 
-void test('appearance-changing and malformed comps fail closed', () => {
+void test('appearance-changing comps are marked native while malformed comps fail closed', () => {
   const altered = structuredClone(comps);
   altered[0].states[0].opacity = 40;
-  assert.equal(canExportPsdLayerComps(altered, layers), false);
-  assert.throws(() => planPsdLayerComps(altered, layers), /visibility and position/);
+  assert.equal(canExportPsdLayerComps(altered, layers), true);
+  assert.equal(
+    planPsdLayerComps(altered, layers).resource?.list[0].capturedInfo,
+    7,
+  );
   assert.equal(
     supportedPsdLayerComps(
       {
@@ -165,7 +168,7 @@ void test('appearance-changing and malformed comps fail closed', () => {
       },
       [],
     ),
-    false,
+    true,
   );
   const duplicateState = structuredClone(comps);
   duplicateState[0].states[1].id = duplicateState[0].states[0].id;

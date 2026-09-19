@@ -15,6 +15,10 @@ self.onmessage = (
       width: dimension(ifd, 't256'),
       height: dimension(ifd, 't257'),
       bitDepth: Math.max(...((ifd.t258 as number[] | undefined) ?? [1])),
+      name:
+        String((ifd.t285 as string[] | undefined)?.[0] ?? '')
+          .replaceAll('\0', '')
+          .trim() || undefined,
     }));
     if (page === undefined) {
       self.postMessage({ ok: true, pages });

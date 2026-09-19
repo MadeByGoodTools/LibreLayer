@@ -11,3 +11,5 @@ overrides:
   esbuild: 0.28.1
   sharp: 0.35.4
   vinext>image-size: '-'
+patchedDependencies:
+  ag-psd@31.0.2: patches/ag-psd@31.0.2.patch

@@ -23,6 +23,9 @@ Released September 12, 2026. LibreLayer 0.5 is the largest pre-1.0 release of th
 - Float16 intermediate rendering across the complete layer/group/mask/adjustment/Smart Object/Smart Filter/effect compositor on supported browsers, including precision-preserving Copy/Paste, Copy Merged, Merge Down, Merge Visible, Flatten, History layer restore, and final-only scene-to-display conversion.
 - Scene-linear Float32 HDR Merge with unclipped high-depth document storage, Float16 extended-range preview on compatible HDR displays, a deterministic SDR fallback, and a highlight clipping map.
 - PSD/PSB, image, TIFF, PDF, RAW, editable project, encrypted project, and web-export workflows with format-specific limitations documented in the format matrix.
+- Native PSD shape layers, saved alpha channels, named paths, shallow/deep knockout, simultaneous gray/RGB Blend If, appearance-aware Layer Comps, exact ICC bytes, and preservation of unknown image-resource metadata.
+- Editable bitmap, indexed, grayscale, CMYK, Lab, and high-depth RGB PSD/PSB imports, with true 16/32-bit flattened PSD/PSB output from high-depth documents.
+- Layered TIFF exchange and expanded local format support for SVG arcs/primitives, EPS, animated WebP, AVIF, JPEG XL, JPEG 2000, HEIC/HEIF, Radiance HDR, and single-part Float32 OpenEXR.
 - Device-local autosave, recovery, preferences, remembered save handles where the browser permits them, configurable history compaction, and large-document reporting.
 
 ## Privacy

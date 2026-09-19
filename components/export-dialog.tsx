@@ -10,11 +10,18 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   encodeImage,
+  encodeLayeredTiff,
   encodeRawTiff16,
   type ExportColorSpace,
   type ExportFormat,
   type HighPrecisionRawSource,
+  type LayeredTiffPage,
 } from '@/lib/image-export';
+import {
+  encodeAnimatedWebp,
+  encodeExtendedImage,
+} from '@/lib/extended-image-codec';
+import { encodeEps } from '@/lib/eps-codec';
 
 const colorSpaceNames: Record<ExportColorSpace, string> = {
   srgb: 'sRGB — web and general use',
@@ -28,12 +35,16 @@ const exportPreferenceKey = 'librelayer-export-preferences';
 export function ExportDialog({
   source,
   highPrecision,
+  layeredTiff = [],
+  animationFrames = [],
   highPrecisionLoading = false,
   name,
   onClose,
 }: {
   source: HTMLCanvasElement | null;
   highPrecision?: HighPrecisionRawSource | null;
+  layeredTiff?: LayeredTiffPage[];
+  animationFrames?: { image: ImageData; duration: number }[];
   highPrecisionLoading?: boolean;
   name: string;
   onClose: () => void;
@@ -45,6 +56,7 @@ export function ExportDialog({
   const [colorSpace, setColorSpace] = useState<ExportColorSpace>('srgb');
   const [resolution, setResolution] = useState(300);
   const [tiffDepth, setTiffDepth] = useState<8 | 16>(8);
+  const [layeredTiffEnabled, setLayeredTiffEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [preferencesReady, setPreferencesReady] = useState(false);
@@ -56,7 +68,21 @@ export function ExportDialog({
       ) as Record<string, unknown> | null;
       if (
         saved &&
-        ['png', 'jpeg', 'webp', 'tiff', 'pdf'].includes(String(saved.format))
+        [
+          'png',
+          'jpeg',
+          'webp',
+          'animated-webp',
+          'avif',
+          'jxl',
+          'heic',
+          'jpeg2000',
+          'exr',
+          'hdr',
+          'eps',
+          'tiff',
+          'pdf',
+        ].includes(String(saved.format))
       )
         setFormat(saved.format as ExportFormat);
       if (saved && [0.25, 0.5, 1, 2].includes(Number(saved.scale)))
@@ -151,9 +177,25 @@ export function ExportDialog({
             value={format}
             onChange={(event) => setFormat(event.target.value as ExportFormat)}
           >
-            {['png', 'jpeg', 'webp', 'tiff', 'pdf'].map((item) => (
+            {[
+              'png',
+              'jpeg',
+              'webp',
+              'animated-webp',
+              'avif',
+              'jxl',
+              'heic',
+              'jpeg2000',
+              'exr',
+              'hdr',
+              'eps',
+              'tiff',
+              'pdf',
+            ].map((item) => (
               <option key={item} value={item}>
-                {item.toUpperCase()}
+                {item === 'animated-webp'
+                  ? `ANIMATED WEBP${animationFrames.length > 1 ? ` · ${animationFrames.length} frames` : ' · needs timed layers'}`
+                  : item.toUpperCase()}
               </option>
             ))}
           </select>
@@ -187,7 +229,16 @@ export function ExportDialog({
               : 0}{' '}
           pixels
         </p>
-        {['jpeg', 'webp', 'pdf'].includes(format) && (
+        {[
+          'jpeg',
+          'webp',
+          'animated-webp',
+          'avif',
+          'jxl',
+          'heic',
+          'jpeg2000',
+          'pdf',
+        ].includes(format) && (
           <label className="grid gap-1">
             Quality
             <input
@@ -217,6 +268,18 @@ export function ExportDialog({
         </label>
         {format === 'tiff' && (
           <>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={layeredTiffEnabled}
+                disabled={!layeredTiff.length || raw16}
+                onChange={(event) =>
+                  setLayeredTiffEnabled(event.target.checked)
+                }
+              />
+              Preserve {layeredTiff.length || 'visible'} top-level layers as
+              named TIFF pages
+            </label>
             <label className="grid gap-1">
               Bit depth
               <select
@@ -297,23 +360,97 @@ export function ExportDialog({
               (!Number.isInteger(resolution) ||
                 resolution < 36 ||
                 resolution > 2400)) ||
-            (raw16 && !highPrecision)
+            (raw16 && !highPrecision) ||
+            (format === 'animated-webp' && animationFrames.length < 2)
           }
           onClick={async () => {
             if (!source) return;
             setBusy(true);
             setError('');
             try {
+              const scaledImage = () => {
+                const width = Math.max(1, Math.round(source.width * scale)),
+                  height = Math.max(1, Math.round(source.height * scale)),
+                  canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const context = canvas.getContext('2d')!;
+                if (matte !== 'transparent') {
+                  context.fillStyle = matte;
+                  context.fillRect(0, 0, width, height);
+                }
+                context.drawImage(source, 0, 0, width, height);
+                return context.getImageData(0, 0, width, height);
+              };
               const blob =
-                raw16 && highPrecision
-                  ? encodeRawTiff16(highPrecision, {
-                      colorSpace,
-                      resolution,
-                    })
-                  : await encodeImage(source, format, quality, scale, matte, {
-                      colorSpace,
-                      resolution,
-                    });
+                layeredTiffEnabled && layeredTiff.length
+                  ? new Blob(
+                      [
+                        encodeLayeredTiff(layeredTiff, {
+                          colorSpace,
+                          resolution,
+                        }),
+                      ],
+                      { type: 'image/tiff' },
+                    )
+                  : format === 'animated-webp'
+                    ? new Blob(
+                        [await encodeAnimatedWebp(animationFrames, quality)],
+                        { type: 'image/webp' },
+                      )
+                    : [
+                          'avif',
+                          'jxl',
+                          'heic',
+                          'jpeg2000',
+                          'hdr',
+                          'exr',
+                        ].includes(format)
+                      ? new Blob(
+                          [
+                            await encodeExtendedImage(
+                              scaledImage(),
+                              format as
+                                | 'avif'
+                                | 'jxl'
+                                | 'heic'
+                                | 'jpeg2000'
+                                | 'hdr'
+                                | 'exr',
+                              quality,
+                            ),
+                          ],
+                          {
+                            type:
+                              format === 'hdr'
+                                ? 'image/vnd.radiance'
+                                : format === 'exr'
+                                  ? 'image/x-exr'
+                                  : format === 'jpeg2000'
+                                    ? 'image/j2k'
+                                    : `image/${format}`,
+                          },
+                        )
+                      : format === 'eps'
+                        ? new Blob([encodeEps(scaledImage())], {
+                            type: 'application/postscript',
+                          })
+                        : raw16 && highPrecision
+                          ? encodeRawTiff16(highPrecision, {
+                              colorSpace,
+                              resolution,
+                            })
+                          : await encodeImage(
+                              source,
+                              format,
+                              quality,
+                              scale,
+                              matte,
+                              {
+                                colorSpace,
+                                resolution,
+                              },
+                            );
               const url = URL.createObjectURL(blob),
                 anchor = document.createElement('a');
               anchor.href = url;
@@ -322,9 +459,13 @@ export function ExportDialog({
                 '.' +
                 (format === 'jpeg'
                   ? 'jpg'
-                  : format === 'tiff'
-                    ? 'tif'
-                    : format);
+                  : format === 'animated-webp'
+                    ? 'webp'
+                    : format === 'tiff'
+                      ? 'tif'
+                      : format === 'jpeg2000'
+                        ? 'j2k'
+                        : format);
               anchor.click();
               setTimeout(() => URL.revokeObjectURL(url), 1000);
               onClose();

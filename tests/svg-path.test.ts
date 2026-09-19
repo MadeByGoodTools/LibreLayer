@@ -39,10 +39,43 @@ void test('SVG export and reimport round-trip curves and stroke metadata', () =>
   assert.match(svg, /data-librelayer-width-start/);
 });
 
+void test('SVG smooth curves, primitives, inline styles, and transforms stay editable', () => {
+  const paths = parseSvgDocument(`
+    <svg>
+      <path id="Smooth" d="M0 0 C10 0 10 10 20 10 S30 20 40 10 Q50 0 60 10 T80 10" />
+      <rect id="Box" x="2" y="3" width="10" height="20" transform="translate(5 7)" style="stroke:#ff0000;stroke-width:6" />
+      <circle id="Dot" cx="30" cy="40" r="5" />
+      <polygon id="Triangle" points="0,0 10,0 5,10" />
+    </svg>`);
+  assert.equal(paths.length, 4);
+  assert.equal(paths[0].anchors.length, 5);
+  assert.equal(paths[1].anchors[0].x, 7);
+  assert.equal(paths[1].anchors[0].y, 10);
+  assert.equal(paths[1].anchors[0].kind, 'corner');
+  assert.equal(paths[1].stroke.color, '#ff0000');
+  assert.equal(paths[1].stroke.widthStart, 6);
+  assert.equal(paths[2].anchors.length, 4);
+  assert.equal(paths[2].closed, true);
+  assert.equal(paths[3].anchors.length, 3);
+  assert.equal(paths[3].closed, true);
+});
+
+void test('SVG elliptical arcs become editable cubic Bezier anchors', () => {
+  const path = parseSvgPathData('M 10 50 A 40 30 20 0 1 90 50');
+  assert.equal(path.closed, false);
+  assert.ok(path.anchors.length >= 2);
+  assert.deepEqual(
+    { x: path.anchors.at(-1)!.x, y: path.anchors.at(-1)!.y },
+    { x: 90, y: 50 },
+  );
+  assert.ok(path.anchors[0].outgoing);
+  assert.ok(path.anchors.at(-1)!.incoming);
+});
+
 void test('unsafe or unsupported SVG content fails explicitly', () => {
   assert.throws(() => parseSvgDocument('<html></html>'), /not an SVG/);
   assert.throws(
-    () => parseSvgDocument('<svg><path d="M0 0 A 10 10 0 0 0 20 20"/></svg>'),
-    /Unsupported SVG path command/,
+    () => parseSvgDocument('<svg><script>alert(1)</script></svg>'),
+    /unsafe/i,
   );
 });

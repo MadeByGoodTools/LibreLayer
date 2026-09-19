@@ -3,11 +3,36 @@ import test from 'node:test';
 import { initializeCanvas, readPsd, writePsd, type Layer } from 'ag-psd';
 import {
   blendIfToPsd,
+  portableKnockoutToPsd,
   portableFillOpacityToPsd,
   psdBlendIfToPortable,
   psdFillOpacityToPortable,
+  psdKnockoutToPortable,
   supportedPsdBlendIf,
 } from '../lib/psd-compositing.ts';
+
+void test('PSD knockout preserves none, shallow, and deep values', () => {
+  assert.equal(psdKnockoutToPortable(undefined), 'none');
+  assert.equal(psdKnockoutToPortable(1), 'shallow');
+  assert.equal(psdKnockoutToPortable(2), 'deep');
+  assert.equal(portableKnockoutToPsd('none'), undefined);
+  assert.equal(portableKnockoutToPsd('shallow'), 1);
+  assert.equal(portableKnockoutToPsd('deep'), 2);
+  const restored = readPsd(
+    writePsd({
+      width: 2,
+      height: 2,
+      imageData: pixels,
+      children: [
+        { name: 'Shallow', imageData: pixels, knockout: 1 },
+        { name: 'Deep', imageData: pixels, knockout: 2 },
+      ],
+    }),
+    { useRawData: true },
+  );
+  assert.equal(restored.children?.[0].knockout, 1);
+  assert.equal(restored.children?.[1].knockout, 2);
+});
 import { layerEffectsToPsd } from '../lib/psd-effects.ts';
 import { defaultLayerEffects } from '../lib/layer-effects.ts';
 import {

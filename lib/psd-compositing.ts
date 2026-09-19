@@ -132,3 +132,36 @@ export function psdFillOpacityToPortable(fillOpacity: number | undefined) {
     return undefined;
   return Math.round(fillOpacity * 100);
 }
+
+export type PortableKnockout = 'none' | 'shallow' | 'deep';
+
+export function supportedPsdKnockout(value: Layer['knockout']) {
+  return (
+    value === undefined ||
+    value === false ||
+    value === true ||
+    value === 0 ||
+    value === 1 ||
+    value === 2
+  );
+}
+
+export function psdKnockoutToPortable(
+  value: Layer['knockout'],
+): PortableKnockout {
+  if (!supportedPsdKnockout(value))
+    throw Error('Unsupported PSD knockout value.');
+  return value === 2
+    ? 'deep'
+    : value === 1 || value === true
+      ? 'shallow'
+      : 'none';
+}
+
+export function portableKnockoutToPsd(value: PortableKnockout | undefined) {
+  return value === 'deep'
+    ? (2 as const)
+    : value === 'shallow'
+      ? (1 as const)
+      : undefined;
+}

@@ -4,10 +4,45 @@ import UTIF from 'utif';
 import {
   convertRgbaColorSpace,
   createIccProfile,
+  encodeLayeredTiff,
   encodeRawTiff16,
   encodeTiff,
   type ExportColorSpace,
 } from '../lib/image-export.ts';
+
+void test('layered TIFF preserves named pages and independent pixels', () => {
+  const buffer = encodeLayeredTiff(
+      [
+        {
+          name: 'Highlights',
+          image: {
+            width: 1,
+            height: 1,
+            data: new Uint8ClampedArray([250, 180, 80, 200]),
+          } as ImageData,
+        },
+        {
+          name: 'Base',
+          image: {
+            width: 1,
+            height: 1,
+            data: new Uint8ClampedArray([20, 40, 70, 255]),
+          } as ImageData,
+        },
+      ],
+      { resolution: 300 },
+    ),
+    ifds = UTIF.decode(buffer);
+  assert.equal(ifds.length, 2);
+  assert.deepEqual(
+    ifds.map((ifd) => (ifd.t285 as string[] | undefined)?.[0]),
+    ['Highlights', 'Base'],
+  );
+  UTIF.decodeImage(buffer, ifds[0]);
+  UTIF.decodeImage(buffer, ifds[1]);
+  assert.deepEqual(Array.from(UTIF.toRGBA8(ifds[0])), [250, 180, 80, 200]);
+  assert.deepEqual(Array.from(UTIF.toRGBA8(ifds[1])), [20, 40, 70, 255]);
+});
 
 function tiffEntries(buffer: ArrayBuffer) {
   const view = new DataView(buffer),

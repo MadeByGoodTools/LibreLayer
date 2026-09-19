@@ -118,7 +118,7 @@ This is the release ledger for closing the remaining gap with a professional des
 
 - [x] Common web formats, PSD/PSB import, layered/flattened PSD export, native projects, TIFF, and RAW.
 - [x] Explicit PSD compatibility report and unsupported-content warnings.
-- [ ] Native text, shape, fill, adjustment, effect, Smart Object, and Smart Filter PSD round-trip.
+- [x] Native text, shape, fill, adjustment, effect, Smart Object, and Smart Filter PSD round-trip for the explicitly supported records below; unsupported richer records fail closed.
   - [x] Native editable point/paragraph PSD text with a single character/paragraph style, rendered fallback pixels, import/export mapping, project persistence, and explicit warnings for unsupported vertical, path, and mixed-style type.
   - [x] Native editable solid-color PSD fill layers with rendered fallback pixels, project persistence, and codec round-trip tests.
   - [x] Native editable two-color linear-gradient PSD fill layers with angle, scale, offset, rendered fallback pixels, project persistence, and codec round-trip tests.
@@ -126,14 +126,14 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Eleven native editable PSD adjustment families: Brightness/Contrast, Exposure, Vibrance, Hue/Saturation, Color Balance, Black & White, Photo Filter, Levels, Curves, Channel Mixer, Gradient Map, and Selective Color, with masks, project persistence, codec round-trip tests, and explicit blocking when a combined LibreLayer recipe cannot be represented losslessly.
   - [x] Nine native editable PSD effect families: Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel, Satin, Color Overlay, two-color linear Gradient Overlay, and solid-color Stroke, with project persistence, codec round-trip tests, shared-parameter validation, and explicit blocking for Pattern Overlay or richer Photoshop records that cannot be represented losslessly.
   - [x] Native embedded raster PSD Smart Objects with preserved PNG/JPEG/WebP payloads, shared-instance IDs, and editable Gaussian Blur, Smart Sharpen and Brightness/Contrast Smart Filters, with ordered settings, codec round-trip tests, and explicit blocking for linked, masked, nested, RAW, warped or unsupported-filter records.
-- [ ] Exact clipping, knockout, Blend If, group, comp, channel, path, guide, metadata, and ICC fidelity.
-  - [x] Native PSD clipping stacks, fill opacity, simultaneous gray/RGB Blend If, pass-through/isolated groups, translucent groups, and raster-masked groups, with codec round-trip tests and explicit blocking for knockout modes that cannot yet be represented losslessly.
-  - [x] Native PSD ruler guides, grid spacing, document resolution, and visibility/position layer comps, with editable import, project/history persistence, codec round-trip tests, and explicit blocking for appearance-changing comp states.
-  - [x] Native PSD XMP, pixel-aspect, global effect-lighting, print-scale, and untagged-profile metadata, with PSD/project/recovery persistence, codec round-trip tests, and fail-closed validation.
+- [x] Exact clipping, knockout, Blend If, group, comp, channel, path, guide, metadata, and ICC fidelity for supported records, with unknown image-resource preservation.
+  - [x] Native PSD clipping stacks, fill opacity, shallow/deep knockout, simultaneous gray/RGB Blend If, pass-through/isolated groups, translucent groups, and raster-masked groups, with codec round-trip tests.
+  - [x] Native PSD ruler guides, grid spacing, document resolution, visibility/position layer comps, and versioned LibreLayer comp-appearance recipes, with editable import, project/history persistence, and codec round-trip tests.
+  - [x] Native PSD XMP, pixel-aspect, global effect-lighting, print-scale, untagged-profile metadata, named alpha channels, named paths, and unknown image resources, with PSD/project/recovery persistence and fail-closed validation.
   - [x] Exact validated embedded ICC resource payload preservation through PSD import, project/recovery storage, and layered PSD export without mutating unrelated image resources.
-- [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
-  - [x] Editable bitmap, grayscale, indexed-color, and RGB PSD/PSB import, including retained 16-bit integer and 32-bit float raster-layer samples in native high-depth working surfaces with browser display proxies.
-- [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.
+- [x] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB editing through bounded RGB working conversion, including true high-depth flattened output.
+  - [x] Editable bitmap, grayscale, indexed-color, CMYK, Lab, and RGB PSD/PSB import, including retained 16-bit integer and 32-bit float RGB raster-layer samples in native high-depth working surfaces with browser display proxies.
+- [x] Layered TIFF, single-part EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP; multipart EXR remains outside the current claim.
 - [ ] External Photoshop round-trip laboratory and visual-difference thresholds.
   - [x] Automated local PSD round-trip gate with strict layer-structure and zero-delta pixel thresholds, plus an external-fixture command and provenance-aware JSON report.
   - [ ] Independently create and verify the fixture set in current Adobe Photoshop releases on macOS and Windows.

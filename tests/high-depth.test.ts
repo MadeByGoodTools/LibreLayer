@@ -46,10 +46,8 @@ void test('PSD header validation accepts supported high-depth RGB sources', () =
     'grayscale',
   );
   assert.equal(readSupportedPsdHeader(psdHeader(8, 2, 1)).colorMode, 'indexed');
-  assert.throws(
-    () => readSupportedPsdHeader(psdHeader(16, 4, 4)),
-    /color mode/,
-  );
+  assert.equal(readSupportedPsdHeader(psdHeader(16, 4, 4)).colorMode, 'cmyk');
+  assert.equal(readSupportedPsdHeader(psdHeader(32, 9, 3)).colorMode, 'lab');
   assert.throws(
     () => readSupportedPsdHeader(psdHeader(16, 2, 1)),
     /Unsupported/,

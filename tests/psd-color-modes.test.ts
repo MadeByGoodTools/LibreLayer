@@ -110,3 +110,37 @@ void test('16-bit grayscale PSD retains adjacent source samples', () => {
   assert.equal(pixels.data[0], pixels.data[1]);
   assert.equal(pixels.data[4], pixels.data[6]);
 });
+
+void test('8-bit CMYK PSD opens as editable RGB without flattening its mode at the header', () => {
+  const buffer = psd(1, 1, 4, 8, 4, [], [...word(0), 255, 0, 0, 255]);
+  assert.equal(readSupportedPsdHeader(buffer).colorMode, 'cmyk');
+  const pixels = getCompositeImageData(readPsd(buffer, { useRawData: true }));
+  assert.ok(pixels);
+  assert.deepEqual([...pixels.data], [255, 0, 0, 255]);
+});
+
+void test('16-bit CMYK composite decoding supports high-depth source channels', () => {
+  const buffer = psd(
+    1,
+    1,
+    4,
+    16,
+    4,
+    [],
+    [...word(0), ...word(65535), ...word(0), ...word(0), ...word(65535)],
+  );
+  const pixels = getCompositeImageData(readPsd(buffer, { useRawData: true }));
+  assert.ok(pixels);
+  assert.deepEqual([...pixels.data], [255, 0, 0, 255]);
+});
+
+void test('Lab PSD converts D50 Lab channels into an editable RGB surface', () => {
+  const buffer = psd(1, 1, 3, 8, 9, [], [...word(0), 255, 128, 128]);
+  assert.equal(readSupportedPsdHeader(buffer).colorMode, 'lab');
+  const pixels = getCompositeImageData(readPsd(buffer, { useRawData: true }));
+  assert.ok(pixels);
+  assert.ok(pixels.data[0] > 245);
+  assert.ok(pixels.data[1] > 245);
+  assert.ok(pixels.data[2] > 245);
+  assert.equal(pixels.data[3], 255);
+});

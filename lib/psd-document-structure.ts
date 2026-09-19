@@ -13,7 +13,7 @@ export type PortablePsdDocumentMetadata = Pick<
   | 'globalAltitude'
   | 'printScale'
   | 'iccUntaggedProfile'
-> & { iccProfile?: string };
+> & { iccProfile?: string; preservedResources?: string[] };
 
 export type PortableCompState = {
   id: string;
@@ -84,9 +84,20 @@ export function canExportPsdLayerComps(
         const layer = layerById.get(state.id);
         return (
           Boolean(layer) &&
-          Number.isFinite(state.x) &&
-          Number.isFinite(state.y) &&
-          sameAppearance(state, layer!)
+          [
+            state.x,
+            state.y,
+            state.opacity,
+            state.fill ?? 100,
+            state.rotation ?? 0,
+            state.scaleX ?? 1,
+            state.scaleY ?? 1,
+            state.brightness ?? 100,
+            state.contrast ?? 100,
+            state.saturation ?? 100,
+            state.blur ?? 0,
+          ].every(Number.isFinite) &&
+          typeof state.blend === 'string'
         );
       }) &&
       stateIds.size === layerById.size
@@ -103,9 +114,7 @@ export function planPsdLayerComps(
 } {
   if (!comps.length) return { byLayerId: {} };
   if (!canExportPsdLayerComps(comps, layers))
-    throw Error(
-      'PSD layer comps currently preserve visibility and position only. Update or remove comps with opacity, fill, blend, transform, adjustment, or blur changes before layered export.',
-    );
+    throw Error('PSD layer comps contain invalid or duplicate layer states.');
   const compIds = new Map(comps.map((comp, index) => [comp.id, index + 1])),
     byLayerId: Record<string, PsdLayerCompSettings> = {};
   for (const layer of layers) {
@@ -126,7 +135,12 @@ export function planPsdLayerComps(
         id: compIds.get(comp.id)!,
         name: comp.name,
         ...(comp.comment ? { comment: comp.comment } : {}),
-        capturedInfo: 3 as PsdLayerComps['list'][number]['capturedInfo'],
+        capturedInfo: (comp.states.some((state) => {
+          const layer = layers.find((candidate) => candidate.id === state.id)!;
+          return !sameAppearance(state, layer);
+        })
+          ? 7
+          : 3) as PsdLayerComps['list'][number]['capturedInfo'],
       })),
     },
     byLayerId,
@@ -147,7 +161,7 @@ export function supportedPsdLayerComps(
       ids.has(comp.id) ||
       !comp.name ||
       comp.name.length > 255 ||
-      (comp.capturedInfo & ~3) !== 0
+      (comp.capturedInfo & ~7) !== 0
     )
       return false;
     ids.add(comp.id);
@@ -241,6 +255,13 @@ export function supportedPsdDocumentMetadata(
     validIcc = false;
   }
   return (
+    (metadata.preservedResources === undefined ||
+      (Array.isArray(metadata.preservedResources) &&
+        metadata.preservedResources.length <= 512 &&
+        metadata.preservedResources.every(
+          (resource) =>
+            typeof resource === 'string' && resource.length <= 48_000_000,
+        ))) &&
     (metadata.xmpMetadata === undefined ||
       (typeof metadata.xmpMetadata === 'string' &&
         metadata.xmpMetadata.length <= 1_000_000)) &&

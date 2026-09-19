@@ -3,7 +3,7 @@ export type PsdHeader = {
   width: number;
   height: number;
   bitDepth: 1 | 8 | 16 | 32;
-  colorMode: 'bitmap' | 'grayscale' | 'indexed' | 'rgb';
+  colorMode: 'bitmap' | 'grayscale' | 'indexed' | 'rgb' | 'cmyk' | 'lab';
 };
 
 export function readSupportedPsdHeader(buffer: ArrayBuffer): PsdHeader {
@@ -20,11 +20,13 @@ export function readSupportedPsdHeader(buffer: ArrayBuffer): PsdHeader {
         1: 'grayscale',
         2: 'indexed',
         3: 'rgb',
+        4: 'cmyk',
+        9: 'lab',
       } as const
-    )[colorModeCode as 0 | 1 | 2 | 3];
+    )[colorModeCode as 0 | 1 | 2 | 3 | 4 | 9];
   if (!colorMode)
     throw new Error(
-      'This PSD color mode is not supported yet. Convert CMYK, Lab, multichannel, or duotone files to RGB first.',
+      'This PSD color mode is not supported yet. Convert multichannel or duotone files to RGB first.',
     );
   if (
     ![1, 8, 16, 32].includes(bitDepth) ||

@@ -83,6 +83,11 @@ import {
 } from '@/lib/document-limits';
 import { preflightImage } from '@/lib/image-preflight';
 import {
+  decodeExtendedImage,
+  extendedImageKind,
+} from '@/lib/extended-image-codec';
+import { decodeEps } from '@/lib/eps-codec';
+import {
   motionClassName,
   normalizeMotionPreference,
 } from '@/lib/accessibility-preferences';
@@ -156,9 +161,11 @@ import { layerEffectsToPsd, psdEffectsToLayerEffects } from '@/lib/psd-effects';
 import { psdToSmartObject, smartObjectToPsd } from '@/lib/psd-smart-object';
 import {
   blendIfToPsd,
+  portableKnockoutToPsd,
   portableFillOpacityToPsd,
   psdBlendIfToPortable,
   psdFillOpacityToPortable,
+  psdKnockoutToPortable,
 } from '@/lib/psd-compositing';
 import {
   canExportPsdLayerComps,
@@ -177,6 +184,13 @@ import {
   type PortableShapeLayer,
 } from '@/lib/psd-shape';
 import { psdIccFromBase64, psdIccToBase64 } from '@/lib/psd-icc';
+import {
+  extractPsdResources,
+  mergeMissingPsdResources,
+  psdResourceFromBase64,
+  psdResourceToBase64,
+} from '@/lib/psd-resources';
+import { encodeFlatHighDepthPsd } from '@/lib/psd-flat';
 import {
   processPsd,
   type PsdImport,
@@ -413,7 +427,10 @@ import {
   serializeRawRecipeSidecar,
 } from '@/lib/raw-sidecar';
 import { runRawBatch } from '@/lib/raw-batch';
-import type { HighPrecisionRawSource } from '@/lib/image-export';
+import type {
+  HighPrecisionRawSource,
+  LayeredTiffPage,
+} from '@/lib/image-export';
 import {
   validateEmbeddedDocument,
   type EmbeddedDocumentEnvelope,
@@ -713,6 +730,7 @@ type TextLayerData = {
 };
 type LayerKind = 'pixel' | 'group' | 'adjustment' | 'fill' | 'shape';
 type LayerMeta = {
+  frameDuration?: number;
   fill?: number;
   clipping?: boolean;
   blendIf?: BlendIf;
@@ -2435,6 +2453,12 @@ export default function Home() {
   );
   const [exportRawSource, setExportRawSource] =
     useState<HighPrecisionRawSource | null>(null);
+  const [exportTiffLayers, setExportTiffLayers] = useState<LayeredTiffPage[]>(
+    [],
+  );
+  const [exportAnimationFrames, setExportAnimationFrames] = useState<
+    { image: ImageData; duration: number }[]
+  >([]);
   const [exportRawLoading, setExportRawLoading] = useState(false);
   const [pagedFile, setPagedFile] = useState<File | null>(null);
   const [recoveries, setRecoveries] = useState<RecoveryRecord[] | null>(null),
@@ -11242,6 +11266,7 @@ export default function Home() {
               ? 'pass-through'
               : 'isolated'
             : undefined,
+          knockout: psdKnockoutToPortable(node.knockout),
           x: 0,
           y: 0,
           hasMask: !!mask,
@@ -11299,10 +11324,39 @@ export default function Home() {
       }
     };
     walk(data.children);
-    const importedComps: LayerComp[] = importPsdLayerComps(
+    const importedChannels: SavedSelection[] = (data.channels ?? []).map(
+      (channel) => {
+        const canvas = toCanvas(channel.imageData),
+          id = crypto.randomUUID(),
+          mask = canvas.toDataURL('image/png');
+        savedSelectionCanvases.current.set(id, canvas);
+        return { id, name: channel.name, mask };
+      },
+    );
+    const sourceLayerIds = new Map(
+        importedCompLayers.map((layer) => [
+          String(layer.sourceId),
+          layer.layerId,
+        ]),
+      ),
+      nativeComps = importPsdLayerComps(
         data.imageResources?.layerComps,
         importedCompLayers,
-      ).map((comp) => ({
+      ),
+      compSource = data.compAppearance?.length
+        ? data.compAppearance
+            .map((comp) => ({
+              ...comp,
+              states: comp.states
+                .map((state) => ({
+                  ...state,
+                  id: sourceLayerIds.get(state.id) ?? '',
+                }))
+                .filter((state) => state.id),
+            }))
+            .filter((comp) => comp.states.length === nextLayers.length)
+        : nativeComps,
+      importedComps: LayerComp[] = compSource.map((comp) => ({
         id: crypto.randomUUID(),
         name: comp.name,
         comment: comp.comment,
@@ -11342,13 +11396,26 @@ export default function Home() {
       undefined,
       undefined,
       {
+        paths: (data.paths ?? []).map((path) => ({
+          id: crypto.randomUUID(),
+          name: path.name,
+          points: path.anchors.map(({ x, y }) => ({ x, y })),
+          anchors: structuredClone(path.anchors),
+          closed: path.closed,
+          curved: path.anchors.some(
+            (anchor) => !!anchor.incoming || !!anchor.outgoing,
+          ),
+          stroke: defaultPathStroke(),
+        })),
         layerComps: importedComps,
+        savedSelections: importedChannels,
         view: importedView,
         psdMetadata: {
           ...psdDocumentMetadata(data.imageResources),
           iccProfile: data.iccProfile
             ? psdIccToBase64(data.iccProfile)
             : undefined,
+          preservedResources: data.preservedResources?.map(psdResourceToBase64),
         },
       },
       importedDepth,
@@ -11408,7 +11475,6 @@ export default function Home() {
             (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
             (l.shapeLayer && !portableShapeToPsd(l.shapeLayer)) ||
             l.blendSpace === 'linear' ||
-            (l.knockout !== undefined && l.knockout !== 'none') ||
             l.blend in extraBlends ||
             !!l.vectorMask ||
             (l.hasMask &&
@@ -11420,20 +11486,20 @@ export default function Home() {
       !canExportPsdLayerComps(layerCompsRef.current, layersRef.current)
     ) {
       setPsdError(
-        'Layered PSD export cannot preserve these extended blend modes, deep or shallow knockout, appearance-changing layer comps, pattern fills, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
+        'Layered PSD export cannot preserve these extended blend modes, pattern fills, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
       );
       return;
     }
     psdBusyRef.current = true;
     setPsdBusy(true);
     try {
-      const composite = makeCanvas(doc.w, doc.h);
-      renderLayers(composite.getContext('2d')!);
-      const imageData = composite
+      const composite = renderEditableSurface();
+      const imageData = composite.pixels
         .getContext('2d')!
         .getImageData(0, 0, doc.w, doc.h);
-      composite.width = 1;
-      composite.height = 1;
+      const precisionComposite = composite.precision;
+      composite.pixels.width = 1;
+      composite.pixels.height = 1;
       const linkedFiles = new Map<
           string,
           NonNullable<ReturnType<typeof smartObjectToPsd>>['linkedFile']
@@ -11498,6 +11564,7 @@ export default function Home() {
                 fillOpacity: portableFillOpacityToPsd(l.fill),
                 clipping: l.clipping,
                 blendingRanges: blendIfToPsd(l.blendIf),
+                knockout: portableKnockoutToPsd(l.knockout),
                 blendMode:
                   l.groupIsolation === 'isolated' ? 'normal' : 'pass through',
                 mask: buildMask(l),
@@ -11542,6 +11609,7 @@ export default function Home() {
               fillOpacity: portableFillOpacityToPsd(l.fill),
               clipping: l.clipping,
               blendingRanges: blendIfToPsd(l.blendIf),
+              knockout: portableKnockoutToPsd(l.knockout),
               transparencyProtected: l.locked,
               blendMode: (l.blend === 'source-over'
                 ? 'normal'
@@ -11568,11 +11636,45 @@ export default function Home() {
       const children = flattened
         ? [{ name: 'Flattened artwork', imageData }]
         : build();
-      const { iccProfile, ...nativePsdMetadata } = psdMetadataRef.current;
-      const buffer = await processPsd<ArrayBuffer>({
+      const { iccProfile, preservedResources, ...nativePsdMetadata } =
+        psdMetadataRef.current;
+      const channels = await Promise.all(
+        savedSelections.map(async (selection, index) => {
+          let canvas = savedSelectionCanvases.current.get(selection.id);
+          if (!canvas) {
+            const image = new Image();
+            image.src = selection.mask;
+            await image.decode();
+            canvas = makeCanvas(doc.w, doc.h);
+            canvas.getContext('2d')!.drawImage(image, 0, 0, doc.w, doc.h);
+          }
+          return {
+            name: selection.name,
+            id: index + 1,
+            imageData: canvas
+              .getContext('2d')!
+              .getImageData(0, 0, doc.w, doc.h),
+          };
+        }),
+      );
+      const writtenBuffer = await processPsd<ArrayBuffer>({
         action: 'write',
         psb,
         iccProfile: psdIccFromBase64(iccProfile),
+        paths: paths.map((path) => ({
+          name: path.name,
+          closed: path.closed !== false,
+          anchors: pathAnchors(path),
+        })),
+        channels,
+        preservedResources: preservedResources?.map(psdResourceFromBase64),
+        compAppearance: layerCompsRef.current.map((comp) => ({
+          ...structuredClone(comp),
+          states: comp.states.map((state) => ({
+            ...state,
+            id: String(layerIds.get(state.id)),
+          })),
+        })),
         psd: {
           width: doc.w,
           height: doc.h,
@@ -11586,6 +11688,17 @@ export default function Home() {
           children,
         },
       });
+      const buffer =
+        flattened && precisionComposite
+          ? mergeMissingPsdResources(
+              encodeFlatHighDepthPsd(
+                precisionComposite,
+                psb,
+                channels.map((channel) => channel.imageData),
+              ),
+              extractPsdResources(writtenBuffer),
+            )
+          : writtenBuffer;
       checkFileSize(buffer.byteLength);
       const url = URL.createObjectURL(
           new Blob([buffer], { type: 'image/vnd.adobe.photoshop' }),
@@ -13440,6 +13553,65 @@ export default function Home() {
 
   const openImage = (file?: File) => {
     if (!file) return;
+    if (/\.eps$/i.test(file.name) || file.type === 'application/postscript') {
+      if (psdBusyRef.current) return;
+      psdBusyRef.current = true;
+      setPsdBusy(true);
+      void file
+        .arrayBuffer()
+        .then((buffer) => decodeEps(buffer))
+        .then((decoded) => {
+          if (decoded.tiffPreview) {
+            setPagedFile(
+              new File(
+                [decoded.tiffPreview],
+                `${file.name.replace(/\.eps$/i, '')} — EPS preview.tif`,
+                { type: 'image/tiff' },
+              ),
+            );
+            return;
+          }
+          const pixels = makeCanvas(
+              decoded.image!.width,
+              decoded.image!.height,
+            ),
+            id = crypto.randomUUID();
+          pixels.getContext('2d')!.putImageData(decoded.image!, 0, 0);
+          loadImportedDocument(
+            file.name,
+            pixels.width,
+            pixels.height,
+            [
+              {
+                id,
+                name: file.name,
+                kind: 'pixel',
+                visible: true,
+                opacity: 100,
+                blend: 'source-over',
+                x: 0,
+                y: 0,
+                hasMask: false,
+                maskEnabled: true,
+              },
+            ],
+            new Map([[id, { pixels }]]),
+            'Open EPS preview',
+          );
+          setStatus('EPS raster artwork opened at its declared bounds');
+        })
+        .catch((error) =>
+          setPsdError(
+            error instanceof Error ? error.message : 'The EPS could not open.',
+          ),
+        )
+        .finally(() => {
+          psdBusyRef.current = false;
+          setPsdBusy(false);
+          if (fileRef.current) fileRef.current.value = '';
+        });
+      return;
+    }
     if (
       /\.(pdf|tiff?)$/i.test(file.name) ||
       ['application/pdf', 'image/tiff'].includes(file.type)
@@ -13457,6 +13629,93 @@ export default function Home() {
     }
     if (/\.(cr2|cr3|nef|arw|dng|raf|orf|rw2)$/i.test(file.name)) {
       void openRaw(file);
+      return;
+    }
+    if (extendedImageKind(file)) {
+      if (psdBusyRef.current) return;
+      psdBusyRef.current = true;
+      setPsdBusy(true);
+      void decodeExtendedImage(file)
+        .then((frames) => {
+          if (!frames.length) throw Error('The image contains no frames.');
+          const { width, height } = frames[0].image;
+          if (
+            frames.some(
+              (frame) =>
+                frame.image.width !== width || frame.image.height !== height,
+            )
+          )
+            throw Error('Animated image frames must share one canvas size.');
+          requireRoom(width, height, width * height * frames.length);
+          const nextLayers: LayerMeta[] = [],
+            nextSurfaces = new Map<string, LayerSurface>(),
+            highDepth = frames.some((frame) => frame.precisionData);
+          frames.forEach((frame, index) => {
+            const id = crypto.randomUUID(),
+              pixels = makeCanvas(width, height);
+            pixels.getContext('2d')!.putImageData(frame.image, 0, 0);
+            nextLayers.push({
+              id,
+              name:
+                frames.length > 1
+                  ? `Frame ${index + 1} · ${frame.duration || 100} ms`
+                  : file.name,
+              frameDuration:
+                frames.length > 1 ? frame.duration || 100 : undefined,
+              visible: index === 0,
+              opacity: 100,
+              blend: 'source-over',
+              x: 0,
+              y: 0,
+              hasMask: false,
+              maskEnabled: true,
+              kind: 'pixel',
+            });
+            nextSurfaces.set(id, {
+              pixels,
+              precision: frame.precisionData
+                ? workingSurfaceFromFloat32(
+                    frame.precisionData.data,
+                    width,
+                    height,
+                    '32f',
+                  )
+                : undefined,
+            });
+          });
+          loadImportedDocument(
+            file.name,
+            width,
+            height,
+            nextLayers,
+            nextSurfaces,
+            'Open extended image',
+            undefined,
+            undefined,
+            undefined,
+            highDepth ? '32f' : '8u',
+            highDepth,
+          );
+          setStatus(
+            frames.length > 1
+              ? `${frames.length} animation frames opened as timed editable layers`
+              : highDepth
+                ? 'Scene-referred HDR image opened in a 32-bit float document'
+                : 'Extended image decoded at full resolution',
+          );
+        })
+        .catch((error) =>
+          setPsdError(
+            error instanceof Error
+              ? error.message
+              : 'This extended image could not be decoded.',
+          ),
+        )
+        .finally(() => {
+          psdBusyRef.current = false;
+          setPsdBusy(false);
+          if (fileRef.current) fileRef.current.value = '';
+        });
       return;
     }
     if (!file.type.startsWith('image/')) {
@@ -14025,6 +14284,51 @@ export default function Home() {
     const canvas = makeCanvas(doc.w, doc.h);
     renderLayers(canvas.getContext('2d')!);
     setExportSource(canvas);
+    const roots = layersRef.current.filter(
+      (layer) =>
+        !layer.parentId && layer.visible && layer.kind !== 'adjustment',
+    );
+    setExportTiffLayers(
+      roots.map((root) => {
+        const memberIds = new Set([
+            root.id,
+            ...descendants(layersRef.current, root.id).map((layer) => layer.id),
+          ]),
+          stack = layersRef.current.filter((layer) => memberIds.has(layer.id)),
+          page = makeCanvas(doc.w, doc.h);
+        renderLayers(page.getContext('2d')!, stack);
+        const image = page.getContext('2d')!.getImageData(0, 0, doc.w, doc.h);
+        page.width = page.height = 1;
+        return { name: root.name, image };
+      }),
+    );
+    setExportAnimationFrames(
+      layersRef.current
+        .filter((layer) => layer.frameDuration !== undefined)
+        .map((layer) => {
+          const frame = makeCanvas(doc.w, doc.h),
+            surface = surfacesRef.current.get(layer.id);
+          if (surface)
+            drawLayer(
+              frame.getContext('2d')!,
+              {
+                ...layer,
+                visible: true,
+                opacity: 100,
+                fill: 100,
+                blend: 'source-over',
+              },
+              surface,
+              doc.w,
+              doc.h,
+            );
+          const image = frame
+            .getContext('2d')!
+            .getImageData(0, 0, doc.w, doc.h);
+          frame.width = frame.height = 1;
+          return { image, duration: layer.frameDuration ?? 100 };
+        }),
+    );
     setExportRawSource(null);
     const raw = selected()?.smartObject?.raw;
     const generation = ++exportRawGeneration.current;
@@ -17285,7 +17589,7 @@ export default function Home() {
             ref={fileRef}
             hidden
             type="file"
-            accept="application/pdf,.pdf,.tif,.tiff,image/*,.psd,.psb,.librelayer,.pixelstudio,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2"
+            accept="application/pdf,application/postscript,.pdf,.eps,.tif,.tiff,image/*,.exr,.hdr,.rgbe,.jxl,.jp2,.j2k,.jpf,.jpx,.heic,.heif,.psd,.psb,.librelayer,.pixelstudio,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2"
             onChange={(e) => openImage(e.target.files?.[0])}
           />
         </div>
@@ -23609,6 +23913,8 @@ export default function Home() {
       </Dialog>
       <ExportDialog
         source={exportSource}
+        layeredTiff={exportTiffLayers}
+        animationFrames={exportAnimationFrames}
         highPrecision={exportRawSource}
         highPrecisionLoading={exportRawLoading}
         name={fileName}
@@ -23616,6 +23922,8 @@ export default function Home() {
           exportRawGeneration.current++;
           setExportSource(null);
           setExportRawSource(null);
+          setExportTiffLayers([]);
+          setExportAnimationFrames([]);
           setExportRawLoading(false);
         }}
       />
@@ -23649,6 +23957,44 @@ export default function Home() {
             new Map([[id, { pixels }]]),
             'Import page',
           );
+        }}
+        onImportLayers={(pages, name) => {
+          if (!pages.length) return;
+          requireRoom(
+            pages[0].canvas.width,
+            pages[0].canvas.height,
+            pages.reduce(
+              (total, page) => total + page.canvas.width * page.canvas.height,
+              0,
+            ),
+          );
+          const nextLayers: LayerMeta[] = [],
+            nextSurfaces = new Map<string, LayerSurface>();
+          for (const page of pages) {
+            const id = crypto.randomUUID();
+            nextLayers.push({
+              id,
+              name: page.name,
+              kind: 'pixel',
+              visible: true,
+              opacity: 100,
+              blend: 'source-over',
+              x: 0,
+              y: 0,
+              hasMask: false,
+              maskEnabled: true,
+            });
+            nextSurfaces.set(id, { pixels: page.canvas });
+          }
+          loadImportedDocument(
+            name,
+            pages[0].canvas.width,
+            pages[0].canvas.height,
+            nextLayers,
+            nextSurfaces,
+            'Open layered TIFF',
+          );
+          setStatus(`${pages.length} TIFF pages opened as editable layers`);
         }}
       />
       <WorkspaceSettings

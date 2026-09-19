@@ -22,7 +22,7 @@ import { unsupportedPsdTextReasons } from './psd-text';
 import { supportedPsdAdjustment } from './psd-adjustment';
 import { supportedPsdEffects } from './psd-effects';
 import { supportedPsdSmartObject } from './psd-smart-object';
-import { supportedPsdBlendIf } from './psd-compositing';
+import { supportedPsdBlendIf, supportedPsdKnockout } from './psd-compositing';
 import {
   supportedPsdDocumentView,
   supportedPsdDocumentMetadata,
@@ -31,6 +31,21 @@ import {
 import { supportedPsdShapeLayer } from './psd-shape';
 import type { PsdLayerImport } from './psd-transfer';
 import { extractPsdIccProfile, injectPsdIccProfile } from './psd-icc';
+import {
+  extractPsdPaths,
+  injectPsdPaths,
+  type PortablePsdPath,
+} from './psd-paths';
+import { extractPsdResources, mergeMissingPsdResources } from './psd-resources';
+import {
+  extractPsdCompAppearance,
+  injectPsdCompAppearance,
+} from './psd-comp-appearance';
+import {
+  psdHasMergedTransparency,
+  restoreLazyCompositeAlpha,
+} from './psd-composite-alpha';
+import type { PortableLayerComp } from './psd-document-structure';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -74,7 +89,10 @@ function decode(buffer: ArrayBuffer) {
   checkFileSize(buffer.byteLength);
   const header = readSupportedPsdHeader(buffer),
     bitDepth = header.bitDepth,
-    iccProfile = extractPsdIccProfile(buffer);
+    iccProfile = extractPsdIccProfile(buffer),
+    paths = extractPsdPaths(buffer, header.width, header.height);
+  const preservedResources = extractPsdResources(buffer);
+  const compAppearance = extractPsdCompAppearance(buffer);
   bounds(header.width, header.height);
   const psd = readPsd(buffer, {
     useRawData: true,
@@ -83,6 +101,12 @@ function decode(buffer: ArrayBuffer) {
     skipLinkedFilesData: false,
     totalMemoryLimit: 256 * 1024 * 1024,
   });
+  const compositePixels = getCompositeImageData(psd);
+  psd.additionalChannelData = restoreLazyCompositeAlpha(
+    compositePixels,
+    psd.additionalChannelData,
+    psdHasMergedTransparency(buffer, header.version === 2),
+  );
   let count = 0,
     expandedPixels = 0;
   const warnings = new Set<string>();
@@ -136,10 +160,12 @@ function decode(buffer: ArrayBuffer) {
       layer.vectorFill.type !== 'solid'
     )
       warnings.add('Unsupported noise-gradient or pattern fill layer');
-    if (layer.realMask || layer.knockout || layer.artboard)
-      warnings.add('Additional masks, knockout blending or artboards');
+    if (layer.realMask || layer.artboard)
+      warnings.add('Additional masks or artboards');
+    if (!supportedPsdKnockout(layer.knockout))
+      warnings.add('Invalid knockout blending');
     if (!supportedPsdBlendIf(layer.blendingRanges))
-      warnings.add('Multiple-channel or invalid Blend If ranges');
+      warnings.add('Invalid Blend If ranges');
     if (
       layer.children &&
       !['pass through', 'normal'].includes(layer.blendMode ?? 'pass through')
@@ -158,7 +184,14 @@ function decode(buffer: ArrayBuffer) {
   };
   psd.children?.forEach((layer) => inspect(layer));
   if (
-    !supportedPsdLayerComps(psd.imageResources?.layerComps, psd.children ?? [])
+    !supportedPsdLayerComps(
+      psd.imageResources?.layerComps,
+      psd.children ?? [],
+    ) ||
+    (psd.imageResources?.layerComps?.list.some(
+      (comp) => (comp.capturedInfo & 4) !== 0,
+    ) &&
+      !compAppearance)
   )
     warnings.add('Unsupported appearance-based or malformed layer comps');
   if (!supportedPsdDocumentView(psd.imageResources))
@@ -169,9 +202,30 @@ function decode(buffer: ArrayBuffer) {
     data
       ? new ImageData(precisionToDisplayRgba(data), data.width, data.height)
       : undefined;
+  const channels = psd.additionalChannelData?.map((plane, index) => {
+    const maximum = plane.data instanceof Uint16Array ? 65535 : 1;
+    const rgba = new Uint8ClampedArray(plane.width * plane.height * 4);
+    for (let pixel = 0; pixel < plane.width * plane.height; pixel++) {
+      const raw = plane.data[pixel],
+        value =
+          plane.data instanceof Uint8Array
+            ? raw
+            : plane.data instanceof Uint16Array
+              ? Math.round((raw / maximum) * 255)
+              : Math.round(Math.max(0, Math.min(1, raw)) * 255),
+        offset = pixel * 4;
+      rgba[offset] = rgba[offset + 1] = rgba[offset + 2] = value;
+      rgba[offset + 3] = 255;
+    }
+    return {
+      name:
+        psd.imageResources?.alphaChannelNames?.[index] || `Alpha ${index + 1}`,
+      id: psd.imageResources?.alphaIdentifiers?.[index],
+      imageData: new ImageData(rgba, plane.width, plane.height),
+    };
+  });
   if (warnings.size || !psd.children?.length) {
-    const compositePixels = getCompositeImageData(psd),
-      imageData = displayData(compositePixels);
+    const imageData = displayData(compositePixels);
     if (!imageData)
       throw Error(
         'This PSD needs a saved composite preview. Resave a copy with Maximize Compatibility enabled.',
@@ -182,6 +236,10 @@ function decode(buffer: ArrayBuffer) {
       bitDepth,
       colorMode: header.colorMode,
       iccProfile,
+      paths,
+      channels,
+      preservedResources,
+      compAppearance,
       warnings: [...warnings],
       children: [
         {
@@ -209,6 +267,7 @@ function decode(buffer: ArrayBuffer) {
       id: layer.id,
       comps: layer.comps,
       transparencyProtected: layer.transparencyProtected,
+      knockout: layer.knockout,
       text: layer.text,
       vectorFill: layer.vectorFill,
       vectorMask: layer.vectorMask,
@@ -239,6 +298,10 @@ function decode(buffer: ArrayBuffer) {
     bitDepth,
     colorMode: header.colorMode,
     iccProfile,
+    paths,
+    channels,
+    preservedResources,
+    compAppearance,
     warnings: [],
     children: psd.children.map(convert),
     linkedFiles: psd.linkedFiles,
@@ -253,6 +316,8 @@ function decode(buffer: ArrayBuffer) {
           globalAltitude: psd.imageResources.globalAltitude,
           printScale: psd.imageResources.printScale,
           iccUntaggedProfile: psd.imageResources.iccUntaggedProfile,
+          alphaChannelNames: psd.imageResources.alphaChannelNames,
+          alphaIdentifiers: psd.imageResources.alphaIdentifiers,
         }
       : undefined,
   };
@@ -265,6 +330,10 @@ self.onmessage = (
         psd: Psd;
         psb?: boolean;
         iccProfile?: Uint8Array;
+        paths?: PortablePsdPath[];
+        channels?: { name: string; id?: number; imageData: ImageData }[];
+        preservedResources?: Uint8Array[];
+        compAppearance?: PortableLayerComp[];
       }
   >,
 ) => {
@@ -276,15 +345,51 @@ self.onmessage = (
         { transfer: pixelTransfers(result) },
       );
     } else {
-      const result = injectPsdIccProfile(
-        writePsd(event.data.psd, {
-          generateThumbnail: false,
-          noBackground: true,
-          trimImageData: false,
-          invalidateTextLayers: true,
-          psb: event.data.psb,
-        }),
-        event.data.iccProfile,
+      const result = injectPsdCompAppearance(
+        mergeMissingPsdResources(
+          injectPsdIccProfile(
+            injectPsdPaths(
+              writePsd(
+                {
+                  ...event.data.psd,
+                  additionalChannelData: event.data.channels?.map(
+                    (channel) => ({
+                      width: channel.imageData.width,
+                      height: channel.imageData.height,
+                      data: new Uint8Array(
+                        channel.imageData.data.filter(
+                          (_, index) => index % 4 === 0,
+                        ),
+                      ),
+                    }),
+                  ),
+                  imageResources: {
+                    ...event.data.psd.imageResources,
+                    alphaChannelNames: event.data.channels?.map(
+                      (channel) => channel.name,
+                    ),
+                    alphaIdentifiers: event.data.channels?.map(
+                      (channel, index) => channel.id ?? index + 1,
+                    ),
+                  },
+                },
+                {
+                  generateThumbnail: false,
+                  noBackground: true,
+                  trimImageData: false,
+                  invalidateTextLayers: true,
+                  psb: event.data.psb,
+                },
+              ),
+              event.data.paths,
+              event.data.psd.width,
+              event.data.psd.height,
+            ),
+            event.data.iccProfile,
+          ),
+          event.data.preservedResources,
+        ),
+        event.data.compAppearance,
       );
       self.postMessage({ ok: true, result }, { transfer: [result] });
     }

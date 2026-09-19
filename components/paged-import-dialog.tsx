@@ -12,12 +12,17 @@ export function PagedImportDialog({
   file,
   onClose,
   onImport,
+  onImportLayers,
   onCheck,
 }: {
   onCheck?: (w: number, h: number) => void;
   file: File | null;
   onClose: () => void;
   onImport: (canvas: HTMLCanvasElement, name: string) => void;
+  onImportLayers?: (
+    pages: { canvas: HTMLCanvasElement; name: string }[],
+    name: string,
+  ) => void;
 }) {
   const [source, setSource] = useState<PagedImage | null>(null),
     [page, setPage] = useState(1),
@@ -134,6 +139,56 @@ export function PagedImportDialog({
             >
               {busy ? 'Opening…' : 'Open page'}
             </Button>
+            {!pdf && source.count > 1 && onImportLayers && (
+              <Button
+                variant="outline"
+                disabled={busy || source.count > 100}
+                onClick={async () => {
+                  const run = generation.current;
+                  setBusy(true);
+                  setError('');
+                  try {
+                    const pages: {
+                      canvas: HTMLCanvasElement;
+                      name: string;
+                    }[] = [];
+                    let width = 0,
+                      height = 0;
+                    for (let index = 1; index <= source.count; index++) {
+                      const canvas = await source.render(index, dpi, onCheck);
+                      if (run !== generation.current) return;
+                      if (!width) {
+                        width = canvas.width;
+                        height = canvas.height;
+                      } else if (
+                        canvas.width !== width ||
+                        canvas.height !== height
+                      )
+                        throw Error(
+                          'Layered TIFF pages must share the same dimensions.',
+                        );
+                      pages.push({
+                        canvas,
+                        name: source.pageNames?.[index - 1] ?? `Layer ${index}`,
+                      });
+                    }
+                    onImportLayers(pages, file?.name ?? 'Layered TIFF');
+                    onClose();
+                  } catch (e) {
+                    if (run === generation.current)
+                      setError(
+                        e instanceof Error
+                          ? e.message
+                          : 'TIFF layers could not be imported.',
+                      );
+                  } finally {
+                    if (run === generation.current) setBusy(false);
+                  }
+                }}
+              >
+                {busy ? 'Opening layers…' : 'Open all pages as layers'}
+              </Button>
+            )}
           </>
         ) : (
           !error && <p>Reading document…</p>

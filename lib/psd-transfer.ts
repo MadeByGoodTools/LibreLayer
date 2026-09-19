@@ -1,12 +1,18 @@
 import type { ImageResources, Layer, LinkedFile, PixelData, Psd } from 'ag-psd';
 import PsdWorker from './psd-worker?worker';
 import { pixelTransfers } from './pixel-transfers';
+import type { PortablePsdPath } from './psd-paths';
+import type { PortableLayerComp } from './psd-document-structure';
 export type PsdImport = {
   width: number;
   height: number;
   bitDepth: 1 | 8 | 16 | 32;
-  colorMode: 'bitmap' | 'grayscale' | 'indexed' | 'rgb';
+  colorMode: 'bitmap' | 'grayscale' | 'indexed' | 'rgb' | 'cmyk' | 'lab';
   iccProfile?: Uint8Array;
+  paths?: PortablePsdPath[];
+  channels?: { name: string; id?: number; imageData: ImageData }[];
+  preservedResources?: Uint8Array[];
+  compAppearance?: PortableLayerComp[];
   warnings: string[];
   children: PsdLayerImport[];
   linkedFiles?: LinkedFile[];
@@ -21,6 +27,8 @@ export type PsdImport = {
     | 'globalAltitude'
     | 'printScale'
     | 'iccUntaggedProfile'
+    | 'alphaChannelNames'
+    | 'alphaIdentifiers'
   >;
 };
 export type PsdLayerImport = Layer & {
@@ -35,6 +43,10 @@ export function processPsd<T>(
         psd: Psd;
         psb?: boolean;
         iccProfile?: Uint8Array;
+        paths?: PortablePsdPath[];
+        channels?: { name: string; id?: number; imageData: ImageData }[];
+        preservedResources?: Uint8Array[];
+        compAppearance?: PortableLayerComp[];
       },
 ): Promise<T> {
   return new Promise((resolve, reject) => {

@@ -3,6 +3,13 @@ LibreLayer third-party notices
 TIFF decoding uses UTIF.js (Photopea).
 PDF rendering uses PDF.js (Mozilla Foundation and contributors).
 Build-time image metadata inspection uses image-size-next.
+AVIF, JPEG XL, and WebP codecs use the Apache-2.0 @jsquash packages.
+JPEG 2000 uses MIT-licensed Cornerstone OpenJPEG and Apache-2.0 jpeg2000.
+HEIC uses MIT-licensed @pbk20191/icodec and ISC-licensed heic-decode.
+OpenEXR decoding uses MIT-licensed parse-exr.
+
+Complete copyright and license texts for these packages are retained in the
+published LibreLayer source tree and its package distributions.
 
 node_modules/image-size/LICENSE
 

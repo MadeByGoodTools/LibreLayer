@@ -1,11 +1,12 @@
-# PSD compatibility — September 9, 2026
+# PSD compatibility — September 19, 2026
 
 ## Supported scope
 
-- PSD and PSB import for bitmap, grayscale, indexed color, and 8-, 16- or 32-bit RGB. Supported 16/32-bit raster layers retain their original integer/float samples in LibreLayer's high-depth working surfaces while an 8-bit display proxy keeps browser rendering responsive. Exact embedded ICC profile bytes survive PSD import, project/recovery storage, and layered PSD export. General Photoshop ICC conversion and native high-depth PSD writing are not implemented yet.
-- Raster layer names, order, visibility, whole-percent opacity and fill opacity, supported Canvas blend modes, masks, native clipping stacks, pass-through or isolated groups, translucent/masked groups, and simultaneous editable gray, red, green, and blue Blend If ranges per layer.
-- Document resolution, ruler guides, grid spacing, and visibility/position Layer Comps remain editable. Layer Comps that capture appearance changes are reported instead of being imported or exported with missing state.
-- Supported document metadata remains attached through PSD import/export, native project saves, browser recovery, and document switching: XMP packets, pixel aspect ratio, global effect angle/altitude, print scale, the untagged-profile flag, and the original validated ICC resource payload. Malformed or excessive values trigger the saved-composite path instead of being silently normalized.
+- PSD and PSB import for bitmap, grayscale, indexed color, CMYK, Lab, and 8-, 16- or 32-bit RGB. CMYK and D50 Lab samples are converted into the document's editable RGB working space; the original source color mode is reported rather than mislabeled. Supported 16/32-bit RGB raster layers retain their integer/float samples in LibreLayer high-depth working surfaces while an 8-bit display proxy keeps browser rendering responsive. Flattened PSD/PSB export writes true 16-bit integer or 32-bit float composite samples when the working document is high depth.
+- Raster layer names, order, visibility, whole-percent opacity and fill opacity, supported Canvas blend modes, masks, native clipping stacks, shallow/deep knockout, pass-through or isolated groups, translucent/masked groups, and simultaneous editable gray, red, green, and blue Blend If ranges per layer.
+- Document resolution, ruler guides, grid spacing, visibility/position Layer Comps, and LibreLayer appearance captures remain editable. Appearance recipes are stored in a versioned LibreLayer image resource while the native comp record retains its capture flag, visibility, and position for other PSD readers.
+- Named alpha/spot-style channels and named open/closed paths round-trip with their pixels or Bézier geometry.
+- Supported document metadata remains attached through PSD import/export, native project saves, browser recovery, and document switching: XMP packets, pixel aspect ratio, global effect angle/altitude, print scale, the untagged-profile flag, exact validated ICC bytes, and otherwise-unknown image-resource blocks. A newly written native resource wins over a preserved duplicate. Malformed or excessive values fail closed.
 - Native editable point and paragraph text with one character and paragraph style, including font, size, color, faux bold/italic, scale, tracking, kerning, leading, baseline shift, alignment, simple warp, underline, strike, small caps, ligatures and direction. The rendered bitmap is included for visual fallback. Vertical, path-based and mixed-style type is reported as unsupported and opens only through the explicit saved-composite choice.
 - Native editable solid-color and two-color linear-gradient fill layers retain color, angle, scale, offset and rendered fallback. Noise-gradient and pattern fill layers are explicitly blocked from layered export and reported on import until their native PSD recipes are supported.
 - Native editable shape layers retain closed straight or Bézier paths, supported Boolean path records, even-odd/non-zero fill rules, solid fill, fill visibility, and simple solid strokes with width, opacity, caps, joins, and dash values. Pattern/gradient strokes, open paths, inverted vector masks, or richer vector records are reported instead of simplified.
@@ -14,13 +15,13 @@
 - Native embedded raster Smart Objects retain their PNG, JPEG or WebP source payload and shared-instance identifier. Gaussian Blur, Smart Sharpen and Brightness/Contrast Smart Filters retain their amount, opacity, blend mode, enabled state and order. Linked, masked, nested-document, Camera Raw, warped or unsupported-filter Smart Objects are explicitly blocked or reported until all of their source semantics can be retained.
 - Mask offsets, default outside color and disabled state.
 - Layered PSD export preserves supported raster structure, masks, clipping, fill opacity, multi-channel Blend If, and pass-through/isolated group compositing; transforms and pixel adjustments are baked into pixels. Native .librelayer saving remains the editable master.
-- Flattened PSD export writes the current composite as one pixel layer.
+- Flattened PSD export writes the current composite without a layer section and retains 16/32-bit working samples, saved channels, paths, ICC data, and preserved image resources.
 - Unsupported layer features trigger a choice to open the PSD's saved composite instead of silently approximating editable layers. Original files are never overwritten.
 - Live adjustment layers and blurred masks block layered export with guidance to use flattened PSD or native saving.
 
 ## Limits
 
-256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK, Lab, IPTC/EXIF resource blocks, print-profile conversion, and full Photoshop metadata fidelity are not supported.
+256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK/Lab sources become editable RGB working data rather than remaining native CMYK/Lab documents. Layered PSD output uses 8-bit layer pixels; true 16/32-bit output is currently the flattened path. Duotone/multitone working modes, Photoshop-only private semantics, print-profile conversion, and independent Adobe certification are not claimed.
 
 ## Verified locally in the browser
 
@@ -35,9 +36,13 @@
 - Native document-structure fixture: horizontal/vertical guides, grid spacing, resolution, and visibility/position Layer Comp records survive codec round trip; malformed and appearance-changing comps fail closed.
 - Native document-metadata fixture: XMP, pixel aspect ratio, global effect lighting, print scale, and untagged-profile state survive codec round trip; unsafe metadata fails closed.
 - Native shape fixture: vector mask knots, solid fill, fill state, stroke color, width, opacity, cap, join, and dash values survive codec round trip; unsupported vector records fail closed.
+- Native channel/path fixture: alpha-channel names, identifiers, pixels, and named open/closed Bézier paths survive codec round trip.
+- High-depth fixture: adjacent 16-bit samples and scene values above display white in a 32-bit PSB survive flattened codec round trip.
+- Color-mode fixtures: bitmap, indexed, grayscale, CMYK, and Lab composite sources decode into bounded editable pixels; 16-bit CMYK and grayscale paths retain their source precision until working-space conversion.
+- Resource fixture: exact ICC bytes and unknown image-resource blocks survive export, while freshly generated resources take precedence over stale preserved duplicates.
 - TypeScript no-emit check and production build passed.
 
-These are editor/library round-trip tests, not independent validation in Adobe Photoshop. Full PSD import/export remain partial in the 300-feature checklist.
+These are editor/library round-trip tests, not independent validation in Adobe Photoshop. Unsupported private records still fail closed or use the saved composite rather than being advertised as lossless.
 
 ## Repeatable round-trip laboratory
 
