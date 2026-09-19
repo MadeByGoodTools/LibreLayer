@@ -92,6 +92,7 @@ Current release: **LibreLayer 0.5 — Deep Canvas Update**. Version 1.0 remains 
 - An explicit-trust local script console with a disposable headless worker, deterministic seeded traces, integrity-checked replay, portable `.librescript`/`.libretrace` files, and a matching optional local CLI
 - A persistent Print Studio with measured paper presets, custom sizing, placement, bleed and trim marks, contact sheets, captions, proof metadata, and an explicit browser-driver color handoff
 - Background filter workers keep the interface responsive, report progress, support immediate cancellation, stop after a safety timeout, and commit pixels only after successful completion
+- WebGPU compute and instanced brush rendering use WebGL2 and deterministic CPU fallbacks; Invert also has an audited WebAssembly SIMD worker fallback for browsers without WebGPU
 - Assign/Convert Profile for sRGB, Display P3, Adobe RGB, and ProPhoto RGB, with four rendering intents, black-point compensation, high-depth preservation, atomic worker conversion, progress, cancellation, undo, and project recovery
 - Live WebGL2-versus-CPU reference-pixel checks for filter math, with exact maximum-channel-delta reporting and a CPU-only browser fallback
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work

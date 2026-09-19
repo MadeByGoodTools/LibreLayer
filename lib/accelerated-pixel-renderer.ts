@@ -2,8 +2,13 @@ import {
   applyCpuReferenceFilter,
   type ReferencePixelOperation,
 } from './gpu-filter-reference.ts';
+import { runWasmSimdInvertJob } from './wasm-simd-job.ts';
 
-export type AcceleratedPixelBackend = 'webgpu' | 'webgl2' | 'cpu';
+export type AcceleratedPixelBackend =
+  | 'webgpu'
+  | 'webgl2'
+  | 'wasm-simd-worker'
+  | 'cpu';
 
 export type AcceleratedPixelResult = {
   pixels: Uint8ClampedArray;
@@ -326,6 +331,7 @@ export const applyAcceleratedPixelFilter = async (
   operation: ReferencePixelOperation,
   amount = 1,
   signal?: AbortSignal,
+  onProgress?: (progress: number) => void,
 ): Promise<AcceleratedPixelResult> => {
   if (
     !Number.isInteger(width) ||
@@ -347,6 +353,27 @@ export const applyAcceleratedPixelFilter = async (
     webGpuWarning =
       error instanceof Error ? error.message : 'WebGPU failed safely.';
   }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (operation === 'invert' && amount === 1)
+    try {
+      const result = await runWasmSimdInvertJob(source, width, height, {
+        signal,
+        onProgress,
+      });
+      return { ...result, warning: webGpuWarning };
+    } catch (error) {
+      if (
+        error instanceof DOMException ||
+        (error instanceof Error && error.name === 'JobCancelledError')
+      )
+        throw new DOMException('Aborted', 'AbortError');
+      webGpuWarning = [
+        webGpuWarning,
+        error instanceof Error ? error.message : 'WASM SIMD failed safely.',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   try {
     return {

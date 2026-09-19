@@ -7941,6 +7941,10 @@ export default function Home() {
             kind,
             1,
             controller.signal,
+            (progress) =>
+              setActiveJob((current) =>
+                current?.id === jobId ? { ...current, progress } : current,
+              ),
           );
           if (controller.signal.aborted)
             throw new DOMException('Aborted', 'AbortError');
@@ -7959,7 +7963,7 @@ export default function Home() {
           snapshot(kind[0].toUpperCase() + kind.slice(1));
           render();
           setStatus(
-            `${kind[0].toUpperCase() + kind.slice(1)} applied · ${result.backend === 'webgpu' ? 'WebGPU' : result.backend === 'webgl2' ? 'WebGL2 fallback' : 'CPU fallback'}`,
+            `${kind[0].toUpperCase() + kind.slice(1)} applied · ${result.backend === 'webgpu' ? 'WebGPU' : result.backend === 'wasm-simd-worker' ? 'WASM SIMD worker fallback' : result.backend === 'webgl2' ? 'WebGL2 fallback' : 'CPU fallback'}`,
           );
         } catch (error) {
           setStatus(

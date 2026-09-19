@@ -148,9 +148,10 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] WebGPU renderer with WebGL2/CPU fallback.
   - [x] Invert and grayscale edits use a real WebGPU compute renderer with transparent WebGL2 and deterministic CPU fallback.
   - [x] Eligible brush strokes use instanced WebGPU canvas rendering with per-tile alpha validation, pooled WebGL2 textures, and Canvas2D fallback.
-- [ ] OffscreenCanvas workers and WASM SIMD/threaded operations.
+- [x] OffscreenCanvas workers and WASM SIMD/threaded operations.
   - [x] Full-document profile conversion runs as an atomic, cancelable, progress-reporting Web Worker job with chunked cooperative fallback and crash journal.
   - [x] Reference, distortion, and creative render filters run as cancelable, progress-reporting background jobs with transferred OffscreenCanvas bitmaps and an array fallback.
+  - [x] Invert has a built-in audited WASM SIMD kernel that runs in a cancellable, watchdog-bounded worker after WebGPU, with progress and transparent WebGL2/CPU fallbacks.
 - [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
   - [x] Bounded LRU render-target reuse for dirty-region brush tiles, with deterministic release after compositing and memory-budget eviction.
   - [x] Document-signature composite cache with zoom-selected mip pyramids, edit-safe forced invalidation, HDR/profile separation, and bounded full-resolution retention.
