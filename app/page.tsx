@@ -149,8 +149,8 @@ import type { Layer as PsdLayer } from 'ag-psd';
 import { portableTextToPsd, psdTextToPortable } from '@/lib/psd-text';
 import { fillRecipeToPsd, psdFillToRecipe } from '@/lib/psd-fill';
 import {
-  highDepthToPsdBrightness,
-  psdBrightnessToHighDepth,
+  highDepthToPsdAdjustment,
+  psdAdjustmentToHighDepth,
 } from '@/lib/psd-adjustment';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
@@ -11000,7 +11000,7 @@ export default function Home() {
           maskEnabled: !node.mask?.disabled,
           kind: node.children
             ? 'group'
-            : node.adjustment?.type === 'brightness/contrast'
+            : node.adjustment && psdAdjustmentToHighDepth(node.adjustment)
               ? 'adjustment'
               : node.vectorFill?.type === 'color' ||
                   node.vectorFill?.type === 'solid'
@@ -11016,8 +11016,8 @@ export default function Home() {
               ? psdFillToRecipe(node.vectorFill)
               : undefined,
           precisionAdjustment:
-            node.adjustment?.type === 'brightness/contrast'
-              ? psdBrightnessToHighDepth(node.adjustment)
+            node.adjustment && psdAdjustmentToHighDepth(node.adjustment)
+              ? psdAdjustmentToHighDepth(node.adjustment)
               : undefined,
         });
         nextSurfaces.set(id, { pixels, mask });
@@ -11081,7 +11081,7 @@ export default function Home() {
       layers.some(
         (l) =>
           (l.kind === 'adjustment' &&
-            !highDepthToPsdBrightness(l.precisionAdjustment)) ||
+            !highDepthToPsdAdjustment(l.precisionAdjustment)) ||
           (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
           l.clipping ||
           l.blendIf ||
@@ -11190,7 +11190,7 @@ export default function Home() {
                 : undefined,
               adjustment:
                 l.kind === 'adjustment'
-                  ? highDepthToPsdBrightness(l.precisionAdjustment)
+                  ? highDepthToPsdAdjustment(l.precisionAdjustment)
                   : undefined,
               mask,
             };
