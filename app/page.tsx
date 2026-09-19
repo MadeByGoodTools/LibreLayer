@@ -152,6 +152,7 @@ import {
   highDepthToPsdAdjustment,
   psdAdjustmentToHighDepth,
 } from '@/lib/psd-adjustment';
+import { layerEffectsToPsd, psdEffectsToLayerEffects } from '@/lib/psd-effects';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -11019,6 +11020,9 @@ export default function Home() {
             node.adjustment && psdAdjustmentToHighDepth(node.adjustment)
               ? psdAdjustmentToHighDepth(node.adjustment)
               : undefined,
+          effects: node.effects
+            ? psdEffectsToLayerEffects(node.effects)
+            : undefined,
         });
         nextSurfaces.set(id, { pixels, mask });
         if (node.children) walk(node.children, id);
@@ -11082,6 +11086,7 @@ export default function Home() {
         (l) =>
           (l.kind === 'adjustment' &&
             !highDepthToPsdAdjustment(l.precisionAdjustment)) ||
+          (l.effects && !layerEffectsToPsd(l.effects)) ||
           (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
           l.clipping ||
           l.blendIf ||
@@ -11098,7 +11103,7 @@ export default function Home() {
       )
     ) {
       setPsdError(
-        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, pattern fill layers, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
+        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, pattern fills or effects, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
       );
       return;
     }
@@ -11128,7 +11133,13 @@ export default function Home() {
               pixels = makeCanvas(doc.w, doc.h);
             drawLayer(
               pixels.getContext('2d')!,
-              { ...l, opacity: 100, blend: 'source-over', hasMask: false },
+              {
+                ...l,
+                opacity: 100,
+                blend: 'source-over',
+                hasMask: false,
+                effects: undefined,
+              },
               s,
               doc.w,
               doc.h,
@@ -11192,6 +11203,7 @@ export default function Home() {
                 l.kind === 'adjustment'
                   ? highDepthToPsdAdjustment(l.precisionAdjustment)
                   : undefined,
+              effects: l.effects ? layerEffectsToPsd(l.effects) : undefined,
               mask,
             };
           });

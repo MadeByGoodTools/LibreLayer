@@ -123,6 +123,7 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Native editable solid-color PSD fill layers with rendered fallback pixels, project persistence, and codec round-trip tests.
   - [x] Native editable two-color linear-gradient PSD fill layers with angle, scale, offset, rendered fallback pixels, project persistence, and codec round-trip tests.
   - [x] Eleven native editable PSD adjustment families: Brightness/Contrast, Exposure, Vibrance, Hue/Saturation, Color Balance, Black & White, Photo Filter, Levels, Curves, Channel Mixer, Gradient Map, and Selective Color, with masks, project persistence, codec round-trip tests, and explicit blocking when a combined LibreLayer recipe cannot be represented losslessly.
+  - [x] Nine native editable PSD effect families: Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel, Satin, Color Overlay, two-color linear Gradient Overlay, and solid-color Stroke, with project persistence, codec round-trip tests, shared-parameter validation, and explicit blocking for Pattern Overlay or richer Photoshop records that cannot be represented losslessly.
 - [ ] Exact clipping, knockout, Blend If, group, comp, channel, path, guide, metadata, and ICC fidelity.
 - [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
 - [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.

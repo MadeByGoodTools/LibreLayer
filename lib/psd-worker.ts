@@ -20,6 +20,7 @@ import { precisionToDisplayRgba } from './high-depth';
 import { readSupportedPsdHeader } from './psd-header';
 import { unsupportedPsdTextReasons } from './psd-text';
 import { supportedPsdAdjustment } from './psd-adjustment';
+import { supportedPsdEffects } from './psd-effects';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -94,7 +95,6 @@ function decode(buffer: ArrayBuffer) {
         (layer.mask.bottom ?? 0) - (layer.mask.top ?? 0),
       );
     if (
-      layer.effects ||
       layer.clipping ||
       layer.vectorMask ||
       layer.vectorStroke ||
@@ -102,8 +102,10 @@ function decode(buffer: ArrayBuffer) {
       (layer.fillOpacity !== undefined && layer.fillOpacity !== 1)
     )
       warnings.add(
-        'Smart objects, clipping, effects, vector content or adjustment layers',
+        'Smart objects, clipping, vector content or adjustment layers',
       );
+    if (layer.effects && !supportedPsdEffects(layer.effects))
+      warnings.add('Unsupported or non-lossless layer effects');
     if (layer.adjustment && !supportedPsdAdjustment(layer.adjustment))
       warnings.add(`Unsupported adjustment layer: ${layer.adjustment.type}`);
     if (layer.text)
@@ -177,6 +179,7 @@ function decode(buffer: ArrayBuffer) {
     text: layer.text,
     vectorFill: layer.vectorFill,
     adjustment: layer.adjustment,
+    effects: layer.effects,
     children: layer.children?.map(convert),
     imageData: layer.children
       ? undefined
