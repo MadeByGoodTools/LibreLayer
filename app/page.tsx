@@ -404,16 +404,11 @@ import {
   type PathStrokeStyle,
 } from '@/lib/path-engine';
 import { parseSvgDocument, serializeSvgDocument } from '@/lib/svg-path';
-import {
-  applyReferenceFilter,
-  type ReferenceFilter,
-} from '@/lib/filter-gallery';
-import { applyDistortFilter, type DistortFilter } from '@/lib/distort-filter';
-import {
-  applyRenderFilter,
-  parseConvolutionKernel,
-  type RenderFilter,
-} from '@/lib/render-filter';
+import { type ReferenceFilter } from '@/lib/filter-gallery';
+import type { DistortFilter } from '@/lib/distort-filter';
+import { parseConvolutionKernel, type RenderFilter } from '@/lib/render-filter';
+import { runPixelFilterJob } from '@/lib/pixel-filter-job';
+import type { PixelFilterRequest } from '@/lib/pixel-filter-core';
 import {
   validateFilterPlugin,
   type FilterPluginManifest,
@@ -15187,6 +15182,75 @@ export default function Home() {
     const canvas = targetContextValue.ctx.canvas,
       original = makeCanvas(canvas.width, canvas.height);
     original.getContext('2d')!.drawImage(canvas, 0, 0);
+    let backgroundFilterBackend:
+      | 'background canvas'
+      | 'background worker'
+      | 'safe cooperative fallback'
+      | null = null;
+    const applyBackgroundFilter = async (filter: PixelFilterRequest) => {
+      const context = canvas.getContext('2d', { willReadFrequently: true })!,
+        image = context.getImageData(0, 0, canvas.width, canvas.height),
+        controller = new AbortController(),
+        jobId = crypto.randomUUID();
+      activeJobAbort.current?.abort();
+      activeJobAbort.current = controller;
+      setActiveJob({ id: jobId, label: feature.label, progress: 0 });
+      setStatus(`Running ${feature.label} in a background canvas…`);
+      try {
+        const result = await runPixelFilterJob(
+          image.data,
+          image.width,
+          image.height,
+          filter,
+          {
+            signal: controller.signal,
+            timeoutMs: 120000,
+            onProgress: (progress) =>
+              setActiveJob((current) =>
+                current?.id === jobId ? { ...current, progress } : current,
+              ),
+          },
+        );
+        context.clearRect(0, 0, image.width, image.height);
+        if (result.backend === 'offscreen-worker') {
+          context.drawImage(result.bitmap, 0, 0);
+          result.bitmap.close();
+          backgroundFilterBackend = 'background canvas';
+        } else {
+          context.putImageData(
+            new ImageData(
+              Uint8ClampedArray.from(result.pixels),
+              image.width,
+              image.height,
+            ),
+            0,
+            0,
+          );
+          backgroundFilterBackend =
+            result.backend === 'worker-array'
+              ? 'background worker'
+              : 'safe cooperative fallback';
+        }
+        return true;
+      } catch (error) {
+        context.clearRect(0, 0, image.width, image.height);
+        context.drawImage(original, 0, 0);
+        setStatus(
+          error instanceof JobCancelledError
+            ? `${feature.label} cancelled · no pixels were changed`
+            : error instanceof JobWatchdogError
+              ? `${feature.label} stopped by the safety watchdog · no pixels were changed`
+              : error instanceof Error
+                ? error.message
+                : `${feature.label} failed safely`,
+        );
+        return false;
+      } finally {
+        if (activeJobAbort.current === controller)
+          activeJobAbort.current = null;
+        setActiveJob((current) => (current?.id === jobId ? null : current));
+      }
+    };
     if (
       [
         'blur-gallery',
@@ -15206,19 +15270,16 @@ export default function Home() {
           0,
         );
       else {
-        const pixels = applyReferenceFilter(
-          image.data,
-          image.width,
-          image.height,
-          feature.command as ReferenceFilter,
-          options.amount,
-          options.secondary,
-        );
-        context.putImageData(
-          new ImageData(pixels, image.width, image.height),
-          0,
-          0,
-        );
+        const applied = await applyBackgroundFilter({
+          family: 'reference',
+          operation: feature.command as ReferenceFilter,
+          amount: options.amount,
+          secondary: options.secondary,
+        });
+        if (!applied) {
+          original.width = original.height = 1;
+          return;
+        }
       }
     } else if (
       [
@@ -15232,21 +15293,16 @@ export default function Home() {
         'halftone',
       ].includes(feature.command)
     ) {
-      const context = canvas.getContext('2d', { willReadFrequently: true })!,
-        image = context.getImageData(0, 0, canvas.width, canvas.height),
-        pixels = applyDistortFilter(
-          image.data,
-          image.width,
-          image.height,
-          feature.command as DistortFilter,
-          options.amount,
-          options.secondary,
-        );
-      context.putImageData(
-        new ImageData(pixels, image.width, image.height),
-        0,
-        0,
-      );
+      const applied = await applyBackgroundFilter({
+        family: 'distort',
+        operation: feature.command as DistortFilter,
+        amount: options.amount,
+        secondary: options.secondary,
+      });
+      if (!applied) {
+        original.width = original.height = 1;
+        return;
+      }
     } else if (
       [
         'oil-paint',
@@ -15257,11 +15313,9 @@ export default function Home() {
         'custom-convolution',
       ].includes(feature.command)
     ) {
-      const context = canvas.getContext('2d', { willReadFrequently: true })!,
-        image = context.getImageData(0, 0, canvas.width, canvas.height),
-        tint = [1, 3, 5].map((index) =>
-          parseInt(options.color.slice(index, index + 2), 16),
-        ) as [number, number, number];
+      const tint = [1, 3, 5].map((index) =>
+        parseInt(options.color.slice(index, index + 2), 16),
+      ) as [number, number, number];
       let kernel: number[];
       try {
         kernel = parseConvolutionKernel(options.text);
@@ -15274,21 +15328,18 @@ export default function Home() {
         );
         return;
       }
-      const pixels = applyRenderFilter(
-        image.data,
-        image.width,
-        image.height,
-        feature.command as RenderFilter,
-        options.amount,
-        options.secondary,
-        tint,
+      const applied = await applyBackgroundFilter({
+        family: 'render',
+        operation: feature.command as RenderFilter,
+        amount: options.amount,
+        secondary: options.secondary,
+        color: tint,
         kernel,
-      );
-      context.putImageData(
-        new ImageData(pixels, image.width, image.height),
-        0,
-        0,
-      );
+      });
+      if (!applied) {
+        original.width = original.height = 1;
+        return;
+      }
     } else if (feature.command === 'distort-filters') {
       remapRaster(canvas, (x, y, w, h) => {
         const nx = x / w - 0.5,
@@ -15325,8 +15376,11 @@ export default function Home() {
     original.width = original.height = 1;
     snapshot(feature.label);
     render();
+    const backendSuffix = backgroundFilterBackend
+      ? ' · '.concat(backgroundFilterBackend)
+      : '';
     setStatus(
-      `${feature.label} applied${selectionRef.current ? ' inside the selection' : ''}`,
+      `${feature.label} applied${selectionRef.current ? ' inside the selection' : ''}${backendSuffix}`,
     );
   };
 

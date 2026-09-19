@@ -148,6 +148,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] WebGPU renderer with WebGL2/CPU fallback.
 - [ ] OffscreenCanvas workers and WASM SIMD/threaded operations.
   - [x] Full-document profile conversion runs as an atomic, cancelable, progress-reporting Web Worker job with chunked cooperative fallback and crash journal.
+  - [x] Reference, distortion, and creative render filters run as cancelable, progress-reporting background jobs with transferred OffscreenCanvas bitmaps and an array fallback.
 - [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
   - [x] Bounded LRU render-target reuse for dirty-region brush tiles, with deterministic release after compositing and memory-budget eviction.
   - [x] Document-signature composite cache with zoom-selected mip pyramids, edit-safe forced invalidation, HDR/profile separation, and bounded full-resolution retention.
