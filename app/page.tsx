@@ -420,6 +420,7 @@ import {
   runFilterPluginJob,
 } from '@/lib/filter-plugin-job';
 import { runGpuCpuReferenceCheck } from '@/lib/gpu-filter-reference';
+import { applyAcceleratedPixelFilter } from '@/lib/accelerated-pixel-renderer';
 import {
   adaptivePerformancePolicy,
   normalizePerformanceMode,
@@ -7909,7 +7910,9 @@ export default function Home() {
     setSelectMaskOutput('layer-mask');
     setSelectMaskOpen(true);
   };
-  const filter = (kind: 'grayscale' | 'invert' | 'brightness' | 'sharpen') => {
+  const filter = async (
+    kind: 'grayscale' | 'invert' | 'brightness' | 'sharpen',
+  ) => {
     const target = targetContext();
     if (!target || editing === 'mask') return;
     const ctx = target.ctx;
@@ -7919,8 +7922,58 @@ export default function Home() {
       ctx.drawImage(ctx.canvas, 0, 0);
       ctx.restore();
     } else {
-      const d = ctx.getImageData(0, 0, doc.w, doc.h),
-        hist = [
+      const d = ctx.getImageData(0, 0, doc.w, doc.h);
+      if (kind === 'grayscale' || kind === 'invert') {
+        const controller = new AbortController(),
+          jobId = crypto.randomUUID();
+        activeJobAbort.current?.abort();
+        activeJobAbort.current = controller;
+        setActiveJob({ id: jobId, label: kind, progress: 10 });
+        setStatus(`Running ${kind} with the fastest local renderer…`);
+        try {
+          const result = await applyAcceleratedPixelFilter(
+            d.data,
+            d.width,
+            d.height,
+            kind,
+            1,
+            controller.signal,
+          );
+          if (controller.signal.aborted)
+            throw new DOMException('Aborted', 'AbortError');
+          ctx.putImageData(
+            new ImageData(
+              Uint8ClampedArray.from(result.pixels),
+              d.width,
+              d.height,
+            ),
+            0,
+            0,
+          );
+          setActiveJob((current) =>
+            current?.id === jobId ? { ...current, progress: 100 } : current,
+          );
+          snapshot(kind[0].toUpperCase() + kind.slice(1));
+          render();
+          setStatus(
+            `${kind[0].toUpperCase() + kind.slice(1)} applied · ${result.backend === 'webgpu' ? 'WebGPU' : result.backend === 'webgl2' ? 'WebGL2 fallback' : 'CPU fallback'}`,
+          );
+        } catch (error) {
+          setStatus(
+            error instanceof DOMException && error.name === 'AbortError'
+              ? `${kind} cancelled · no pixels were changed`
+              : error instanceof Error
+                ? error.message
+                : `${kind} failed safely`,
+          );
+        } finally {
+          if (activeJobAbort.current === controller)
+            activeJobAbort.current = null;
+          setActiveJob((current) => (current?.id === jobId ? null : current));
+        }
+        return;
+      }
+      const hist = [
           new Uint32Array(256),
           new Uint32Array(256),
           new Uint32Array(256),
@@ -7943,26 +7996,15 @@ export default function Home() {
         return [low, Math.max(low + 1, high)];
       });
       for (let i = 0; i < d.data.length; i += 4) {
-        const r = d.data[i],
-          g = d.data[i + 1],
-          b = d.data[i + 2];
-        if (kind === 'grayscale') {
-          const y = 0.299 * r + 0.587 * g + 0.114 * b;
-          d.data[i] = d.data[i + 1] = d.data[i + 2] = y;
-        } else if (kind === 'invert') {
-          d.data[i] = 255 - r;
-          d.data[i + 1] = 255 - g;
-          d.data[i + 2] = 255 - b;
-        } else
-          for (let c = 0; c < 3; c++)
-            d.data[i + c] = Math.max(
-              0,
-              Math.min(
-                255,
-                ((d.data[i + c] - limits[c][0]) * 255) /
-                  (limits[c][1] - limits[c][0]),
-              ),
-            );
+        for (let c = 0; c < 3; c++)
+          d.data[i + c] = Math.max(
+            0,
+            Math.min(
+              255,
+              ((d.data[i + c] - limits[c][0]) * 255) /
+                (limits[c][1] - limits[c][0]),
+            ),
+          );
       }
       ctx.putImageData(d, 0, 0);
     }
