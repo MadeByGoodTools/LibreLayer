@@ -28,6 +28,7 @@ import {
   supportedPsdDocumentMetadata,
   supportedPsdLayerComps,
 } from './psd-document-structure';
+import { supportedPsdShapeLayer } from './psd-shape';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -101,7 +102,10 @@ function decode(buffer: ArrayBuffer) {
         (layer.mask.right ?? 0) - (layer.mask.left ?? 0),
         (layer.mask.bottom ?? 0) - (layer.mask.top ?? 0),
       );
-    if (layer.vectorMask || layer.vectorStroke)
+    if (
+      (layer.vectorMask || layer.vectorStroke) &&
+      !supportedPsdShapeLayer(layer)
+    )
       warnings.add('Unsupported vector content');
     if (
       layer.fillOpacity !== undefined &&
@@ -195,6 +199,9 @@ function decode(buffer: ArrayBuffer) {
     transparencyProtected: layer.transparencyProtected,
     text: layer.text,
     vectorFill: layer.vectorFill,
+    vectorMask: layer.vectorMask,
+    vectorStroke: layer.vectorStroke,
+    vectorOrigination: layer.vectorOrigination,
     adjustment: layer.adjustment,
     effects: layer.effects,
     placedLayer: layer.placedLayer,

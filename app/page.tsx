@@ -170,6 +170,12 @@ import {
   supportedPsdDocumentMetadata,
   type PortablePsdDocumentMetadata,
 } from '@/lib/psd-document-structure';
+import {
+  portableShapeToPsd,
+  psdShapeToPortable,
+  supportedPortableShape,
+  type PortableShapeLayer,
+} from '@/lib/psd-shape';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -700,7 +706,7 @@ type TextLayerData = {
   spaceBefore: number;
   spaceAfter: number;
 };
-type LayerKind = 'pixel' | 'group' | 'adjustment' | 'fill';
+type LayerKind = 'pixel' | 'group' | 'adjustment' | 'fill' | 'shape';
 type LayerMeta = {
   fill?: number;
   clipping?: boolean;
@@ -742,6 +748,7 @@ type LayerMeta = {
   colorGrade?: ColorGrade;
   precisionAdjustment?: HighDepthAdjustments;
   fillLayer?: FillLayerRecipe;
+  shapeLayer?: PortableShapeLayer;
   frame?: FrameRecipe;
 };
 type LayerSurface = {
@@ -4537,7 +4544,11 @@ export default function Home() {
     syncLayers(next);
     return true;
   };
-  const createLayer = (name = 'Pixel layer', selectIt = true) => {
+  const createLayer = (
+    name = 'Pixel layer',
+    selectIt = true,
+    record = true,
+  ) => {
     if (!roomForLayers()) return undefined;
     const current = selected(),
       parent = current?.kind === 'group' ? current.id : current?.parentId;
@@ -4559,7 +4570,7 @@ export default function Home() {
     insertLayer(meta);
     if (selectIt) select(id);
     setEditing('pixels');
-    setTimeout(() => snapshot('New layer'), 0);
+    if (record) setTimeout(() => snapshot('New layer'), 0);
     return id;
   };
   const init = useCallback(() => {
@@ -6706,8 +6717,145 @@ export default function Home() {
     setStatus(`Paint Bucket filled ${count.toLocaleString()} matching pixels`);
   };
   const shape = (r: Rect) => {
-    const target = targetContext();
+    const label =
+        shapeKind === 'ellipse'
+          ? 'Ellipse'
+          : shapeKind === 'polygon'
+            ? `${polygonSides}-sided polygon`
+            : shapeRadius
+              ? 'Rounded rectangle'
+              : 'Rectangle',
+      shapeAnchors = (): PortableShapeLayer['paths'][number]['anchors'] => {
+        const x = Math.min(r.x, r.x + r.w),
+          y = Math.min(r.y, r.y + r.h),
+          width = Math.abs(r.w),
+          height = Math.abs(r.h),
+          cx = x + width / 2,
+          cy = y + height / 2;
+        if (shapeKind === 'ellipse') {
+          const rx = width / 2,
+            ry = height / 2,
+            k = 0.5522847498;
+          return [
+            {
+              x: cx,
+              y,
+              incoming: { x: cx - rx * k, y },
+              outgoing: { x: cx + rx * k, y },
+              smooth: true,
+            },
+            {
+              x: x + width,
+              y: cy,
+              incoming: { x: x + width, y: cy - ry * k },
+              outgoing: { x: x + width, y: cy + ry * k },
+              smooth: true,
+            },
+            {
+              x: cx,
+              y: y + height,
+              incoming: { x: cx + rx * k, y: y + height },
+              outgoing: { x: cx - rx * k, y: y + height },
+              smooth: true,
+            },
+            {
+              x,
+              y: cy,
+              incoming: { x, y: cy + ry * k },
+              outgoing: { x, y: cy - ry * k },
+              smooth: true,
+            },
+          ];
+        }
+        if (shapeKind === 'polygon') {
+          const sides = Math.max(3, Math.min(24, polygonSides));
+          return Array.from({ length: sides }, (_, index) => {
+            const angle = -Math.PI / 2 + (index * Math.PI * 2) / sides;
+            return {
+              x: cx + (Math.cos(angle) * width) / 2,
+              y: cy + (Math.sin(angle) * height) / 2,
+            };
+          });
+        }
+        const radius = Math.min(shapeRadius, width / 2, height / 2);
+        if (!radius)
+          return [
+            { x, y },
+            { x: x + width, y },
+            { x: x + width, y: y + height },
+            { x, y: y + height },
+          ];
+        const k = 0.5522847498;
+        return [
+          { x: x + radius, y, incoming: { x: x + radius - radius * k, y } },
+          {
+            x: x + width - radius,
+            y,
+            outgoing: { x: x + width - radius + radius * k, y },
+          },
+          {
+            x: x + width,
+            y: y + radius,
+            incoming: { x: x + width, y: y + radius - radius * k },
+          },
+          {
+            x: x + width,
+            y: y + height - radius,
+            outgoing: { x: x + width, y: y + height - radius + radius * k },
+          },
+          {
+            x: x + width - radius,
+            y: y + height,
+            incoming: { x: x + width - radius + radius * k, y: y + height },
+          },
+          {
+            x: x + radius,
+            y: y + height,
+            outgoing: { x: x + radius - radius * k, y: y + height },
+          },
+          {
+            x,
+            y: y + height - radius,
+            incoming: { x, y: y + height - radius + radius * k },
+          },
+          { x, y: y + radius, outgoing: { x, y: y + radius - radius * k } },
+        ];
+      };
+    let target = targetContext();
     if (!target) return;
+    if (editing === 'pixels') {
+      const id = createLayer(label, true, false);
+      if (!id) return;
+      const meta = layersRef.current.find((layer) => layer.id === id),
+        surface = surfacesRef.current.get(id);
+      if (!meta || !surface) return;
+      const shapeLayer: PortableShapeLayer = {
+        fill: color,
+        fillEnabled: shapeFill,
+        paths: [
+          {
+            closed: true,
+            operation: 'combine',
+            fillRule: 'non-zero',
+            anchors: shapeAnchors(),
+          },
+        ],
+        stroke: {
+          enabled: true,
+          color: shapeFill ? backgroundColor : color,
+          width: size,
+          opacity: 100,
+          cap: 'round',
+          join: 'round',
+          dashes: [],
+        },
+      };
+      patchLayer(id, { kind: 'shape', shapeLayer, opacity });
+      target = {
+        meta: { ...meta, kind: 'shape', shapeLayer, opacity },
+        ctx: surface.pixels.getContext('2d')!,
+      };
+    }
     const first = toLayerPoint(target.meta, { x: r.x, y: r.y }),
       second = toLayerPoint(target.meta, { x: r.x + r.w, y: r.y + r.h }),
       x = Math.min(first.x, second.x),
@@ -6720,7 +6868,7 @@ export default function Home() {
         editing === 'mask' ? maskGray(backgroundColor) : backgroundColor;
     withSelection(target.ctx, target.meta, () => {
       target.ctx.save();
-      target.ctx.globalAlpha = opacity / 100;
+      target.ctx.globalAlpha = editing === 'mask' ? opacity / 100 : 1;
       target.ctx.beginPath();
       if (shapeKind === 'ellipse')
         target.ctx.ellipse(
@@ -6754,15 +6902,7 @@ export default function Home() {
       target.ctx.stroke();
       target.ctx.restore();
     });
-    snapshot(
-      shapeKind === 'ellipse'
-        ? 'Ellipse'
-        : shapeKind === 'polygon'
-          ? `${polygonSides}-sided polygon`
-          : shapeRadius
-            ? 'Rounded rectangle'
-            : 'Rectangle',
-    );
+    snapshot(label);
     render();
   };
   const applyGradient = (r: Rect) => {
@@ -7145,6 +7285,30 @@ export default function Home() {
           x: point.x - s.x,
           y: point.y - s.y,
         }));
+      if (meta.shapeLayer)
+        meta.shapeLayer = {
+          ...meta.shapeLayer,
+          paths: meta.shapeLayer.paths.map((path) => ({
+            ...path,
+            anchors: path.anchors.map((anchor) => ({
+              ...anchor,
+              x: anchor.x - s.x,
+              y: anchor.y - s.y,
+              incoming: anchor.incoming
+                ? {
+                    x: anchor.incoming.x - s.x,
+                    y: anchor.incoming.y - s.y,
+                  }
+                : undefined,
+              outgoing: anchor.outgoing
+                ? {
+                    x: anchor.outgoing.x - s.x,
+                    y: anchor.outgoing.y - s.y,
+                  }
+                : undefined,
+            })),
+          })),
+        };
     }
     setDoc({ w: nw, h: nh });
     setSelection(null);
@@ -11022,10 +11186,14 @@ export default function Home() {
                 (node.mask.positionRelativeToLayer ? (node.top ?? 0) : 0),
             );
         }
-        const blend =
-          node.blendMode === 'normal' || node.children
-            ? 'source-over'
-            : ((node.blendMode ?? 'normal').replaceAll(' ', '-') as BlendMode);
+        const shapeLayer = psdShapeToPortable(node),
+          blend =
+            node.blendMode === 'normal' || node.children
+              ? 'source-over'
+              : ((node.blendMode ?? 'normal').replaceAll(
+                  ' ',
+                  '-',
+                ) as BlendMode);
         nextLayers.push({
           id,
           name: node.name || 'PSD layer',
@@ -11046,21 +11214,25 @@ export default function Home() {
           maskEnabled: !node.mask?.disabled,
           kind: node.children
             ? 'group'
-            : node.adjustment && psdAdjustmentToHighDepth(node.adjustment)
-              ? 'adjustment'
-              : node.vectorFill?.type === 'color' ||
-                  node.vectorFill?.type === 'solid'
-                ? 'fill'
-                : 'pixel',
+            : shapeLayer
+              ? 'shape'
+              : node.adjustment && psdAdjustmentToHighDepth(node.adjustment)
+                ? 'adjustment'
+                : node.vectorFill?.type === 'color' ||
+                    node.vectorFill?.type === 'solid'
+                  ? 'fill'
+                  : 'pixel',
           parentId,
           collapsed: node.opened === false,
           locked: !!node.transparencyProtected,
           textLayer: node.text ? psdTextToPortable(node.text) : undefined,
           fillLayer:
-            node.vectorFill?.type === 'color' ||
-            node.vectorFill?.type === 'solid'
+            !shapeLayer &&
+            (node.vectorFill?.type === 'color' ||
+              node.vectorFill?.type === 'solid')
               ? psdFillToRecipe(node.vectorFill)
               : undefined,
+          shapeLayer,
           precisionAdjustment:
             node.adjustment && psdAdjustmentToHighDepth(node.adjustment)
               ? psdAdjustmentToHighDepth(node.adjustment)
@@ -11093,7 +11265,9 @@ export default function Home() {
         name: comp.name,
         comment: comp.comment,
         states: comp.states.map((state) => {
-          const layer = nextLayers.find((candidate) => candidate.id === state.id)!;
+          const layer = nextLayers.find(
+            (candidate) => candidate.id === state.id,
+          )!;
           return {
             id: state.id,
             visible: state.visible,
@@ -11175,24 +11349,25 @@ export default function Home() {
       return;
     }
     if (
-      !flattened &&
-      layers.some(
-        (l) =>
-          (l.kind === 'adjustment' &&
-            !highDepthToPsdAdjustment(l.precisionAdjustment)) ||
-          (l.effects && !layerEffectsToPsd(l.effects)) ||
-          (l.smartObject && !smartObjectToPsd(l.smartObject, doc.w, doc.h)) ||
-          (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
-          l.blendSpace === 'linear' ||
-          (l.knockout !== undefined && l.knockout !== 'none') ||
-          l.blend in extraBlends ||
-          !!l.vectorMask ||
-          (l.hasMask &&
-            ((l.blur ?? 0) > 0 ||
-              (l.maskDensity ?? 100) !== 100 ||
-              (l.maskFeather ?? 0) > 0 ||
-              l.maskLinked === false)),
-      ) ||
+      (!flattened &&
+        layers.some(
+          (l) =>
+            (l.kind === 'adjustment' &&
+              !highDepthToPsdAdjustment(l.precisionAdjustment)) ||
+            (l.effects && !layerEffectsToPsd(l.effects)) ||
+            (l.smartObject && !smartObjectToPsd(l.smartObject, doc.w, doc.h)) ||
+            (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
+            (l.shapeLayer && !portableShapeToPsd(l.shapeLayer)) ||
+            l.blendSpace === 'linear' ||
+            (l.knockout !== undefined && l.knockout !== 'none') ||
+            l.blend in extraBlends ||
+            !!l.vectorMask ||
+            (l.hasMask &&
+              ((l.blur ?? 0) > 0 ||
+                (l.maskDensity ?? 100) !== 100 ||
+                (l.maskFeather ?? 0) > 0 ||
+                l.maskLinked === false)),
+        )) ||
       !canExportPsdLayerComps(layerCompsRef.current, layersRef.current)
     ) {
       setPsdError(
@@ -11211,9 +11386,9 @@ export default function Home() {
       composite.width = 1;
       composite.height = 1;
       const linkedFiles = new Map<
-        string,
-        NonNullable<ReturnType<typeof smartObjectToPsd>>['linkedFile']
-      >(),
+          string,
+          NonNullable<ReturnType<typeof smartObjectToPsd>>['linkedFile']
+        >(),
         layerIds = new Map(
           layersRef.current.map((layer, index) => [layer.id, index + 1]),
         ),
@@ -11261,6 +11436,9 @@ export default function Home() {
         layersRef.current
           .filter((l) => l.parentId === parentId)
           .map((l) => {
+            const shapeRecords = l.shapeLayer
+              ? portableShapeToPsd(l.shapeLayer)
+              : undefined;
             if (l.kind === 'group')
               return {
                 id: layerIds.get(l.id),
@@ -11323,9 +11501,11 @@ export default function Home() {
               top: 0,
               imageData: layerImage,
               text: l.textLayer ? portableTextToPsd(l.textLayer) : undefined,
-              vectorFill: l.fillLayer
-                ? fillRecipeToPsd(l.fillLayer)
-                : undefined,
+              vectorFill:
+                shapeRecords?.vectorFill ??
+                (l.fillLayer ? fillRecipeToPsd(l.fillLayer) : undefined),
+              vectorMask: shapeRecords?.vectorMask,
+              vectorStroke: shapeRecords?.vectorStroke,
               adjustment:
                 l.kind === 'adjustment'
                   ? highDepthToPsdAdjustment(l.precisionAdjustment)
@@ -11753,6 +11933,11 @@ export default function Home() {
             ))
         )
           throw Error('Invalid vector mask');
+        if (
+          item.shapeLayer !== undefined &&
+          !supportedPortableShape(item.shapeLayer)
+        )
+          throw Error('Invalid editable shape layer');
         if (item.blendIf !== undefined && !validBlendIf(item.blendIf))
           throw Error('Invalid Blend If range');
         if (
@@ -19810,6 +19995,7 @@ export default function Home() {
                           <option value="group">Groups</option>
                           <option value="adjustment">Adjustments</option>
                           <option value="fill">Fill layers</option>
+                          <option value="shape">Shape layers</option>
                         </select>
                         <select
                           aria-label="Filter layer state"

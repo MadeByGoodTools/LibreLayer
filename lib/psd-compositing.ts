@@ -1,7 +1,10 @@
 import type { Layer } from 'ag-psd';
 import {
+  blendIfChannels,
   validBlendIf,
   type BlendIf,
+  type BlendIfChannel,
+  type BlendIfChannelRange,
   type BlendRange,
 } from './layer-compositing.ts';
 
@@ -44,14 +47,17 @@ export function blendIfToPsd(
       destRange: [...DEFAULT_RANGE],
     })),
   };
-  const channel = value.channel ?? 'gray';
-  if (channel === 'gray') {
-    ranges.compositeGrayBlendSource = [...value.source];
-    ranges.compositeGraphBlendDestinationRange = [...value.backdrop];
-  } else {
-    const target = ranges.ranges[CHANNEL_INDEX[channel]];
-    target.sourceRange = [...value.source];
-    target.destRange = [...value.backdrop];
+  for (const [channel, channelRange] of Object.entries(
+    blendIfChannels(value),
+  ) as [BlendIfChannel, BlendIfChannelRange][]) {
+    if (channel === 'gray') {
+      ranges.compositeGrayBlendSource = [...channelRange.source];
+      ranges.compositeGraphBlendDestinationRange = [...channelRange.backdrop];
+    } else {
+      const target = ranges.ranges[CHANNEL_INDEX[channel]];
+      target.sourceRange = [...channelRange.source];
+      target.destRange = [...channelRange.backdrop];
+    }
   }
   return ranges;
 }
@@ -85,11 +91,19 @@ export function psdBlendIfToPortable(
   });
   if (!active.length) return undefined;
   const selected = active[0];
-  return {
+  const portable: BlendIf = {
     channel: selected.channel,
     source: cloneRange(selected.source),
     backdrop: cloneRange(selected.backdrop),
   };
+  if (active.length > 1)
+    portable.channels = Object.fromEntries(
+      active.map(({ channel, source, backdrop }) => [
+        channel,
+        { source: cloneRange(source), backdrop: cloneRange(backdrop) },
+      ]),
+    );
+  return portable;
 }
 
 export function supportedPsdBlendIf(ranges: Layer['blendingRanges']): boolean {
@@ -103,21 +117,7 @@ export function supportedPsdBlendIf(ranges: Layer['blendingRanges']): boolean {
     )
   )
     return false;
-  const padded = [0, 1, 2].map(
-    (index) =>
-      ranges.ranges[index] ?? {
-        sourceRange: DEFAULT_RANGE,
-        destRange: DEFAULT_RANGE,
-      },
-  );
-  const activeChannels = [
-    !isDefault(ranges.compositeGrayBlendSource) ||
-      !isDefault(ranges.compositeGraphBlendDestinationRange),
-    ...padded.map(
-      (range) => !isDefault(range.sourceRange) || !isDefault(range.destRange),
-    ),
-  ].filter(Boolean).length;
-  return activeChannels <= 1;
+  return true;
 }
 
 export function portableFillOpacityToPsd(fill: number | undefined) {

@@ -1,8 +1,10 @@
 'use client';
 import { Button } from '@/components/ui/button';
 import {
+  blendIfChannels,
   defaultBlendIf,
   type BlendIf,
+  type BlendIfChannel,
   type BlendRange,
 } from '@/lib/layer-compositing';
 export function BlendIfControls({
@@ -15,6 +17,18 @@ export function BlendIfControls({
   disabled: boolean;
 }) {
   const current = value ?? defaultBlendIf;
+  const channels = blendIfChannels(current);
+  const updateRange = (key: 'source' | 'backdrop', range: BlendRange) => {
+    const selected = current.channel ?? 'gray';
+    onChange({
+      ...current,
+      [key]: range,
+      channels: {
+        ...channels,
+        [selected]: { ...channels[selected]!, [key]: range },
+      },
+    });
+  };
   return (
     <details className="blend-if-controls">
       <summary>
@@ -33,12 +47,17 @@ export function BlendIfControls({
           <select
             aria-label="Blend If channel"
             value={current.channel ?? 'gray'}
-            onChange={(event) =>
+            onChange={(event) => {
+              const channel = event.target.value as BlendIfChannel,
+                selected = channels[channel] ?? defaultBlendIf;
               onChange({
                 ...current,
-                channel: event.target.value as BlendIf['channel'],
-              })
-            }
+                channel,
+                source: [...selected.source],
+                backdrop: [...selected.backdrop],
+                channels,
+              });
+            }}
           >
             <option value="gray">Grayscale</option>
             <option value="red">Red</option>
@@ -74,7 +93,7 @@ export function BlendIfControls({
                         i ? range[i - 1] : 0,
                         Math.min(i < 3 ? range[i + 1] : 255, Math.round(n)),
                       );
-                      onChange({ ...current, [key]: range });
+                      updateRange(key, range);
                     }}
                   />
                 </label>
@@ -82,9 +101,39 @@ export function BlendIfControls({
             </div>
           </div>
         ))}
-        <Button size="sm" variant="outline" onClick={() => onChange(undefined)}>
-          Reset Blend If
-        </Button>
+        <div className="property-buttons">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const channel = current.channel ?? 'gray',
+                next = { ...channels };
+              delete next[channel];
+              const remaining = Object.entries(next)[0] as
+                | [BlendIfChannel, { source: BlendRange; backdrop: BlendRange }]
+                | undefined;
+              onChange(
+                remaining
+                  ? {
+                      channel: remaining[0],
+                      source: [...remaining[1].source],
+                      backdrop: [...remaining[1].backdrop],
+                      channels: next,
+                    }
+                  : undefined,
+              );
+            }}
+          >
+            Reset channel
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onChange(undefined)}
+          >
+            Reset all
+          </Button>
+        </div>
       </fieldset>
     </details>
   );

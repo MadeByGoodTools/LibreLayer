@@ -46,7 +46,7 @@ void test('gray Blend If converts to native PSD blending ranges', () => {
   assert.deepEqual(psdBlendIfToPortable(native), portable);
 });
 
-void test('one RGB channel remains editable and multiple active channels fail closed', () => {
+void test('one RGB channel remains editable', () => {
   const portable = {
     channel: 'green' as const,
     source: [22, 40, 210, 232] as [number, number, number, number],
@@ -55,9 +55,31 @@ void test('one RGB channel remains editable and multiple active channels fail cl
   const native = blendIfToPsd(portable)!;
   assert.deepEqual(native.ranges[1].sourceRange, portable.source);
   assert.deepEqual(psdBlendIfToPortable(native), portable);
-  native.ranges[0].sourceRange = [1, 2, 253, 254];
-  assert.equal(supportedPsdBlendIf(native), false);
-  assert.equal(psdBlendIfToPortable(native), undefined);
+});
+
+void test('gray and RGB Blend If channels round-trip together', () => {
+  const portable = {
+    channel: 'gray' as const,
+    source: [12, 28, 220, 244] as [number, number, number, number],
+    backdrop: [5, 16, 230, 250] as [number, number, number, number],
+    channels: {
+      gray: {
+        source: [12, 28, 220, 244] as [number, number, number, number],
+        backdrop: [5, 16, 230, 250] as [number, number, number, number],
+      },
+      red: {
+        source: [1, 2, 253, 254] as [number, number, number, number],
+        backdrop: [3, 4, 251, 252] as [number, number, number, number],
+      },
+      blue: {
+        source: [8, 24, 216, 248] as [number, number, number, number],
+        backdrop: [4, 12, 236, 252] as [number, number, number, number],
+      },
+    },
+  };
+  const native = blendIfToPsd(portable)!;
+  assert.equal(supportedPsdBlendIf(native), true);
+  assert.deepEqual(psdBlendIfToPortable(native), portable);
 });
 
 void test('fill opacity validates and converts between percent and PSD fraction', () => {

@@ -1,14 +1,32 @@
 export type BlendRange = [number, number, number, number];
-export type BlendIf = {
-  channel?: 'gray' | 'red' | 'green' | 'blue';
+export type BlendIfChannel = 'gray' | 'red' | 'green' | 'blue';
+export type BlendIfChannelRange = {
   source: BlendRange;
   backdrop: BlendRange;
+};
+export type BlendIf = {
+  channel?: BlendIfChannel;
+  source: BlendRange;
+  backdrop: BlendRange;
+  channels?: Partial<Record<BlendIfChannel, BlendIfChannelRange>>;
 };
 export const defaultBlendIf: BlendIf = {
   channel: 'gray',
   source: [0, 0, 255, 255],
   backdrop: [0, 0, 255, 255],
 };
+const blendIfChannelNames: BlendIfChannel[] = ['gray', 'red', 'green', 'blue'];
+export function blendIfChannels(
+  value: BlendIf,
+): Partial<Record<BlendIfChannel, BlendIfChannelRange>> {
+  return {
+    ...value.channels,
+    [value.channel ?? 'gray']: {
+      source: [...value.source],
+      backdrop: [...value.backdrop],
+    },
+  };
+}
 export const extraBlends = {
   'linear-dodge': 'Linear Dodge (Add)',
   'linear-burn': 'Linear Burn',
@@ -89,23 +107,30 @@ export function rangeAlpha(value: number, [low, start, end, high]: BlendRange) {
 export function validBlendIf(value: unknown): value is BlendIf {
   if (!value || typeof value !== 'object') return false;
   const channel = (value as BlendIf).channel;
+  const rangeIsValid = (a: unknown) =>
+    Array.isArray(a) &&
+    a.length === 4 &&
+    a.every(
+      (v, i) =>
+        Number.isFinite(v) && v >= 0 && v <= 255 && (i === 0 || v >= a[i - 1]),
+    );
+  const channels = (value as BlendIf).channels;
   return (
-    (channel === undefined ||
-      ['gray', 'red', 'green', 'blue'].includes(channel)) &&
+    (channel === undefined || blendIfChannelNames.includes(channel)) &&
     ['source', 'backdrop'].every((key) => {
       const a = (value as Record<string, unknown>)[key];
-      return (
-        Array.isArray(a) &&
-        a.length === 4 &&
-        a.every(
-          (v, i) =>
-            Number.isFinite(v) &&
-            v >= 0 &&
-            v <= 255 &&
-            (i === 0 || v >= a[i - 1]),
-        )
-      );
-    })
+      return rangeIsValid(a);
+    }) &&
+    (channels === undefined ||
+      (typeof channels === 'object' &&
+        channels !== null &&
+        Object.entries(channels).every(
+          ([key, ranges]) =>
+            blendIfChannelNames.includes(key as BlendIfChannel) &&
+            !!ranges &&
+            rangeIsValid(ranges.source) &&
+            rangeIsValid(ranges.backdrop),
+        )))
   );
 }
 export function blendChannel(b: number, s: number, mode: string): number {
@@ -324,32 +349,35 @@ export function compositePixels(
         let sa = s.data[i + 3] / maximum;
         const ba = b.data[i + 3] / maximum;
         if (blendIf) {
-          const channel = blendIf.channel ?? 'gray',
-            index =
-              channel === 'red'
-                ? 0
-                : channel === 'green'
-                  ? 1
-                  : channel === 'blue'
-                    ? 2
-                    : -1,
-            sl =
-              index < 0
-                ? (0.299 * s.data[i] +
-                    0.587 * s.data[i + 1] +
-                    0.114 * s.data[i + 2]) *
-                  (255 / maximum)
-                : s.data[i + index] * (255 / maximum),
-            bl =
-              index < 0
-                ? (0.299 * b.data[i] +
-                    0.587 * b.data[i + 1] +
-                    0.114 * b.data[i + 2]) *
-                  (255 / maximum)
-                : b.data[i + index] * (255 / maximum);
-          sa *=
-            rangeAlpha(sl, blendIf.source) *
-            (ba === 0 ? 1 : rangeAlpha(bl, blendIf.backdrop));
+          for (const [channel, ranges] of Object.entries(
+            blendIfChannels(blendIf),
+          ) as [BlendIfChannel, BlendIfChannelRange][]) {
+            const index =
+                channel === 'red'
+                  ? 0
+                  : channel === 'green'
+                    ? 1
+                    : channel === 'blue'
+                      ? 2
+                      : -1,
+              sl =
+                index < 0
+                  ? (0.299 * s.data[i] +
+                      0.587 * s.data[i + 1] +
+                      0.114 * s.data[i + 2]) *
+                    (255 / maximum)
+                  : s.data[i + index] * (255 / maximum),
+              bl =
+                index < 0
+                  ? (0.299 * b.data[i] +
+                      0.587 * b.data[i + 1] +
+                      0.114 * b.data[i + 2]) *
+                    (255 / maximum)
+                  : b.data[i + index] * (255 / maximum);
+            sa *=
+              rangeAlpha(sl, ranges.source) *
+              (ba === 0 ? 1 : rangeAlpha(bl, ranges.backdrop));
+          }
           s.data[i + 3] = sa * maximum;
         }
         if (!custom) continue;
