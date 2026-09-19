@@ -721,6 +721,8 @@ type LayerSurface = {
   pixels: HTMLCanvasElement;
   mask?: HTMLCanvasElement;
   precision?: WorkingSurface;
+  backing?: TiledImage;
+  maskBacking?: TiledImage;
 };
 type LayerComp = {
   id: string;
@@ -3323,6 +3325,29 @@ export default function Home() {
       depth,
     );
   };
+  const syncTiledBacking = (
+    surface: LayerSurface,
+    dirty?: { pixels?: DirtyRegion; mask?: DirtyRegion },
+    previous?: { pixels?: TiledImage; mask?: TiledImage },
+  ) => {
+    surface.backing = captureTiles(
+      surface.pixels,
+      surface.backing ?? previous?.pixels,
+      dirty?.pixels,
+    );
+    surface.pixels.dataset.tileBacked = 'true';
+    surface.pixels.dataset.tileCount = String(surface.backing.tiles.length);
+    if (surface.mask) {
+      surface.maskBacking = captureTiles(
+        surface.mask,
+        surface.maskBacking ?? previous?.mask,
+        dirty?.mask,
+      );
+      surface.mask.dataset.tileBacked = 'true';
+      surface.mask.dataset.tileCount = String(surface.maskBacking.tiles.length);
+    } else surface.maskBacking = undefined;
+    return { pixels: surface.backing, mask: surface.maskBacking };
+  };
   const surfaceMemoryUnits = (surface: LayerSurface) =>
     surface.pixels.width * surface.pixels.height +
     (surface.mask ? surface.mask.width * surface.mask.height : 0) +
@@ -3993,21 +4018,41 @@ export default function Home() {
               workingDepthRef.current as HighWorkingDepth,
             );
           const precisionChanges = syncPrecisionSurface(s);
+          const backing =
+            dirtySurface && old && !localized
+              ? {
+                  pixels: s.backing ?? old.pixels,
+                  mask: s.mask ? (s.maskBacking ?? old.mask) : undefined,
+                }
+              : localized && old && !dirtySurface?.pixels
+                ? {
+                    pixels: s.backing ?? old.pixels,
+                    mask: s.mask
+                      ? dirtySurface.mask
+                        ? syncTiledBacking(
+                            s,
+                            { mask: dirtySurface.mask },
+                            { pixels: old.pixels, mask: old.mask },
+                          ).mask
+                        : (s.maskBacking ?? old.mask)
+                      : undefined,
+                  }
+                : syncTiledBacking(
+                    s,
+                    localized
+                      ? {
+                          pixels: dirtySurface?.pixels,
+                          mask: dirtySurface?.mask,
+                        }
+                      : undefined,
+                    { pixels: old?.pixels, mask: old?.mask },
+                  );
+          s.backing = backing.pixels;
+          s.maskBacking = backing.mask;
           return {
             id: meta.id,
-            pixels:
-              dirtySurface && old && !localized
-                ? old.pixels
-                : localized && old && !dirtySurface?.pixels
-                  ? old.pixels
-                  : captureTiles(s.pixels, old?.pixels, dirtySurface?.pixels),
-            mask: s.mask
-              ? dirtySurface && old && !localized
-                ? old.mask
-                : localized && old && !dirtySurface?.mask
-                  ? old.mask
-                  : captureTiles(s.mask, old?.mask, dirtySurface?.mask)
-              : undefined,
+            pixels: backing.pixels,
+            mask: backing.mask,
             precision: s.precision
               ? precisionChanges === 0 && old?.precision
                 ? old.precision
@@ -4065,6 +4110,8 @@ export default function Home() {
       nextMap.set(item.id, {
         pixels,
         mask,
+        backing: item.pixels,
+        maskBacking: item.mask,
         precision: item.precision
           ? cloneWorkingSurface(item.precision)
           : undefined,
@@ -4128,6 +4175,8 @@ export default function Home() {
         precision: historicSurface.precision
           ? cloneWorkingSurface(historicSurface.precision)
           : undefined,
+        backing: historicSurface.pixels,
+        maskBacking: historicSurface.mask,
       },
       parentId = historicMeta.parentId
         ? layersRef.current.some((layer) => layer.id === historicMeta.parentId)
@@ -4164,6 +4213,8 @@ export default function Home() {
       map.set(item.id, {
         pixels: restoreTiles(item.pixels),
         mask: item.mask ? restoreTiles(item.mask) : undefined,
+        backing: item.pixels,
+        maskBacking: item.mask,
         precision: item.precision
           ? cloneWorkingSurface(item.precision)
           : undefined,
@@ -10789,10 +10840,11 @@ export default function Home() {
         layerComps: structuredClone(extras?.layerComps ?? []),
         surfaces: nextLayers.map((meta) => {
           const s = nextSurfaces.get(meta.id)!;
+          const backing = syncTiledBacking(s);
           return {
             id: meta.id,
-            pixels: captureTiles(s.pixels),
-            mask: s.mask ? captureTiles(s.mask) : undefined,
+            pixels: backing.pixels,
+            mask: backing.mask,
             precision: s.precision
               ? captureWorkingSurface(s.precision)
               : undefined,
@@ -19053,6 +19105,11 @@ export default function Home() {
               }
               ref={displayRef}
               aria-label="Editable image canvas"
+              data-tile-backed-layers={
+                [...surfacesRef.current.values()].filter(
+                  (surface) => surface.backing,
+                ).length
+              }
               className={`soft-proof-${preferences.proofMode ?? 'none'}`}
               width={doc.w}
               height={doc.h}

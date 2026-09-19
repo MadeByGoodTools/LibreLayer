@@ -152,7 +152,8 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Full-document profile conversion runs as an atomic, cancelable, progress-reporting Web Worker job with chunked cooperative fallback and crash journal.
   - [x] Reference, distortion, and creative render filters run as cancelable, progress-reporting background jobs with transferred OffscreenCanvas bitmaps and an array fallback.
   - [x] Invert has a built-in audited WASM SIMD kernel that runs in a cancellable, watchdog-bounded worker after WebGPU, with progress and transparent WebGL2/CPU fallbacks.
-- [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
+- [x] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
+  - [x] Every committed pixel and mask surface retains a tile-addressable backing store with structural sharing for unchanged 256 px tiles and a materialized canvas editing cache.
   - [x] Bounded LRU render-target reuse for dirty-region brush tiles, with deterministic release after compositing and memory-budget eviction.
   - [x] Document-signature composite cache with zoom-selected mip pyramids, edit-safe forced invalidation, HDR/profile separation, and bounded full-resolution retention.
   - [x] Brush history snapshots reuse untouched layer, mask, selection, and pixel tiles while capturing only the stroke's dirty tile range.

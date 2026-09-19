@@ -17,3 +17,9 @@ For automated browser QA, opening `?qa=performance` starts the check and opens i
 Invert and grayscale try the WebGPU compute renderer first. When WebGPU is unavailable, Invert uses LibreLayer's built-in WebAssembly SIMD kernel in a dedicated worker before trying WebGL2 and the deterministic CPU reference path. The worker receives a copied RGBA8 buffer, reports progress, can be cancelled by terminating the worker, stops at a bounded watchdog, and commits only a complete result. The SIMD kernel handles four pixels per vector instruction and preserves every alpha byte. Its human-readable source is committed at `lib/wasm/invert-simd.wat`; no module is downloaded at runtime.
 
 Browsers without WebAssembly SIMD skip that route automatically. Grayscale falls back directly from WebGPU to WebGL2 and then CPU because its current reference luminance equation is not implemented by the SIMD module. None of these accelerated paths uploads image data.
+
+## Tiled document backing
+
+Every committed pixel layer and raster mask keeps a tile-addressable 256 × 256 backing store. The canvas is the active editing cache; when an edit commits, only tiles intersecting its known dirty region are read back and replaced. Unchanged tile objects are structurally shared with the preceding transaction and its Undo state. Solid-color and transparent tiles use a four-byte packed value instead of a full pixel allocation. Restoring history materializes a fresh canvas cache from the saved tiles, while mip selection, composite caching, and pooled GPU targets remain independent bounded caches.
+
+Document tabs, native project saves, local recovery, Smart Object synchronization, Undo/Redo, and branch creation all pass through the same committed surface transactions. A browser that cannot allocate a required canvas fails the transaction explicitly instead of silently resizing or discarding tiles.
