@@ -5,10 +5,34 @@ import {
   developRawRgba,
   developRawRgb16,
   isRawDevelopSettings,
+  normalizeLibRawImage,
   normalizeRawDecodeSettings,
   rawDecodeOptions,
   type RawLinearImage,
 } from '../lib/raw-develop.ts';
+
+void test('LibRaw output normalization retains depth, metadata, and channel values', () => {
+  const normalized = normalizeLibRawImage(
+    {
+      width: 2,
+      height: 1,
+      colors: 3,
+      bits: 16,
+      data: new Uint16Array([0, 32768, 65535, 65535, 16384, 0]),
+    },
+    {
+      camera_make: 'Fixture',
+      camera_model: 'Bayer 1',
+      lens: { Lens: 'Fixture 35mm' },
+    },
+  );
+  assert.equal(normalized.bitDepth, 16);
+  assert.equal(normalized.camera, 'Fixture Bayer 1');
+  assert.equal(normalized.lens, 'Fixture 35mm');
+  assert.equal(normalized.data[0], 0);
+  assert.ok(Math.abs(normalized.data[1] - 32768 / 65535) < 1e-6);
+  assert.equal(normalized.data[2], 1);
+});
 
 const image: RawLinearImage = {
   width: 2,
@@ -86,18 +110,22 @@ void test('RAW demosaic modes map to distinct LibRaw interpolation recipes', () 
 void test('RAW white balance and embedded profiles produce explicit decode options', () => {
   assert.equal(rawDecodeOptions({ whiteBalance: 'camera' }).useCameraWb, true);
   assert.equal(rawDecodeOptions({ whiteBalance: 'auto' }).useAutoWb, true);
-  assert.deepEqual(rawDecodeOptions({ whiteBalance: 'daylight' }).userMul, [
-    2.15, 1, 1.45, 1,
-  ]);
+  assert.deepEqual(
+    rawDecodeOptions({ whiteBalance: 'daylight' }).userMul,
+    [2.15, 1, 1.45, 1],
+  );
   assert.equal(
     rawDecodeOptions({ cameraProfile: 'embedded-dng' }).cameraProfile,
     'embed',
   );
-  assert.deepEqual(normalizeRawDecodeSettings({ demosaic: 'invalid' as never }), {
-    demosaic: 'dht',
-    whiteBalance: 'camera',
-    cameraProfile: 'camera-matrix',
-  });
+  assert.deepEqual(
+    normalizeRawDecodeSettings({ demosaic: 'invalid' as never }),
+    {
+      demosaic: 'dht',
+      whiteBalance: 'camera',
+      cameraProfile: 'camera-matrix',
+    },
+  );
 });
 
 void test('saved Camera Raw recipes require every bounded adjustment', () => {

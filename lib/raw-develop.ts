@@ -7,6 +7,50 @@ export type RawLinearImage = {
   lens: string;
 };
 
+type LibRawImageData = {
+  width: number;
+  height: number;
+  colors?: number;
+  bits?: number;
+  data: Uint8Array | Uint16Array;
+};
+
+type LibRawMetadata = {
+  camera_make?: string;
+  camera_model?: string;
+  lens?: { Lens?: string; makernotes?: { Lens?: string } };
+};
+
+export function normalizeLibRawImage(
+  decoded: LibRawImageData,
+  metadata?: LibRawMetadata,
+): RawLinearImage {
+  if (!decoded?.data || !decoded.width || !decoded.height)
+    throw new Error('The sensor data did not produce editable pixels.');
+  const channels = Math.max(1, decoded.colors || 3);
+  const maximum = decoded.data instanceof Uint16Array ? 65535 : 255;
+  const data = new Float32Array(decoded.width * decoded.height * 3);
+  for (let pixel = 0; pixel < decoded.width * decoded.height; pixel++) {
+    const source = pixel * channels;
+    const target = pixel * 3;
+    data[target] = Number(decoded.data[source] ?? 0) / maximum;
+    data[target + 1] =
+      Number(decoded.data[source + Math.min(1, channels - 1)] ?? 0) / maximum;
+    data[target + 2] =
+      Number(decoded.data[source + Math.min(2, channels - 1)] ?? 0) / maximum;
+  }
+  return {
+    width: decoded.width,
+    height: decoded.height,
+    data,
+    bitDepth: decoded.bits || 16,
+    camera: [metadata?.camera_make, metadata?.camera_model]
+      .filter(Boolean)
+      .join(' '),
+    lens: metadata?.lens?.Lens ?? metadata?.lens?.makernotes?.Lens ?? '',
+  };
+}
+
 export type RawDemosaicMode =
   | 'linear'
   | 'vng'
@@ -85,8 +129,7 @@ export const rawDecodeOptions = (value?: Partial<RawDecodeSettings>) => {
         ? ([1.35, 1, 2.55, 1] as [number, number, number, number])
         : null,
     useCameraMatrix: 3,
-    cameraProfile:
-      settings.cameraProfile === 'embedded-dng' ? 'embed' : null,
+    cameraProfile: settings.cameraProfile === 'embedded-dng' ? 'embed' : null,
     userQual: qualities[settings.demosaic],
     dcbIterations: settings.demosaic === 'dcb' ? 2 : -1,
     dcbEnhanceFl: settings.demosaic === 'dcb',
@@ -281,30 +324,9 @@ export async function decodeCameraRaw(
       decoder.imageData(),
       decoder.metadata(true),
     ]);
-    if (!decoded?.data || !decoded.width || !decoded.height)
+    if (!decoded)
       throw new Error('The sensor data did not produce editable pixels.');
-    const channels = Math.max(1, decoded.colors || 3);
-    const maximum = decoded.data instanceof Uint16Array ? 65535 : 255;
-    const data = new Float32Array(decoded.width * decoded.height * 3);
-    for (let pixel = 0; pixel < decoded.width * decoded.height; pixel++) {
-      const source = pixel * channels;
-      const target = pixel * 3;
-      data[target] = Number(decoded.data[source] ?? 0) / maximum;
-      data[target + 1] =
-        Number(decoded.data[source + Math.min(1, channels - 1)] ?? 0) / maximum;
-      data[target + 2] =
-        Number(decoded.data[source + Math.min(2, channels - 1)] ?? 0) / maximum;
-    }
-    return {
-      width: decoded.width,
-      height: decoded.height,
-      data,
-      bitDepth: decoded.bits || 16,
-      camera: [metadata?.camera_make, metadata?.camera_model]
-        .filter(Boolean)
-        .join(' '),
-      lens: metadata?.lens?.Lens ?? metadata?.lens?.makernotes?.Lens ?? '',
-    };
+    return normalizeLibRawImage(decoded, metadata);
   } finally {
     decoder.dispose();
   }
@@ -430,9 +452,7 @@ export function developRawRgba(
       const sourceX = x;
       const rgb = encodeProPhotoPixel(
         adjustRawPixel(
-          [0, 1, 2].map((channel) =>
-            bilinear(prepared, sourceX, y, channel),
-          ),
+          [0, 1, 2].map((channel) => bilinear(prepared, sourceX, y, channel)),
           settings,
         ),
         'srgb',

@@ -17,6 +17,7 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "test:core": "node --test tests/*.test.ts",
     "test:performance": "node scripts/performance-suite.ts",
+    "test:raw-matrix": "node scripts/raw-camera-matrix.ts",
     "test:release": "pnpm exec tsc --noEmit && pnpm lint && pnpm test:core && pnpm test:performance && pnpm test:visual && pnpm audit --prod && pnpm build",
     "test:visual": "node scripts/visual-regression.ts",
     "script:local": "node scripts/librelayer-script.ts",

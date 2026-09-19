@@ -112,7 +112,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Local focal-family lens profiles with metadata matching, distortion, vignette, aberration, defringe, and RAW sharpening.
 - [x] Scene-referred 32-bit HDR Merge with Float16 extended-sRGB preview on supported HDR displays, deterministic SDR fallback, and highlight map.
 - [x] Portable sidecars and sequential local batch development with progress, per-file failure reporting, and safe stopping.
-- [ ] Full camera fixture matrix.
+- [x] Full advertised-format camera fixture matrix with pinned real-camera CR2, CR3, NEF, ARW, DNG, RAF/X-Trans, ORF, and RW2 files.
 
 ## 8. File compatibility
 
