@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   brushTileBounds,
+  gpuTextureTargetCost,
+  gpuTextureTargetKey,
   partitionBrushDabs,
   type BrushDab,
 } from '../lib/gpu-brush-renderer.ts';
@@ -47,4 +49,11 @@ void test('invalid and invisible dabs are excluded from renderer batches', () =>
     ]),
     [[dab(1, 2)]],
   );
+});
+
+void test('GPU brush targets use stable dimensions and exact RGBA8 cost', () => {
+  assert.equal(gpuTextureTargetKey(256.9, 128.2), '256x128');
+  assert.equal(gpuTextureTargetCost(256.9, 128.2), 256 * 128 * 4);
+  assert.equal(gpuTextureTargetKey(0, Number.NaN), '1x1');
+  assert.equal(gpuTextureTargetCost(0, Number.NaN), 4);
 });

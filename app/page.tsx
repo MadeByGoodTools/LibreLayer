@@ -4058,6 +4058,7 @@ export default function Home() {
       );
       return;
     }
+    releaseDisplayCompositeCache();
     const nextMap = new Map<string, LayerSurface>();
     for (const item of snap.surfaces) {
       const pixels = restoreTiles(item.pixels),
@@ -5904,6 +5905,10 @@ export default function Home() {
               hueJitter === 0 &&
               opacityJitter === 0 &&
               flowJitter === 0;
+          if (displayRef.current)
+            displayRef.current.dataset.brushRenderPath = accelerated
+              ? 'eligible'
+              : 'canvas2d-standard';
           if (accelerated && stroke.points.length) {
             const baseAlpha =
                 (((opacity / 100) * flow) / 100) *
@@ -5931,6 +5936,9 @@ export default function Home() {
                 color: paint === 'white' ? '#ffffff' : paint,
                 hardness: hardness / 100,
               });
+            if (displayRef.current)
+              displayRef.current.dataset.brushRenderPath =
+                renderer.lastRenderPath;
             for (const dab of dabs) recordDirty(dab.x, dab.y, dab.size / 2);
             ctx.save();
             ctx.globalAlpha = 1;
@@ -6103,7 +6111,6 @@ export default function Home() {
                 continue;
               }
               const inner = radius * Math.max(0, Math.min(1, hardness / 100)),
-                g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius),
                 transparentPaint = dabPaint.startsWith('#')
                   ? `${dabPaint}00`
                   : dabPaint.startsWith('rgb(')
@@ -6111,9 +6118,6 @@ export default function Home() {
                     : dabPaint === 'white'
                       ? 'rgba(255,255,255,0)'
                       : 'rgba(0,0,0,0)';
-              g.addColorStop(0, dabPaint);
-              g.addColorStop(Math.min(0.999, inner / radius), dabPaint);
-              g.addColorStop(1, transparentPaint);
               ctx.save();
               ctx.translate(x, y);
               ctx.rotate((brushAngle * Math.PI) / 180);
@@ -6122,6 +6126,10 @@ export default function Home() {
                 ctx.rotate(tiltAngle);
                 ctx.scale(1, Math.max(0.18, 1 - tiltMagnitude));
               }
+              const g = ctx.createRadialGradient(0, 0, inner, 0, 0, radius);
+              g.addColorStop(0, dabPaint);
+              g.addColorStop(Math.min(0.999, inner / radius), dabPaint);
+              g.addColorStop(1, transparentPaint);
               ctx.fillStyle = g;
               ctx.beginPath();
               ctx.arc(0, 0, radius, 0, Math.PI * 2);
@@ -6145,7 +6153,23 @@ export default function Home() {
                 );
                 ctx.rotate(angle + Math.PI / 4);
                 ctx.scale(1, Math.max(0.05, brushRoundness / 100));
-                ctx.fillStyle = g;
+                const dualInner =
+                    dualRadius * Math.max(0, Math.min(1, hardness / 100)),
+                  dualGradient = ctx.createRadialGradient(
+                    0,
+                    0,
+                    dualInner,
+                    0,
+                    0,
+                    dualRadius,
+                  );
+                dualGradient.addColorStop(0, dabPaint);
+                dualGradient.addColorStop(
+                  Math.min(0.999, dualInner / dualRadius),
+                  dabPaint,
+                );
+                dualGradient.addColorStop(1, transparentPaint);
+                ctx.fillStyle = dualGradient;
                 ctx.beginPath();
                 ctx.arc(0, 0, dualRadius, 0, Math.PI * 2);
                 ctx.fill();
@@ -16754,7 +16778,7 @@ export default function Home() {
                       aria-label={`Brush renderer ${brushRendererBackend}`}
                     >
                       {brushRendererBackend === 'webgl2'
-                        ? 'WebGL2 subpixel renderer active'
+                        ? 'WebGL2 pooled texture renderer active'
                         : 'Canvas renderer fallback active'}
                     </p>
                     <section

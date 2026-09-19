@@ -152,6 +152,7 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Bounded LRU render-target reuse for dirty-region brush tiles, with deterministic release after compositing and memory-budget eviction.
   - [x] Document-signature composite cache with zoom-selected mip pyramids, edit-safe forced invalidation, HDR/profile separation, and bounded full-resolution retention.
   - [x] Brush history snapshots reuse untouched layer, mask, selection, and pixel tiles while capturing only the stroke's dirty tile range.
+  - [x] Bounded WebGL2 framebuffer and texture pooling for brush tiles, with validated targets, per-tile fallback, deterministic release, and GPU-memory eviction.
 - [x] Memory-pressure adaptation and preview/final quality scheduling.
 - [x] OPFS scratch storage with selectable locations and quotas.
 - [x] Incremental saving, pixel deduplication, compressed history, and transaction journal.

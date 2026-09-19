@@ -23,6 +23,22 @@ export type RenderedBrushTile = BrushTileBounds & {
   release(): void;
 };
 
+type WebGlRenderTarget = {
+  texture: WebGLTexture;
+  framebuffer: WebGLFramebuffer;
+  width: number;
+  height: number;
+};
+
+const gpuTargetDimension = (value: number) =>
+  Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
+
+export const gpuTextureTargetKey = (width: number, height: number) =>
+  `${gpuTargetDimension(width)}x${gpuTargetDimension(height)}`;
+
+export const gpuTextureTargetCost = (width: number, height: number) =>
+  gpuTargetDimension(width) * gpuTargetDimension(height) * 4;
+
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
 layout(location = 0) in vec2 a_corner;
@@ -168,10 +184,13 @@ const createProgram = (gl: WebGL2RenderingContext) => {
 export class GpuBrushRenderer {
   canvas: HTMLCanvasElement;
   readonly backend: BrushRendererBackend;
+  lastRenderPath: 'webgl2-pooled' | 'canvas2d-texture-fallback' | 'canvas2d' =
+    'canvas2d';
   private gl: WebGL2RenderingContext | null = null;
   private program: WebGLProgram | null = null;
   private cornerBuffer: WebGLBuffer | null = null;
   private instanceBuffer: WebGLBuffer | null = null;
+  private gpuTargetPool: BoundedResourcePool<WebGlRenderTarget> | null = null;
   private readonly tilePool = new BoundedResourcePool<HTMLCanvasElement>(
     64 * 1024 * 1024,
     (canvas) => {
@@ -195,6 +214,10 @@ export class GpuBrushRenderer {
       this.instanceBuffer = gl.createBuffer();
       if (!this.cornerBuffer || !this.instanceBuffer)
         throw new Error('Brush buffers could not be created.');
+      this.gpuTargetPool = new BoundedResourcePool<WebGlRenderTarget>(
+        64 * 1024 * 1024,
+        (target) => this.destroyGpuTarget(target),
+      );
       this.backend = 'webgl2';
       const selfTestBounds = { x: 0, y: 0, width: 16, height: 16 };
       this.resize(selfTestBounds.width, selfTestBounds.height);
@@ -223,6 +246,7 @@ export class GpuBrushRenderer {
       this.program = null;
       this.cornerBuffer = null;
       this.instanceBuffer = null;
+      this.gpuTargetPool = null;
       this.backend = 'canvas2d';
     }
   }
@@ -232,13 +256,127 @@ export class GpuBrushRenderer {
     if (this.canvas.height !== height) this.canvas.height = height;
   }
 
+  private destroyGpuTarget(target: WebGlRenderTarget) {
+    if (!this.gl) return;
+    this.gl.deleteFramebuffer(target.framebuffer);
+    this.gl.deleteTexture(target.texture);
+  }
+
+  private createGpuTarget(width: number, height: number): WebGlRenderTarget {
+    const gl = this.gl!,
+      texture = gl.createTexture(),
+      framebuffer = gl.createFramebuffer();
+    if (!texture || !framebuffer) {
+      if (texture) gl.deleteTexture(texture);
+      if (framebuffer) gl.deleteFramebuffer(framebuffer);
+      throw new Error('GPU brush target could not be created.');
+    }
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      width,
+      height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      null,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      texture,
+      0,
+    );
+    const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    if (complete !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteTexture(texture);
+      throw new Error('GPU brush target is incomplete.');
+    }
+    return { texture, framebuffer, width, height };
+  }
+
+  private readGpuTarget(
+    target: WebGlRenderTarget,
+    bounds: BrushTileBounds,
+    sample: BrushDab,
+    canvas: HTMLCanvasElement,
+  ) {
+    const gl = this.gl!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.getError();
+    const pixels = new Uint8Array(target.width * target.height * 4);
+    gl.readPixels(
+      0,
+      0,
+      target.width,
+      target.height,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixels,
+    );
+    const failed = gl.getError() !== gl.NO_ERROR,
+      x = Math.max(
+        0,
+        Math.min(target.width - 1, Math.round(sample.x - bounds.x)),
+      ),
+      y = Math.max(
+        0,
+        Math.min(
+          target.height - 1,
+          target.height - 1 - Math.round(sample.y - bounds.y),
+        ),
+      ),
+      sampleAlpha = pixels[(y * target.width + x) * 4 + 3];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (failed || sampleAlpha === 0)
+      throw new Error('GPU brush target validation failed.');
+    const flipped = new Uint8ClampedArray(pixels.length),
+      rowBytes = target.width * 4;
+    for (let sourceY = 0; sourceY < target.height; sourceY++) {
+      const sourceOffset = sourceY * rowBytes,
+        targetOffset = (target.height - sourceY - 1) * rowBytes;
+      for (let offset = 0; offset < rowBytes; offset += 4) {
+        const alpha = pixels[sourceOffset + offset + 3],
+          scale = alpha ? 255 / alpha : 0;
+        flipped[targetOffset + offset] = Math.min(
+          255,
+          Math.round(pixels[sourceOffset + offset] * scale),
+        );
+        flipped[targetOffset + offset + 1] = Math.min(
+          255,
+          Math.round(pixels[sourceOffset + offset + 1] * scale),
+        );
+        flipped[targetOffset + offset + 2] = Math.min(
+          255,
+          Math.round(pixels[sourceOffset + offset + 2] * scale),
+        );
+        flipped[targetOffset + offset + 3] = alpha;
+      }
+    }
+    canvas
+      .getContext('2d')!
+      .putImageData(new ImageData(flipped, target.width, target.height), 0, 0);
+  }
+
   private renderCanvas2d(
     dabs: BrushDab[],
     bounds: BrushTileBounds,
     color: string,
     hardness: number,
+    canvas = this.canvas,
   ) {
-    const ctx = this.canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, bounds.width, bounds.height);
     for (const dab of dabs) {
       const radius = dab.size / 2,
@@ -265,6 +403,7 @@ export class GpuBrushRenderer {
     bounds: BrushTileBounds,
     color: string,
     hardness: number,
+    framebuffer: WebGLFramebuffer | null = null,
   ) {
     const gl = this.gl!,
       program = this.program!,
@@ -286,6 +425,7 @@ export class GpuBrushRenderer {
         at,
       );
     }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
     gl.viewport(0, 0, bounds.width, bounds.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -341,29 +481,53 @@ export class GpuBrushRenderer {
     for (const group of groups) {
       const bounds = brushTileBounds(group);
       if (!bounds) continue;
-      this.resize(bounds.width, bounds.height);
-      if (this.backend === 'webgl2')
-        this.renderWebGl(
-          group,
-          bounds,
-          options.color,
-          Math.max(0, Math.min(1, options.hardness)),
+      const poolKey = gpuTextureTargetKey(bounds.width, bounds.height),
+        bytes = gpuTextureTargetCost(bounds.width, bounds.height),
+        copy = this.tilePool.acquire(poolKey, bytes, () =>
+          document.createElement('canvas'),
         );
-      else
+      copy.width = bounds.width;
+      copy.height = bounds.height;
+      let gpuTarget: WebGlRenderTarget | null = null;
+      if (this.backend === 'webgl2') {
+        try {
+          gpuTarget = this.gpuTargetPool!.acquire(poolKey, bytes, () =>
+            this.createGpuTarget(bounds.width, bounds.height),
+          );
+          this.renderWebGl(
+            group,
+            bounds,
+            options.color,
+            Math.max(0, Math.min(1, options.hardness)),
+            gpuTarget.framebuffer,
+          );
+          this.readGpuTarget(gpuTarget, bounds, group[0], copy);
+          this.lastRenderPath = 'webgl2-pooled';
+        } catch {
+          if (gpuTarget) this.destroyGpuTarget(gpuTarget);
+          gpuTarget = null;
+          this.gpuTargetPool?.clear();
+          this.renderCanvas2d(
+            group,
+            bounds,
+            options.color,
+            Math.max(0, Math.min(1, options.hardness)),
+            copy,
+          );
+          this.lastRenderPath = 'canvas2d-texture-fallback';
+        }
+      } else {
+        this.resize(bounds.width, bounds.height);
         this.renderCanvas2d(
           group,
           bounds,
           options.color,
           Math.max(0, Math.min(1, options.hardness)),
         );
-      const poolKey = `${bounds.width}x${bounds.height}`,
-        bytes = bounds.width * bounds.height * 4,
-        copy = this.tilePool.acquire(poolKey, bytes, () =>
-          document.createElement('canvas'),
-        );
-      copy.width = bounds.width;
-      copy.height = bounds.height;
-      copy.getContext('2d')!.drawImage(this.canvas, 0, 0);
+        copy.getContext('2d')!.drawImage(this.canvas, 0, 0);
+        this.lastRenderPath = 'canvas2d';
+      }
+      if (gpuTarget) this.gpuTargetPool!.release(poolKey, gpuTarget, bytes);
       let released = false;
       tiles.push({
         ...bounds,
@@ -380,6 +544,7 @@ export class GpuBrushRenderer {
 
   dispose() {
     this.tilePool.clear();
+    this.gpuTargetPool?.clear();
     if (this.gl) {
       if (this.cornerBuffer) this.gl.deleteBuffer(this.cornerBuffer);
       if (this.instanceBuffer) this.gl.deleteBuffer(this.instanceBuffer);
