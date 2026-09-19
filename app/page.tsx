@@ -165,7 +165,10 @@ import {
   editorViewToPsdResources,
   importPsdLayerComps,
   planPsdLayerComps,
+  psdDocumentMetadata,
   psdResourcesToEditorView,
+  supportedPsdDocumentMetadata,
+  type PortablePsdDocumentMetadata,
 } from '@/lib/psd-document-structure';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
@@ -779,6 +782,7 @@ type Snapshot = {
   sceneReferred?: boolean;
   colorProfile?: ColorProfileId;
   colorProfileData?: PortableIccProfile;
+  psdMetadata?: PortablePsdDocumentMetadata;
   layers: LayerMeta[];
   surfaces: HistorySurface[];
   selectedId: string;
@@ -803,6 +807,7 @@ type EditorDocument = {
   sceneReferred?: boolean;
   colorProfile?: ColorProfileId;
   colorProfileData?: PortableIccProfile;
+  psdMetadata?: PortablePsdDocumentMetadata;
   layers: LayerMeta[];
   surfaces: Map<string, LayerSurface>;
   selectedId: string;
@@ -2990,6 +2995,7 @@ export default function Home() {
   const [colorProfile, setColorProfileState] = useState<ColorProfileId>('srgb');
   const colorProfileRef = useRef<ColorProfileId>('srgb');
   const colorProfileDataRef = useRef<PortableIccProfile | undefined>(undefined);
+  const psdMetadataRef = useRef<PortablePsdDocumentMetadata>({});
   const setWorkingDepth = (depth: WorkingDepth) => {
     workingDepthRef.current = depth;
     setWorkingDepthState(depth);
@@ -4008,6 +4014,7 @@ export default function Home() {
         colorProfileData: colorProfileDataRef.current
           ? structuredClone(colorProfileDataRef.current)
           : undefined,
+        psdMetadata: structuredClone(psdMetadataRef.current),
         layers: layersRef.current.map((x) => ({ ...x })),
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
@@ -4164,6 +4171,7 @@ export default function Home() {
       normalizeColorProfile(snap.colorProfile),
       snap.colorProfileData,
     );
+    psdMetadataRef.current = structuredClone(snap.psdMetadata ?? {});
     syncLayers(snap.layers.map((x) => ({ ...x })));
     selectMany(snap.selectedIds ?? [snap.selectedId], snap.selectedId);
     const restoredSelection = snap.selection
@@ -4311,6 +4319,7 @@ export default function Home() {
         colorProfileData: snap.colorProfileData
           ? structuredClone(snap.colorProfileData)
           : undefined,
+        psdMetadata: structuredClone(snap.psdMetadata ?? {}),
         layers: branchSnapshot.layers,
         surfaces,
         selectedId: snap.selectedId,
@@ -4655,6 +4664,7 @@ export default function Home() {
       colorProfileData: colorProfileDataRef.current
         ? structuredClone(colorProfileDataRef.current)
         : undefined,
+      psdMetadata: structuredClone(psdMetadataRef.current),
       layers: layersRef.current,
       surfaces: surfacesRef.current,
       selectedId: selectedRef.current,
@@ -4787,6 +4797,7 @@ export default function Home() {
       colorProfileData: parent.colorProfileData
         ? structuredClone(parent.colorProfileData)
         : undefined,
+      psdMetadata: structuredClone(parent.psdMetadata ?? {}),
       layers: structuredClone(parent.layers),
       selectedId: parent.selectedId,
       selectedIds: [...(parent.selectedIds ?? [parent.selectedId])],
@@ -4860,6 +4871,7 @@ export default function Home() {
       normalizeColorProfile(next.colorProfile),
       next.colorProfileData,
     );
+    psdMetadataRef.current = structuredClone(next.psdMetadata ?? {});
     setZoom(clampZoom(next.zoom));
     setView(readView(next.view));
     setSelection(next.selection);
@@ -10872,6 +10884,7 @@ export default function Home() {
       | 'savedSelections'
       | 'feather'
       | 'view'
+      | 'psdMetadata'
     >,
     nextWorkingDepth: WorkingDepth = '8u',
     sceneReferred = false,
@@ -10902,6 +10915,7 @@ export default function Home() {
         colorProfileData: nextColorProfileData
           ? structuredClone(nextColorProfileData)
           : undefined,
+        psdMetadata: structuredClone(extras?.psdMetadata ?? {}),
         layers: nextLayers.map((x) => ({ ...x })),
         selectedId: selectedLayer.id,
         paths: structuredClone(extras?.paths ?? []),
@@ -10932,6 +10946,7 @@ export default function Home() {
         colorProfileData: nextColorProfileData
           ? structuredClone(nextColorProfileData)
           : undefined,
+        psdMetadata: structuredClone(extras?.psdMetadata ?? {}),
         layers: nextLayers,
         surfaces: nextSurfaces,
         selectedId: selectedLayer.id,
@@ -11110,7 +11125,11 @@ export default function Home() {
       'Open PSD',
       undefined,
       undefined,
-      { layerComps: importedComps, view: importedView },
+      {
+        layerComps: importedComps,
+        view: importedView,
+        psdMetadata: psdDocumentMetadata(data.imageResources),
+      },
     );
     setStatus(
       data.warnings.length
@@ -11328,6 +11347,7 @@ export default function Home() {
           height: doc.h,
           imageData,
           imageResources: {
+            ...psdMetadataRef.current,
             ...editorViewToPsdResources(view),
             layerComps: flattened ? undefined : compPlan.resource,
           },
@@ -11455,6 +11475,7 @@ export default function Home() {
         colorProfileData: colorProfileDataRef.current
           ? structuredClone(colorProfileDataRef.current)
           : undefined,
+        psdMetadata: structuredClone(psdMetadataRef.current),
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
         layerComps: layerCompsRef.current,
@@ -11577,6 +11598,9 @@ export default function Home() {
         normalizeColorProfile(data.colorProfile) !== data.colorProfile
       )
         throw Error('Unsupported document color profile');
+      if (!supportedPsdDocumentMetadata(data.psdMetadata))
+        throw Error('Unsupported or malformed PSD document metadata');
+      const importedPsdMetadata = psdDocumentMetadata(data.psdMetadata);
       if (
         (data.sceneReferred !== undefined &&
           typeof data.sceneReferred !== 'boolean') ||
@@ -11926,7 +11950,7 @@ export default function Home() {
         'Open layered project',
         restore,
         undefined,
-        undefined,
+        { psdMetadata: importedPsdMetadata },
         projectDepth,
         data.sceneReferred === true,
         normalizeColorProfile(data.colorProfile),
@@ -14014,6 +14038,7 @@ export default function Home() {
             d.sceneReferred ? 1 : 0,
             normalizeColorProfile(d.colorProfile),
             d.colorProfileData?.sourceSha256 ?? '',
+            JSON.stringify(d.psdMetadata ?? {}),
             JSON.stringify(d.view ?? {}),
             d.selectedId,
           ].join(':'),
@@ -14070,6 +14095,7 @@ export default function Home() {
           colorProfileData: d.colorProfileData
             ? structuredClone(d.colorProfileData)
             : undefined,
+          psdMetadata: structuredClone(d.psdMetadata ?? {}),
           selectedId: d.selectedId,
           selectedIds: d.selectedIds,
           layerComps: d.layerComps,

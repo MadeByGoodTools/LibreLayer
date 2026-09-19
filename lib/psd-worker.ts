@@ -25,6 +25,7 @@ import { supportedPsdSmartObject } from './psd-smart-object';
 import { supportedPsdBlendIf } from './psd-compositing';
 import {
   supportedPsdDocumentView,
+  supportedPsdDocumentMetadata,
   supportedPsdLayerComps,
 } from './psd-document-structure';
 
@@ -158,6 +159,8 @@ function decode(buffer: ArrayBuffer) {
     warnings.add('Unsupported appearance-based or malformed layer comps');
   if (!supportedPsdDocumentView(psd.imageResources))
     warnings.add('Unsupported or excessive PSD guides, grid, or resolution');
+  if (!supportedPsdDocumentMetadata(psd.imageResources))
+    warnings.add('Unsupported or malformed PSD document metadata');
   const displayData = (data: PixelData | undefined) =>
     data
       ? new ImageData(precisionToDisplayRgba(data), data.width, data.height)
@@ -223,6 +226,12 @@ function decode(buffer: ArrayBuffer) {
             psd.imageResources.gridAndGuidesInformation,
           resolutionInfo: psd.imageResources.resolutionInfo,
           layerComps: psd.imageResources.layerComps,
+          xmpMetadata: psd.imageResources.xmpMetadata,
+          pixelAspectRatio: psd.imageResources.pixelAspectRatio,
+          globalAngle: psd.imageResources.globalAngle,
+          globalAltitude: psd.imageResources.globalAltitude,
+          printScale: psd.imageResources.printScale,
+          iccUntaggedProfile: psd.imageResources.iccUntaggedProfile,
         }
       : undefined,
   };

@@ -7,7 +7,9 @@ import {
   editorViewToPsdResources,
   importPsdLayerComps,
   planPsdLayerComps,
+  psdDocumentMetadata,
   psdResourcesToEditorView,
+  supportedPsdDocumentMetadata,
   supportedPsdDocumentView,
   supportedPsdLayerComps,
   type PortableCompLayer,
@@ -222,5 +224,45 @@ void test('unsupported document-view metadata fails closed without silent loss',
       },
     }).resolution,
     300,
+  );
+});
+
+void test('supported PSD document metadata round-trips without mutation', () => {
+  const metadata = {
+      xmpMetadata:
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF /></x:xmpmeta>',
+      pixelAspectRatio: { aspect: 1.25 },
+      globalAngle: 120,
+      globalAltitude: 35,
+      printScale: { style: 'user defined' as const, x: 2, y: 3, scale: 87.5 },
+      iccUntaggedProfile: false,
+    },
+    restored = readPsd(
+      writePsd({
+        width: 2,
+        height: 2,
+        imageData: pixels,
+        imageResources: metadata,
+      }),
+      { useRawData: true },
+    ).imageResources;
+  assert.equal(supportedPsdDocumentMetadata(restored), true);
+  assert.deepEqual(psdDocumentMetadata(restored), metadata);
+});
+
+void test('unsafe PSD document metadata fails closed', () => {
+  assert.equal(
+    supportedPsdDocumentMetadata({ pixelAspectRatio: { aspect: 0 } }),
+    false,
+  );
+  assert.equal(
+    supportedPsdDocumentMetadata({
+      printScale: { style: 'user defined', scale: Number.NaN },
+    }),
+    false,
+  );
+  assert.throws(
+    () => psdDocumentMetadata({ globalAltitude: 120 }),
+    /malformed PSD document metadata/,
   );
 });

@@ -10,7 +10,15 @@ export type PsdImport = {
   linkedFiles?: LinkedFile[];
   imageResources?: Pick<
     ImageResources,
-    'gridAndGuidesInformation' | 'resolutionInfo' | 'layerComps'
+    | 'gridAndGuidesInformation'
+    | 'resolutionInfo'
+    | 'layerComps'
+    | 'xmpMetadata'
+    | 'pixelAspectRatio'
+    | 'globalAngle'
+    | 'globalAltitude'
+    | 'printScale'
+    | 'iccUntaggedProfile'
   >;
 };
 export function processPsd<T>(

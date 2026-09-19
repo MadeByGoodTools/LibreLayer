@@ -4,6 +4,16 @@ import type { EditorView, Guide } from './editor-view.ts';
 type PsdLayerComps = NonNullable<ImageResources['layerComps']>;
 type PsdLayerCompSettings = NonNullable<Layer['comps']>;
 
+export type PortablePsdDocumentMetadata = Pick<
+  ImageResources,
+  | 'xmpMetadata'
+  | 'pixelAspectRatio'
+  | 'globalAngle'
+  | 'globalAltitude'
+  | 'printScale'
+  | 'iccUntaggedProfile'
+>;
+
 export type PortableCompState = {
   id: string;
   visible: boolean;
@@ -220,6 +230,62 @@ export function supportedPsdDocumentView(
       return false;
   }
   return true;
+}
+
+export function supportedPsdDocumentMetadata(
+  metadata: PortablePsdDocumentMetadata | undefined,
+) {
+  if (!metadata) return true;
+  const scale = metadata.printScale;
+  return (
+    (metadata.xmpMetadata === undefined ||
+      (typeof metadata.xmpMetadata === 'string' &&
+        metadata.xmpMetadata.length <= 1_000_000)) &&
+    (metadata.pixelAspectRatio === undefined ||
+      (Number.isFinite(metadata.pixelAspectRatio.aspect) &&
+        metadata.pixelAspectRatio.aspect > 0 &&
+        metadata.pixelAspectRatio.aspect <= 100)) &&
+    (metadata.globalAngle === undefined ||
+      (Number.isFinite(metadata.globalAngle) &&
+        metadata.globalAngle >= -360 &&
+        metadata.globalAngle <= 360)) &&
+    (metadata.globalAltitude === undefined ||
+      (Number.isFinite(metadata.globalAltitude) &&
+        metadata.globalAltitude >= -90 &&
+        metadata.globalAltitude <= 90)) &&
+    (metadata.iccUntaggedProfile === undefined ||
+      typeof metadata.iccUntaggedProfile === 'boolean') &&
+    (scale === undefined ||
+      ((!scale.style ||
+        ['centered', 'size to fit', 'user defined'].includes(scale.style)) &&
+        [scale.x, scale.y].every(
+          (value) =>
+            value === undefined ||
+            (Number.isFinite(value) && Math.abs(value) <= 100_000),
+        ) &&
+        (scale.scale === undefined ||
+          (Number.isFinite(scale.scale) &&
+            scale.scale > 0 &&
+            scale.scale <= 100_000))))
+  );
+}
+
+export function psdDocumentMetadata(
+  resources: ImageResources | undefined,
+): PortablePsdDocumentMetadata {
+  const metadata: PortablePsdDocumentMetadata = {
+    xmpMetadata: resources?.xmpMetadata,
+    pixelAspectRatio: resources?.pixelAspectRatio
+      ? { ...resources.pixelAspectRatio }
+      : undefined,
+    globalAngle: resources?.globalAngle,
+    globalAltitude: resources?.globalAltitude,
+    printScale: resources?.printScale ? { ...resources.printScale } : undefined,
+    iccUntaggedProfile: resources?.iccUntaggedProfile,
+  };
+  if (!supportedPsdDocumentMetadata(metadata))
+    throw Error('Unsupported or malformed PSD document metadata');
+  return metadata;
 }
 
 export function importPsdLayerComps(
