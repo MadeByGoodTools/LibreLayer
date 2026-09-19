@@ -130,6 +130,7 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Native PSD clipping stacks, fill opacity, simultaneous gray/RGB Blend If, pass-through/isolated groups, translucent groups, and raster-masked groups, with codec round-trip tests and explicit blocking for knockout modes that cannot yet be represented losslessly.
   - [x] Native PSD ruler guides, grid spacing, document resolution, and visibility/position layer comps, with editable import, project/history persistence, codec round-trip tests, and explicit blocking for appearance-changing comp states.
   - [x] Native PSD XMP, pixel-aspect, global effect-lighting, print-scale, and untagged-profile metadata, with PSD/project/recovery persistence, codec round-trip tests, and fail-closed validation.
+  - [x] Exact validated embedded ICC resource payload preservation through PSD import, project/recovery storage, and layered PSD export without mutating unrelated image resources.
 - [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
   - [x] Editable bitmap, grayscale, indexed-color, and RGB PSD/PSB import, including retained 16-bit integer and 32-bit float raster-layer samples in native high-depth working surfaces with browser display proxies.
 - [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.

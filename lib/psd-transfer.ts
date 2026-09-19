@@ -6,6 +6,7 @@ export type PsdImport = {
   height: number;
   bitDepth: 1 | 8 | 16 | 32;
   colorMode: 'bitmap' | 'grayscale' | 'indexed' | 'rgb';
+  iccProfile?: Uint8Array;
   warnings: string[];
   children: PsdLayerImport[];
   linkedFiles?: LinkedFile[];
@@ -29,7 +30,12 @@ export type PsdLayerImport = Layer & {
 export function processPsd<T>(
   request:
     | { action: 'read'; buffer: ArrayBuffer }
-    | { action: 'write'; psd: Psd; psb?: boolean },
+    | {
+        action: 'write';
+        psd: Psd;
+        psb?: boolean;
+        iccProfile?: Uint8Array;
+      },
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const worker = new PsdWorker();

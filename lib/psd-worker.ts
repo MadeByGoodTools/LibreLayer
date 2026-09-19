@@ -30,6 +30,7 @@ import {
 } from './psd-document-structure';
 import { supportedPsdShapeLayer } from './psd-shape';
 import type { PsdLayerImport } from './psd-transfer';
+import { extractPsdIccProfile, injectPsdIccProfile } from './psd-icc';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -72,7 +73,8 @@ function bounds(w: number, h: number) {
 function decode(buffer: ArrayBuffer) {
   checkFileSize(buffer.byteLength);
   const header = readSupportedPsdHeader(buffer),
-    bitDepth = header.bitDepth;
+    bitDepth = header.bitDepth,
+    iccProfile = extractPsdIccProfile(buffer);
   bounds(header.width, header.height);
   const psd = readPsd(buffer, {
     useRawData: true,
@@ -179,6 +181,7 @@ function decode(buffer: ArrayBuffer) {
       height: psd.height,
       bitDepth,
       colorMode: header.colorMode,
+      iccProfile,
       warnings: [...warnings],
       children: [
         {
@@ -235,6 +238,7 @@ function decode(buffer: ArrayBuffer) {
     height: psd.height,
     bitDepth,
     colorMode: header.colorMode,
+    iccProfile,
     warnings: [],
     children: psd.children.map(convert),
     linkedFiles: psd.linkedFiles,
@@ -256,7 +260,12 @@ function decode(buffer: ArrayBuffer) {
 self.onmessage = (
   event: MessageEvent<
     | { action: 'read'; buffer: ArrayBuffer }
-    | { action: 'write'; psd: Psd; psb?: boolean }
+    | {
+        action: 'write';
+        psd: Psd;
+        psb?: boolean;
+        iccProfile?: Uint8Array;
+      }
   >,
 ) => {
   try {
@@ -267,13 +276,16 @@ self.onmessage = (
         { transfer: pixelTransfers(result) },
       );
     } else {
-      const result = writePsd(event.data.psd, {
-        generateThumbnail: false,
-        noBackground: true,
-        trimImageData: false,
-        invalidateTextLayers: true,
-        psb: event.data.psb,
-      });
+      const result = injectPsdIccProfile(
+        writePsd(event.data.psd, {
+          generateThumbnail: false,
+          noBackground: true,
+          trimImageData: false,
+          invalidateTextLayers: true,
+          psb: event.data.psb,
+        }),
+        event.data.iccProfile,
+      );
       self.postMessage({ ok: true, result }, { transfer: [result] });
     }
   } catch (error) {

@@ -1,5 +1,6 @@
 import type { ImageResources, Layer } from 'ag-psd';
 import type { EditorView, Guide } from './editor-view.ts';
+import { psdIccFromBase64 } from './psd-icc.ts';
 
 type PsdLayerComps = NonNullable<ImageResources['layerComps']>;
 type PsdLayerCompSettings = NonNullable<Layer['comps']>;
@@ -12,7 +13,7 @@ export type PortablePsdDocumentMetadata = Pick<
   | 'globalAltitude'
   | 'printScale'
   | 'iccUntaggedProfile'
->;
+> & { iccProfile?: string };
 
 export type PortableCompState = {
   id: string;
@@ -47,13 +48,13 @@ export type ImportedPsdCompLayer = {
   comps?: PsdLayerCompSettings;
 };
 
-const same = (left: number | undefined, right: number | undefined, fallback: number) =>
-  (left ?? fallback) === (right ?? fallback);
+const same = (
+  left: number | undefined,
+  right: number | undefined,
+  fallback: number,
+) => (left ?? fallback) === (right ?? fallback);
 
-const sameAppearance = (
-  state: PortableCompState,
-  layer: PortableCompLayer,
-) =>
+const sameAppearance = (state: PortableCompState, layer: PortableCompLayer) =>
   state.opacity === layer.opacity &&
   same(state.fill, layer.fill, 100) &&
   state.blend === layer.blend &&
@@ -71,28 +72,26 @@ export function canExportPsdLayerComps(
 ) {
   if (comps.length > 256 || layers.length > 100) return false;
   const layerById = new Map(layers.map((layer) => [layer.id, layer]));
-  return comps.every(
-    (comp) => {
-      const stateIds = new Set<string>();
-      return (
-        comp.name.length > 0 &&
-        comp.name.length <= 255 &&
-        comp.states.length === layers.length &&
-        comp.states.every((state) => {
-          if (stateIds.has(state.id)) return false;
-          stateIds.add(state.id);
-          const layer = layerById.get(state.id);
-          return (
-            Boolean(layer) &&
-            Number.isFinite(state.x) &&
-            Number.isFinite(state.y) &&
-            sameAppearance(state, layer!)
-          );
-        }) &&
-        stateIds.size === layerById.size
-      );
-    },
-  );
+  return comps.every((comp) => {
+    const stateIds = new Set<string>();
+    return (
+      comp.name.length > 0 &&
+      comp.name.length <= 255 &&
+      comp.states.length === layers.length &&
+      comp.states.every((state) => {
+        if (stateIds.has(state.id)) return false;
+        stateIds.add(state.id);
+        const layer = layerById.get(state.id);
+        return (
+          Boolean(layer) &&
+          Number.isFinite(state.x) &&
+          Number.isFinite(state.y) &&
+          sameAppearance(state, layer!)
+        );
+      }) &&
+      stateIds.size === layerById.size
+    );
+  });
 }
 
 export function planPsdLayerComps(
@@ -174,10 +173,8 @@ export function supportedPsdLayerComps(
   return inspect(layers);
 }
 
-const resolutionInPpi = (
-  value: number,
-  unit: 'PPI' | 'PPCM',
-) => value * (unit === 'PPCM' ? 2.54 : 1);
+const resolutionInPpi = (value: number, unit: 'PPI' | 'PPCM') =>
+  value * (unit === 'PPCM' ? 2.54 : 1);
 
 export function supportedPsdDocumentView(
   resources: ImageResources | undefined,
@@ -237,6 +234,12 @@ export function supportedPsdDocumentMetadata(
 ) {
   if (!metadata) return true;
   const scale = metadata.printScale;
+  let validIcc = true;
+  try {
+    psdIccFromBase64(metadata.iccProfile);
+  } catch {
+    validIcc = false;
+  }
   return (
     (metadata.xmpMetadata === undefined ||
       (typeof metadata.xmpMetadata === 'string' &&
@@ -255,6 +258,7 @@ export function supportedPsdDocumentMetadata(
         metadata.globalAltitude <= 90)) &&
     (metadata.iccUntaggedProfile === undefined ||
       typeof metadata.iccUntaggedProfile === 'boolean') &&
+    validIcc &&
     (scale === undefined ||
       ((!scale.style ||
         ['centered', 'size to fit', 'user defined'].includes(scale.style)) &&
@@ -283,6 +287,9 @@ export function psdDocumentMetadata(
     printScale: resources?.printScale ? { ...resources.printScale } : undefined,
     iccUntaggedProfile: resources?.iccUntaggedProfile,
   };
+  const iccProfile = (resources as PortablePsdDocumentMetadata | undefined)
+    ?.iccProfile;
+  if (iccProfile !== undefined) metadata.iccProfile = iccProfile;
   if (!supportedPsdDocumentMetadata(metadata))
     throw Error('Unsupported or malformed PSD document metadata');
   return metadata;

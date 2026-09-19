@@ -2,10 +2,10 @@
 
 ## Supported scope
 
-- PSD and PSB import for bitmap, grayscale, indexed color, and 8-, 16- or 32-bit RGB. Supported 16/32-bit raster layers retain their original integer/float samples in LibreLayer's high-depth working surfaces while an 8-bit display proxy keeps browser rendering responsive. Photoshop ICC conversion and native high-depth PSD writing are not implemented yet.
+- PSD and PSB import for bitmap, grayscale, indexed color, and 8-, 16- or 32-bit RGB. Supported 16/32-bit raster layers retain their original integer/float samples in LibreLayer's high-depth working surfaces while an 8-bit display proxy keeps browser rendering responsive. Exact embedded ICC profile bytes survive PSD import, project/recovery storage, and layered PSD export. General Photoshop ICC conversion and native high-depth PSD writing are not implemented yet.
 - Raster layer names, order, visibility, whole-percent opacity and fill opacity, supported Canvas blend modes, masks, native clipping stacks, pass-through or isolated groups, translucent/masked groups, and simultaneous editable gray, red, green, and blue Blend If ranges per layer.
 - Document resolution, ruler guides, grid spacing, and visibility/position Layer Comps remain editable. Layer Comps that capture appearance changes are reported instead of being imported or exported with missing state.
-- Supported document metadata remains attached through PSD import/export, native project saves, browser recovery, and document switching: XMP packets, pixel aspect ratio, global effect angle/altitude, print scale, and the untagged-profile flag. Malformed or excessive values trigger the saved-composite path instead of being silently normalized.
+- Supported document metadata remains attached through PSD import/export, native project saves, browser recovery, and document switching: XMP packets, pixel aspect ratio, global effect angle/altitude, print scale, the untagged-profile flag, and the original validated ICC resource payload. Malformed or excessive values trigger the saved-composite path instead of being silently normalized.
 - Native editable point and paragraph text with one character and paragraph style, including font, size, color, faux bold/italic, scale, tracking, kerning, leading, baseline shift, alignment, simple warp, underline, strike, small caps, ligatures and direction. The rendered bitmap is included for visual fallback. Vertical, path-based and mixed-style type is reported as unsupported and opens only through the explicit saved-composite choice.
 - Native editable solid-color and two-color linear-gradient fill layers retain color, angle, scale, offset and rendered fallback. Noise-gradient and pattern fill layers are explicitly blocked from layered export and reported on import until their native PSD recipes are supported.
 - Native editable shape layers retain closed straight or Bézier paths, supported Boolean path records, even-odd/non-zero fill rules, solid fill, fill visibility, and simple solid strokes with width, opacity, caps, joins, and dash values. Pattern/gradient strokes, open paths, inverted vector masks, or richer vector records are reported instead of simplified.
@@ -20,7 +20,7 @@
 
 ## Limits
 
-256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK, Lab, IPTC/EXIF resource blocks, print-profile payloads, and full Photoshop metadata fidelity are not supported.
+256 MiB input; 16,384 pixels per side; 64 megapixels per document; 100 layers; 20 nested groups; 96 million expanded layer/mask pixels. Processing is serialized in a dedicated worker, with a two-minute timeout. CMYK, Lab, IPTC/EXIF resource blocks, print-profile conversion, and full Photoshop metadata fidelity are not supported.
 
 ## Verified locally in the browser
 

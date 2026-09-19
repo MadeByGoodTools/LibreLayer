@@ -176,6 +176,7 @@ import {
   supportedPortableShape,
   type PortableShapeLayer,
 } from '@/lib/psd-shape';
+import { psdIccFromBase64, psdIccToBase64 } from '@/lib/psd-icc';
 import {
   processPsd,
   type PsdImport,
@@ -11343,7 +11344,12 @@ export default function Home() {
       {
         layerComps: importedComps,
         view: importedView,
-        psdMetadata: psdDocumentMetadata(data.imageResources),
+        psdMetadata: {
+          ...psdDocumentMetadata(data.imageResources),
+          iccProfile: data.iccProfile
+            ? psdIccToBase64(data.iccProfile)
+            : undefined,
+        },
       },
       importedDepth,
       data.bitDepth === 32,
@@ -11562,15 +11568,17 @@ export default function Home() {
       const children = flattened
         ? [{ name: 'Flattened artwork', imageData }]
         : build();
+      const { iccProfile, ...nativePsdMetadata } = psdMetadataRef.current;
       const buffer = await processPsd<ArrayBuffer>({
         action: 'write',
         psb,
+        iccProfile: psdIccFromBase64(iccProfile),
         psd: {
           width: doc.w,
           height: doc.h,
           imageData,
           imageResources: {
-            ...psdMetadataRef.current,
+            ...nativePsdMetadata,
             ...editorViewToPsdResources(view),
             layerComps: flattened ? undefined : compPlan.resource,
           },
