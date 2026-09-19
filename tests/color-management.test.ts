@@ -5,9 +5,17 @@ import {
   convertColor,
   convertRgba,
   convertRgbaChunked,
+  installedIccProfiles,
+  loadInstalledIccProfiles,
   normalizeColorProfile,
   normalizeRenderingIntent,
+  parseIccProfile,
+  registerIccProfile,
+  resolveColorProfile,
+  saveInstalledIccProfiles,
+  validatePortableIccProfile,
 } from '../lib/color-management.ts';
+import { createIccProfile } from '../lib/image-export.ts';
 
 void test('color profiles expose versioned professional RGB spaces', () => {
   assert.deepEqual(
@@ -108,4 +116,62 @@ void test('chunked conversion cancels without changing its source', async () => 
     /cancelled/,
   );
   assert.deepEqual(source, untouched);
+});
+
+void test('user-supplied ICC v2 matrix profiles parse, register, and convert', async () => {
+  const parsed = await parseIccProfile(createIccProfile('adobe-rgb')),
+    registered = registerIccProfile(parsed),
+    converted = convertColor(
+      [0.17, 0.48, 0.82],
+      registered,
+      'srgb',
+      'relative-colorimetric',
+      false,
+    ),
+    restored = convertColor(
+      converted,
+      'srgb',
+      registered,
+      'relative-colorimetric',
+      false,
+    );
+  assert.equal(parsed.version, 2);
+  assert.match(parsed.id, /^icc-[a-f0-9]{24}$/);
+  assert.equal(
+    resolveColorProfile(parsed.id).name,
+    'LibreLayer Adobe RGB (1998)',
+  );
+  restored.forEach((value, index) =>
+    assert.ok(Math.abs(value - [0.17, 0.48, 0.82][index]) < 0.002),
+  );
+});
+
+void test('ICC v4 matrix profiles and device-local libraries survive reload', async () => {
+  const bytes = new Uint8Array(createIccProfile('display-p3'));
+  bytes[8] = 4;
+  const parsed = registerIccProfile(await parseIccProfile(bytes));
+  assert.equal(parsed.version, 4);
+  let stored = '';
+  saveInstalledIccProfiles({ setItem: (_key, value) => (stored = value) });
+  assert.ok(stored.includes(parsed.id));
+  const loaded = loadInstalledIccProfiles({ getItem: () => stored });
+  assert.ok(loaded.some(({ id }) => id === parsed.id));
+  assert.ok(installedIccProfiles().some(({ id }) => id === parsed.id));
+});
+
+void test('ICC imports reject malformed, unsupported, and forged profile data', async () => {
+  const malformed = new Uint8Array(createIccProfile('srgb'));
+  malformed.set([0, 0, 0, 0], 36);
+  await assert.rejects(parseIccProfile(malformed), /not an ICC profile/);
+
+  const parsed = await parseIccProfile(createIccProfile('prophoto-rgb'));
+  assert.throws(
+    () =>
+      validatePortableIccProfile({
+        ...parsed,
+        id: 'icc-000000000000000000000000',
+      }),
+    /Invalid or unsupported ICC matrix profile/,
+  );
+  assert.deepEqual(loadInstalledIccProfiles({ getItem: () => '{broken' }), []);
 });

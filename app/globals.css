@@ -316,6 +316,12 @@ button {
   color: #bbbcc4;
   font-size: 12px;
 }
+
+/* Portal menus must clear the contextual bar, including its Workspace button. */
+body > div > div:has(> [data-slot='dropdown-menu-content']),
+[data-slot='dropdown-menu-content'] {
+  z-index: 240 !important;
+}
 .active-tool {
   color: #fff;
   font-weight: 700;
@@ -5216,6 +5222,25 @@ button {
   align-items: center;
   gap: 8px;
   color: var(--foreground);
+}
+
+.profile-import-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.profile-import-row span {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.profile-import-error {
+  margin: 0;
+  color: #ff9b9b;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 .profile-impact {
   display: grid;

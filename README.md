@@ -95,7 +95,7 @@ Current release: **LibreLayer 0.5 — Deep Canvas Update**. Version 1.0 remains 
 - Background filter workers keep the interface responsive, report progress, support immediate cancellation, stop after a safety timeout, and commit pixels only after successful completion
 - WebGPU compute and instanced brush rendering use WebGL2 and deterministic CPU fallbacks; Invert also has an audited WebAssembly SIMD worker fallback for browsers without WebGPU
 - Tile-addressable pixel and mask backing stores structurally share unchanged 256 px tiles across edits and Undo states while canvases remain the materialized editing cache
-- Assign/Convert Profile for sRGB, Display P3, Adobe RGB, and ProPhoto RGB, with four rendering intents, black-point compensation, high-depth preservation, atomic worker conversion, progress, cancellation, undo, and project recovery
+- Assign/Convert Profile for sRGB, Display P3, Adobe RGB, ProPhoto RGB, and validated user-supplied RGB matrix/shaper ICC v2/v4 profiles, with a device-local profile library, four rendering intents, black-point compensation, high-depth preservation, atomic worker conversion, progress, cancellation, undo, Smart Object persistence, and project recovery
 - Live WebGL2-versus-CPU reference-pixel checks for filter math, with exact maximum-channel-delta reporting and a CPU-only browser fallback
 - A checked completion ledger in `LIBRELAYER-10-ROADMAP.md` that distinguishes verified features from remaining professional-parity work
 

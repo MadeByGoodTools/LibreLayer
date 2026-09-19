@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateEmbeddedDocument } from '../lib/embedded-smart-object.ts';
+import { parseIccProfile } from '../lib/color-management.ts';
+import { createIccProfile } from '../lib/image-export.ts';
 import {
   serializeWorkingSurface,
   workingSurfaceFromRgba8,
@@ -30,6 +32,24 @@ void test('embedded documents retain supported profiles and reject unknown profi
   assert.equal(validateEmbeddedDocument(profiled), profiled);
   assert.throws(
     () => validateEmbeddedDocument({ ...valid(), colorProfile: 'made-up-rgb' }),
+    /Invalid embedded Smart Object color profile/,
+  );
+});
+
+void test('embedded documents retain a validated custom ICC matrix profile', async () => {
+  const profile = await parseIccProfile(createIccProfile('adobe-rgb')),
+    profiled = {
+      ...valid(),
+      colorProfile: profile.id,
+      colorProfileData: profile,
+    };
+  assert.equal(validateEmbeddedDocument(profiled), profiled);
+  assert.throws(
+    () =>
+      validateEmbeddedDocument({
+        ...profiled,
+        colorProfile: 'icc-000000000000000000000000',
+      }),
     /Invalid embedded Smart Object color profile/,
   );
 });

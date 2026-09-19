@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -10,6 +10,12 @@ import {
 } from '@/components/ui/dialog';
 import {
   COLOR_PROFILES,
+  installedIccProfiles,
+  loadInstalledIccProfiles,
+  parseIccProfile,
+  registerIccProfile,
+  resolveColorProfile,
+  saveInstalledIccProfiles,
   type ColorProfileId,
   type RenderingIntent,
 } from '@/lib/color-management';
@@ -36,14 +42,44 @@ export function ColorProfileDialog({
 }) {
   const [target, setTarget] = useState<ColorProfileId>(currentProfile),
     [intent, setIntent] = useState<RenderingIntent>('relative-colorimetric'),
-    [blackPointCompensation, setBlackPointCompensation] = useState(true);
+    [blackPointCompensation, setBlackPointCompensation] = useState(true),
+    [customProfiles, setCustomProfiles] = useState(installedIccProfiles),
+    [importError, setImportError] = useState(''),
+    profileFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) setTarget(currentProfile);
+    if (open) {
+      loadInstalledIccProfiles(localStorage);
+      setCustomProfiles(installedIccProfiles());
+      setImportError('');
+      setTarget(currentProfile);
+    }
   }, [open, currentProfile, operation]);
 
-  const current = COLOR_PROFILES[currentProfile],
-    destination = COLOR_PROFILES[target];
+  const current = resolveColorProfile(currentProfile),
+    destination = resolveColorProfile(target),
+    choices = [...Object.values(COLOR_PROFILES), ...customProfiles];
+
+  const importProfile = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (file.size > 4 * 1024 * 1024)
+        throw Error('ICC profiles must be 4 MB or smaller.');
+      const profile = registerIccProfile(
+        await parseIccProfile(await file.arrayBuffer()),
+      );
+      saveInstalledIccProfiles(localStorage);
+      setCustomProfiles(installedIccProfiles());
+      setTarget(profile.id);
+      setImportError('');
+    } catch (error) {
+      setImportError(
+        error instanceof Error ? error.message : 'The ICC profile is invalid.',
+      );
+    } finally {
+      if (profileFileRef.current) profileFileRef.current.value = '';
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -78,13 +114,35 @@ export function ColorProfileDialog({
               setTarget(event.target.value as ColorProfileId)
             }
           >
-            {Object.values(COLOR_PROFILES).map((profile) => (
+            {choices.map((profile) => (
               <option key={profile.id} value={profile.id}>
                 {profile.name} · ICC v{profile.version}
               </option>
             ))}
           </select>
         </label>
+        <input
+          ref={profileFileRef}
+          hidden
+          type="file"
+          accept=".icc,.icm,application/vnd.iccprofile"
+          onChange={(event) => void importProfile(event.target.files?.[0])}
+        />
+        <div className="profile-import-row">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => profileFileRef.current?.click()}
+          >
+            Load ICC profile…
+          </Button>
+          <span>RGB matrix profiles up to 4 MB · stored on this device</span>
+        </div>
+        {importError && (
+          <p className="profile-import-error" role="alert">
+            {importError}
+          </p>
+        )}
         {operation === 'convert' && (
           <>
             <label>

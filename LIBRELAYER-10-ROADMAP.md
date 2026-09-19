@@ -186,6 +186,8 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Embedded export profiles, resolution metadata, proof simulation, and gamut-warning preview.
 - [ ] ICC v2/v4 engine with Assign/Convert Profile, intents, and black-point compensation.
   - [x] Built-in matrix-profile assignment and conversion for sRGB, Display P3, Adobe RGB, and ProPhoto RGB with four intents, black-point compensation, undo, Smart Object/project persistence, and high-depth preservation.
+  - [x] User-supplied RGB matrix/shaper `.icc` and `.icm` v2/v4 profiles with validated curve tags, a device-local profile library, worker conversion, undo/redo, recovery, and layered-project/embedded-Smart-Object persistence.
+  - [ ] LUT-based RGB profiles, CMYK/device-link profiles, and platform color-management interoperability.
 - [ ] RGB, CMYK, Lab, grayscale, spot, duotone, tritone, and quadtone working modes.
 - [ ] Exact proof profiles, paper/ink simulation, ink limits, and separations.
 - [x] Printer/paper profiles, sizing, placement, bleed, trim, marks, contact sheets, and metadata.

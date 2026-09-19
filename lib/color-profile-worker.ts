@@ -3,13 +3,14 @@
 import {
   convertRgbaChunked,
   type ColorProfileId,
+  type PortableIccProfile,
   type RenderingIntent,
 } from './color-management';
 
 type Request = {
   pixels: Uint8ClampedArray | Float32Array;
-  source: ColorProfileId;
-  target: ColorProfileId;
+  source: ColorProfileId | PortableIccProfile;
+  target: ColorProfileId | PortableIccProfile;
   intent: RenderingIntent;
   blackPointCompensation: boolean;
 };

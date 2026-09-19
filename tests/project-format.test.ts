@@ -7,6 +7,8 @@ import {
   packProject,
   unpackProject,
 } from '../lib/project-format.ts';
+import { parseIccProfile } from '../lib/color-management.ts';
+import { createIccProfile } from '../lib/image-export.ts';
 
 const fixture = {
   format: 'librelayer',
@@ -52,6 +54,20 @@ void test('layered embedded Smart Object sources survive project packaging', asy
       await (await packProject(project)).text(),
     );
   assert.deepEqual(result.project, project);
+});
+
+void test('custom ICC working profiles survive project packaging', async () => {
+  const colorProfileData = await parseIccProfile(createIccProfile('adobe-rgb')),
+    project = {
+      ...fixture,
+      colorProfile: colorProfileData.id,
+      colorProfileData,
+    },
+    result = await unpackProject<typeof project>(
+      await (await packProject(project)).text(),
+    );
+  assert.deepEqual(result.project, project);
+  assert.equal(result.verified, true);
 });
 
 void test('Pixel Studio package envelopes remain readable after rebranding', async () => {

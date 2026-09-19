@@ -2,6 +2,7 @@ import ColorProfileWorker from './color-profile-worker?worker';
 import {
   convertRgbaChunked,
   type ColorProfileId,
+  type PortableIccProfile,
   type RenderingIntent,
 } from './color-management';
 import { JobCancelledError, JobWatchdogError } from './filter-plugin-job';
@@ -13,8 +14,8 @@ export type ColorProfileJobResult = {
 
 const fallback = async (
   pixels: Uint8ClampedArray | Float32Array,
-  source: ColorProfileId,
-  target: ColorProfileId,
+  source: ColorProfileId | PortableIccProfile,
+  target: ColorProfileId | PortableIccProfile,
   intent: RenderingIntent,
   blackPointCompensation: boolean,
   options: {
@@ -43,8 +44,8 @@ const fallback = async (
 
 export function runColorProfileJob(
   pixels: Uint8ClampedArray | Float32Array,
-  source: ColorProfileId,
-  target: ColorProfileId,
+  source: ColorProfileId | PortableIccProfile,
+  target: ColorProfileId | PortableIccProfile,
   intent: RenderingIntent,
   blackPointCompensation: boolean,
   options: {

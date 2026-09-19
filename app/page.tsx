@@ -485,9 +485,12 @@ import {
   type WorkingSurface,
 } from '@/lib/working-depth';
 import {
-  COLOR_PROFILES,
+  portableIccProfile,
+  registerIccProfile,
+  resolveColorProfile,
   normalizeColorProfile,
   type ColorProfileId,
+  type PortableIccProfile,
   type RenderingIntent,
 } from '@/lib/color-management';
 import { runColorProfileJob } from '@/lib/color-profile-job';
@@ -754,6 +757,7 @@ type Snapshot = {
   workingDepth?: WorkingDepth;
   sceneReferred?: boolean;
   colorProfile?: ColorProfileId;
+  colorProfileData?: PortableIccProfile;
   layers: LayerMeta[];
   surfaces: HistorySurface[];
   selectedId: string;
@@ -777,6 +781,7 @@ type EditorDocument = {
   workingDepth?: WorkingDepth;
   sceneReferred?: boolean;
   colorProfile?: ColorProfileId;
+  colorProfileData?: PortableIccProfile;
   layers: LayerMeta[];
   surfaces: Map<string, LayerSurface>;
   selectedId: string;
@@ -2641,14 +2646,16 @@ export default function Home() {
   }, []);
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      if (process.env.NODE_ENV === 'production') {
+      const localPreview = ['localhost', '127.0.0.1'].includes(
+        window.location.hostname,
+      );
+      if (process.env.NODE_ENV === 'production' && !localPreview) {
         void navigator.serviceWorker.register('/sw.js').catch(() => {});
-      } else {
-        // A production service worker left on localhost can cache Vite's
-        // development client and break hot reload with repeated send errors.
+      } else if (localPreview) {
+        // Production-like local previews must also remove a previously
+        // installed shell worker or they can keep serving an obsolete build.
         void navigator.serviceWorker
-          .register('/sw.js?dev-cleanup=v0.5.0')
-          .then(() => navigator.serviceWorker.getRegistrations())
+          .getRegistrations()
           .then(async (registrations) => {
             const wasControlled = Boolean(navigator.serviceWorker.controller);
             await Promise.all(
@@ -2666,12 +2673,12 @@ export default function Home() {
             );
             if (
               wasControlled &&
-              sessionStorage.getItem('pixel-studio-dev-sw-cleaned') !== 'true'
+              sessionStorage.getItem('librelayer-local-sw-cleaned') !== 'true'
             ) {
-              sessionStorage.setItem('pixel-studio-dev-sw-cleaned', 'true');
+              sessionStorage.setItem('librelayer-local-sw-cleaned', 'true');
               window.location.reload();
             } else {
-              sessionStorage.removeItem('pixel-studio-dev-sw-cleaned');
+              sessionStorage.removeItem('librelayer-local-sw-cleaned');
             }
           })
           .catch(() => {});
@@ -2961,6 +2968,7 @@ export default function Home() {
   const sceneReferredRef = useRef(false);
   const [colorProfile, setColorProfileState] = useState<ColorProfileId>('srgb');
   const colorProfileRef = useRef<ColorProfileId>('srgb');
+  const colorProfileDataRef = useRef<PortableIccProfile | undefined>(undefined);
   const setWorkingDepth = (depth: WorkingDepth) => {
     workingDepthRef.current = depth;
     setWorkingDepthState(depth);
@@ -2969,9 +2977,15 @@ export default function Home() {
     sceneReferredRef.current = value;
     setSceneReferredState(value);
   };
-  const setColorProfile = (value: ColorProfileId) => {
-    colorProfileRef.current = value;
-    setColorProfileState(value);
+  const setColorProfile = (
+    value: ColorProfileId,
+    data: PortableIccProfile | undefined = portableIccProfile(value),
+  ) => {
+    if (data) registerIccProfile(data);
+    const normalized = normalizeColorProfile(value);
+    colorProfileRef.current = normalized;
+    colorProfileDataRef.current = portableIccProfile(normalized);
+    setColorProfileState(normalized);
   };
   const [artboards, setArtboards] = useState<Artboard[]>([]),
     [activeArtboardId, setActiveArtboardId] = useState(''),
@@ -3970,6 +3984,9 @@ export default function Home() {
         workingDepth: workingDepthRef.current,
         sceneReferred: sceneReferredRef.current,
         colorProfile: colorProfileRef.current,
+        colorProfileData: colorProfileDataRef.current
+          ? structuredClone(colorProfileDataRef.current)
+          : undefined,
         layers: layersRef.current.map((x) => ({ ...x })),
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
@@ -4121,7 +4138,11 @@ export default function Home() {
     setDoc({ w: snap.w, h: snap.h });
     setWorkingDepth(snap.workingDepth ?? '8u');
     setSceneReferred(snap.sceneReferred === true);
-    setColorProfile(normalizeColorProfile(snap.colorProfile));
+    if (snap.colorProfileData) registerIccProfile(snap.colorProfileData);
+    setColorProfile(
+      normalizeColorProfile(snap.colorProfile),
+      snap.colorProfileData,
+    );
     syncLayers(snap.layers.map((x) => ({ ...x })));
     selectMany(snap.selectedIds ?? [snap.selectedId], snap.selectedId);
     const restoredSelection = snap.selection
@@ -4266,6 +4287,9 @@ export default function Home() {
         workingDepth: snap.workingDepth ?? '8u',
         sceneReferred: snap.sceneReferred === true,
         colorProfile: normalizeColorProfile(snap.colorProfile),
+        colorProfileData: snap.colorProfileData
+          ? structuredClone(snap.colorProfileData)
+          : undefined,
         layers: branchSnapshot.layers,
         surfaces,
         selectedId: snap.selectedId,
@@ -4607,6 +4631,9 @@ export default function Home() {
       workingDepth: workingDepthRef.current,
       sceneReferred: sceneReferredRef.current,
       colorProfile: colorProfileRef.current,
+      colorProfileData: colorProfileDataRef.current
+        ? structuredClone(colorProfileDataRef.current)
+        : undefined,
       layers: layersRef.current,
       surfaces: surfacesRef.current,
       selectedId: selectedRef.current,
@@ -4634,6 +4661,9 @@ export default function Home() {
     workingDepth: source.workingDepth ?? '8u',
     sceneReferred: source.sceneReferred === true,
     colorProfile: normalizeColorProfile(source.colorProfile),
+    colorProfileData: source.colorProfileData
+      ? structuredClone(source.colorProfileData)
+      : undefined,
     layers: structuredClone(source.layers),
     surfaces: source.layers.map((layer) => {
       const surface = source.surfaces.get(layer.id);
@@ -4733,6 +4763,9 @@ export default function Home() {
       workingDepth: parent.workingDepth ?? '8u',
       sceneReferred: parent.sceneReferred === true,
       colorProfile: normalizeColorProfile(parent.colorProfile),
+      colorProfileData: parent.colorProfileData
+        ? structuredClone(parent.colorProfileData)
+        : undefined,
       layers: structuredClone(parent.layers),
       selectedId: parent.selectedId,
       selectedIds: [...(parent.selectedIds ?? [parent.selectedId])],
@@ -4801,7 +4834,11 @@ export default function Home() {
     setDoc(next.doc);
     setWorkingDepth(next.workingDepth ?? '8u');
     setSceneReferred(next.sceneReferred === true);
-    setColorProfile(normalizeColorProfile(next.colorProfile));
+    if (next.colorProfileData) registerIccProfile(next.colorProfileData);
+    setColorProfile(
+      normalizeColorProfile(next.colorProfile),
+      next.colorProfileData,
+    );
     setZoom(clampZoom(next.zoom));
     setView(readView(next.view));
     setSelection(next.selection);
@@ -8680,6 +8717,7 @@ export default function Home() {
           normalizeWorkingDepth(embedded.workingDepth),
           embedded.sceneReferred === true,
           normalizeColorProfile(embedded.colorProfile),
+          embedded.colorProfileData,
         );
         const opened = documentStoreRef.current.get(activeDocumentRef.current);
         if (opened) {
@@ -10812,7 +10850,9 @@ export default function Home() {
     nextWorkingDepth: WorkingDepth = '8u',
     sceneReferred = false,
     nextColorProfile: ColorProfileId = 'srgb',
+    nextColorProfileData?: PortableIccProfile,
   ) => {
+    if (nextColorProfileData) registerIccProfile(nextColorProfileData);
     nextLayers = treeOrder(nextLayers);
     requireRoom(
       w,
@@ -10833,6 +10873,9 @@ export default function Home() {
         workingDepth: nextWorkingDepth,
         sceneReferred,
         colorProfile: nextColorProfile,
+        colorProfileData: nextColorProfileData
+          ? structuredClone(nextColorProfileData)
+          : undefined,
         layers: nextLayers.map((x) => ({ ...x })),
         selectedId: selectedLayer.id,
         paths: structuredClone(extras?.paths ?? []),
@@ -10859,6 +10902,9 @@ export default function Home() {
         workingDepth: nextWorkingDepth,
         sceneReferred,
         colorProfile: nextColorProfile,
+        colorProfileData: nextColorProfileData
+          ? structuredClone(nextColorProfileData)
+          : undefined,
         layers: nextLayers,
         surfaces: nextSurfaces,
         selectedId: selectedLayer.id,
@@ -11245,6 +11291,9 @@ export default function Home() {
         workingDepth: workingDepthRef.current,
         sceneReferred: sceneReferredRef.current,
         colorProfile: colorProfileRef.current,
+        colorProfileData: colorProfileDataRef.current
+          ? structuredClone(colorProfileDataRef.current)
+          : undefined,
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
         layerComps: layerCompsRef.current,
@@ -11356,6 +11405,12 @@ export default function Home() {
         throw Error('Invalid project');
       checkDimensions(data.width, data.height);
       const projectDepth = normalizeWorkingDepth(data.workingDepth);
+      let importedColorProfileData: PortableIccProfile | undefined;
+      if (data.colorProfileData !== undefined) {
+        importedColorProfileData = registerIccProfile(data.colorProfileData);
+        if (importedColorProfileData.id !== data.colorProfile)
+          throw Error('The embedded ICC profile does not match the document.');
+      }
       if (
         data.colorProfile !== undefined &&
         normalizeColorProfile(data.colorProfile) !== data.colorProfile
@@ -11714,6 +11769,7 @@ export default function Home() {
         projectDepth,
         data.sceneReferred === true,
         normalizeColorProfile(data.colorProfile),
+        importedColorProfileData,
       );
       setPaths(importedPaths);
       setArtboards(importedArtboards);
@@ -13796,6 +13852,7 @@ export default function Home() {
             d.workingDepth ?? '8u',
             d.sceneReferred ? 1 : 0,
             normalizeColorProfile(d.colorProfile),
+            d.colorProfileData?.sourceSha256 ?? '',
             JSON.stringify(d.view ?? {}),
             d.selectedId,
           ].join(':'),
@@ -13849,6 +13906,9 @@ export default function Home() {
           workingDepth: d.workingDepth ?? '8u',
           sceneReferred: d.sceneReferred === true,
           colorProfile: normalizeColorProfile(d.colorProfile),
+          colorProfileData: d.colorProfileData
+            ? structuredClone(d.colorProfileData)
+            : undefined,
           selectedId: d.selectedId,
           selectedIds: d.selectedIds,
           layerComps: d.layerComps,
@@ -15559,7 +15619,9 @@ export default function Home() {
     blackPointCompensation: boolean;
   }) => {
     const source = colorProfileRef.current,
-      targetName = COLOR_PROFILES[options.target].name;
+      sourceJobProfile = portableIccProfile(source) ?? source,
+      targetJobProfile = portableIccProfile(options.target) ?? options.target,
+      targetName = resolveColorProfile(options.target).name;
     if (source === options.target) {
       setColorProfileDialog(null);
       setStatus(`Document already uses ${targetName}`);
@@ -15628,8 +15690,8 @@ export default function Home() {
           syncPrecisionSurface(surface);
           const result = await runColorProfileJob(
               workingSurfaceToFloat32(surface.precision),
-              source,
-              options.target,
+              sourceJobProfile,
+              targetJobProfile,
               options.intent,
               options.blackPointCompensation,
               { signal: controller.signal, onProgress: updateProgress },
@@ -15661,8 +15723,8 @@ export default function Home() {
           ),
           result = await runColorProfileJob(
             sourceImage.data,
-            source,
-            options.target,
+            sourceJobProfile,
+            targetJobProfile,
             options.intent,
             options.blackPointCompensation,
             { signal: controller.signal, onProgress: updateProgress },
@@ -16191,7 +16253,7 @@ export default function Home() {
               name: 'Document color profile',
               action: () =>
                 setStatus(
-                  `Current profile: ${COLOR_PROFILES[colorProfile].name} · ICC v${COLOR_PROFILES[colorProfile].version}`,
+                  `Current profile: ${resolveColorProfile(colorProfile).name} · ICC v${resolveColorProfile(colorProfile).version}`,
                 ),
             },
             {
@@ -18595,7 +18657,7 @@ export default function Home() {
                   ? 'Layer group'
                   : 'Layer pixels'}{' '}
           · RGB {WORKING_DEPTH_LABELS[workingDepth]}
-          {` · ${COLOR_PROFILES[colorProfile].name}`}
+          {` · ${resolveColorProfile(colorProfile).name}`}
           {workingDepth !== '8u' && ' · Float render'}
           {sceneReferred &&
             ` · HDR ${

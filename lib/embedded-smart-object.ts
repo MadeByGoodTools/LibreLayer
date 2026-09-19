@@ -6,7 +6,9 @@ import {
 } from './working-depth.ts';
 import {
   normalizeColorProfile,
+  registerIccProfile,
   type ColorProfileId,
+  type PortableIccProfile,
 } from './color-management.ts';
 
 export type EmbeddedSurfaceRecord = {
@@ -31,6 +33,7 @@ export type EmbeddedDocumentEnvelope = {
   workingDepth?: WorkingDepth;
   sceneReferred?: boolean;
   colorProfile?: ColorProfileId;
+  colorProfileData?: PortableIccProfile;
   layers: EmbeddedLayerRecord[];
   surfaces: EmbeddedSurfaceRecord[];
   selectedId: string;
@@ -52,6 +55,11 @@ export const validateEmbeddedDocument = (
   seen.add(value);
   const data = value as Partial<EmbeddedDocumentEnvelope>;
   const workingDepth = normalizeWorkingDepth(data.workingDepth);
+  if (data.colorProfileData !== undefined) {
+    const profile = registerIccProfile(data.colorProfileData);
+    if (profile.id !== data.colorProfile)
+      throw Error('Invalid embedded Smart Object color profile');
+  }
   if (
     data.version !== 1 ||
     !Number.isInteger(data.width) ||
