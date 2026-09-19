@@ -25,6 +25,15 @@ void test('layered embedded documents retain their editable envelope', () => {
   assert.equal(validateEmbeddedDocument(data), data);
 });
 
+void test('embedded documents retain supported profiles and reject unknown profiles', () => {
+  const profiled = { ...valid(), colorProfile: 'display-p3' as const };
+  assert.equal(validateEmbeddedDocument(profiled), profiled);
+  assert.throws(
+    () => validateEmbeddedDocument({ ...valid(), colorProfile: 'made-up-rgb' }),
+    /Invalid embedded Smart Object color profile/,
+  );
+});
+
 void test('embedded documents bound their artboard collection', () => {
   assert.throws(
     () =>

@@ -4,6 +4,10 @@ import {
   type StoredWorkingSurface,
   type WorkingDepth,
 } from './working-depth.ts';
+import {
+  normalizeColorProfile,
+  type ColorProfileId,
+} from './color-management.ts';
 
 export type EmbeddedSurfaceRecord = {
   id: string;
@@ -26,6 +30,7 @@ export type EmbeddedDocumentEnvelope = {
   height: number;
   workingDepth?: WorkingDepth;
   sceneReferred?: boolean;
+  colorProfile?: ColorProfileId;
   layers: EmbeddedLayerRecord[];
   surfaces: EmbeddedSurfaceRecord[];
   selectedId: string;
@@ -69,6 +74,11 @@ export const validateEmbeddedDocument = (
     throw Error('Invalid embedded Smart Object color encoding');
   if (data.sceneReferred === true && workingDepth === '8u')
     throw Error('Scene-referred embedded content requires high-depth pixels');
+  if (
+    data.colorProfile !== undefined &&
+    normalizeColorProfile(data.colorProfile) !== data.colorProfile
+  )
+    throw Error('Invalid embedded Smart Object color profile');
 
   const ids = new Set<string>();
   for (const layer of data.layers) {

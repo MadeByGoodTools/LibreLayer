@@ -5168,6 +5168,65 @@ button {
   gap: 8px;
   justify-content: flex-end;
 }
+.color-profile-dialog {
+  display: grid;
+  gap: 14px;
+}
+.color-profile-dialog label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.color-profile-dialog select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--foreground);
+  padding: 6px 9px;
+}
+.profile-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.profile-summary > div,
+.profile-impact {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  padding: 9px;
+}
+.profile-summary dt {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.profile-summary dd {
+  margin: 3px 0 0;
+  color: var(--foreground);
+  font-size: 12px;
+}
+.color-profile-dialog .profile-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--foreground);
+}
+.profile-impact {
+  display: grid;
+  gap: 3px;
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+.profile-impact span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 /* Workspace fit, spacing and quiet scrolling */
 .editor-shell,

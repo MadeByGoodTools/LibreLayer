@@ -175,6 +175,10 @@ import {
   NewDocumentDialog,
   type NewDocumentOptions,
 } from '@/components/new-document';
+import {
+  ColorProfileDialog,
+  type ColorProfileOperation,
+} from '@/components/color-profile-dialog';
 import { ImageSizeDialog, CanvasSizeDialog } from '@/components/resize-dialogs';
 import {
   AdvancedAdjustmentsDialog,
@@ -478,6 +482,13 @@ import {
   type WorkingDepth,
   type WorkingSurface,
 } from '@/lib/working-depth';
+import {
+  COLOR_PROFILES,
+  convertRgba,
+  normalizeColorProfile,
+  type ColorProfileId,
+  type RenderingIntent,
+} from '@/lib/color-management';
 const Mask = Focus;
 
 type Tool =
@@ -738,6 +749,7 @@ type Snapshot = {
   h: number;
   workingDepth?: WorkingDepth;
   sceneReferred?: boolean;
+  colorProfile?: ColorProfileId;
   layers: LayerMeta[];
   surfaces: HistorySurface[];
   selectedId: string;
@@ -760,6 +772,7 @@ type EditorDocument = {
   doc: { w: number; h: number };
   workingDepth?: WorkingDepth;
   sceneReferred?: boolean;
+  colorProfile?: ColorProfileId;
   layers: LayerMeta[];
   surfaces: Map<string, LayerSurface>;
   selectedId: string;
@@ -2710,6 +2723,8 @@ export default function Home() {
     null,
   );
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
+  const [colorProfileDialog, setColorProfileDialog] =
+    useState<ColorProfileOperation | null>(null);
   const [imageSizeOpen, setImageSizeOpen] = useState(false),
     [canvasSizeOpen, setCanvasSizeOpen] = useState(false),
     [adjustmentsOpen, setAdjustmentsOpen] = useState(false),
@@ -2923,6 +2938,8 @@ export default function Home() {
   const workingDepthRef = useRef<WorkingDepth>('8u');
   const [sceneReferred, setSceneReferredState] = useState(false);
   const sceneReferredRef = useRef(false);
+  const [colorProfile, setColorProfileState] = useState<ColorProfileId>('srgb');
+  const colorProfileRef = useRef<ColorProfileId>('srgb');
   const setWorkingDepth = (depth: WorkingDepth) => {
     workingDepthRef.current = depth;
     setWorkingDepthState(depth);
@@ -2930,6 +2947,10 @@ export default function Home() {
   const setSceneReferred = (value: boolean) => {
     sceneReferredRef.current = value;
     setSceneReferredState(value);
+  };
+  const setColorProfile = (value: ColorProfileId) => {
+    colorProfileRef.current = value;
+    setColorProfileState(value);
   };
   const [artboards, setArtboards] = useState<Artboard[]>([]),
     [activeArtboardId, setActiveArtboardId] = useState(''),
@@ -3819,6 +3840,7 @@ export default function Home() {
         h: first?.pixels.height ?? 800,
         workingDepth: workingDepthRef.current,
         sceneReferred: sceneReferredRef.current,
+        colorProfile: colorProfileRef.current,
         layers: layersRef.current.map((x) => ({ ...x })),
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
@@ -3933,6 +3955,7 @@ export default function Home() {
     setDoc({ w: snap.w, h: snap.h });
     setWorkingDepth(snap.workingDepth ?? '8u');
     setSceneReferred(snap.sceneReferred === true);
+    setColorProfile(normalizeColorProfile(snap.colorProfile));
     syncLayers(snap.layers.map((x) => ({ ...x })));
     selectMany(snap.selectedIds ?? [snap.selectedId], snap.selectedId);
     const restoredSelection = snap.selection
@@ -4072,6 +4095,7 @@ export default function Home() {
         doc: { w: snap.w, h: snap.h },
         workingDepth: snap.workingDepth ?? '8u',
         sceneReferred: snap.sceneReferred === true,
+        colorProfile: normalizeColorProfile(snap.colorProfile),
         layers: branchSnapshot.layers,
         surfaces,
         selectedId: snap.selectedId,
@@ -4412,6 +4436,7 @@ export default function Home() {
       doc: { ...doc },
       workingDepth: workingDepthRef.current,
       sceneReferred: sceneReferredRef.current,
+      colorProfile: colorProfileRef.current,
       layers: layersRef.current,
       surfaces: surfacesRef.current,
       selectedId: selectedRef.current,
@@ -4438,6 +4463,7 @@ export default function Home() {
     height: source.doc.h,
     workingDepth: source.workingDepth ?? '8u',
     sceneReferred: source.sceneReferred === true,
+    colorProfile: normalizeColorProfile(source.colorProfile),
     layers: structuredClone(source.layers),
     surfaces: source.layers.map((layer) => {
       const surface = source.surfaces.get(layer.id);
@@ -4536,6 +4562,7 @@ export default function Home() {
       h: parent.doc.h,
       workingDepth: parent.workingDepth ?? '8u',
       sceneReferred: parent.sceneReferred === true,
+      colorProfile: normalizeColorProfile(parent.colorProfile),
       layers: structuredClone(parent.layers),
       selectedId: parent.selectedId,
       selectedIds: [...(parent.selectedIds ?? [parent.selectedId])],
@@ -4604,6 +4631,7 @@ export default function Home() {
     setDoc(next.doc);
     setWorkingDepth(next.workingDepth ?? '8u');
     setSceneReferred(next.sceneReferred === true);
+    setColorProfile(normalizeColorProfile(next.colorProfile));
     setZoom(clampZoom(next.zoom));
     setView(readView(next.view));
     setSelection(next.selection);
@@ -4698,6 +4726,7 @@ export default function Home() {
       w,
       h,
       workingDepth: nextWorkingDepth,
+      colorProfile: 'srgb',
       layers: nextLayers.map((x) => ({ ...x })),
       selectedId: layerId,
       surfaces: [
@@ -4716,6 +4745,7 @@ export default function Home() {
       saved: false,
       doc: { w, h },
       workingDepth: nextWorkingDepth,
+      colorProfile: 'srgb',
       layers: nextLayers,
       surfaces: new Map([[layerId, surface]]),
       selectedId: layerId,
@@ -4768,6 +4798,7 @@ export default function Home() {
           label: 'New document',
           w: 1200,
           h: 800,
+          colorProfile: 'srgb',
           layers: nextLayers,
           selectedId: layerId,
           surfaces: [{ id: layerId, pixels: captureTiles(pixels) }],
@@ -4777,6 +4808,7 @@ export default function Home() {
           name: 'Untitled artwork',
           saved: false,
           doc: { w: 1200, h: 800 },
+          colorProfile: 'srgb',
           layers: nextLayers,
           surfaces: new Map([[layerId, { pixels }]]),
           selectedId: layerId,
@@ -8370,6 +8402,7 @@ export default function Home() {
           undefined,
           normalizeWorkingDepth(embedded.workingDepth),
           embedded.sceneReferred === true,
+          normalizeColorProfile(embedded.colorProfile),
         );
         const opened = documentStoreRef.current.get(activeDocumentRef.current);
         if (opened) {
@@ -10501,6 +10534,7 @@ export default function Home() {
     >,
     nextWorkingDepth: WorkingDepth = '8u',
     sceneReferred = false,
+    nextColorProfile: ColorProfileId = 'srgb',
   ) => {
     nextLayers = treeOrder(nextLayers);
     requireRoom(
@@ -10521,6 +10555,7 @@ export default function Home() {
         h,
         workingDepth: nextWorkingDepth,
         sceneReferred,
+        colorProfile: nextColorProfile,
         layers: nextLayers.map((x) => ({ ...x })),
         selectedId: selectedLayer.id,
         paths: structuredClone(extras?.paths ?? []),
@@ -10545,6 +10580,7 @@ export default function Home() {
         doc: { w, h },
         workingDepth: nextWorkingDepth,
         sceneReferred,
+        colorProfile: nextColorProfile,
         layers: nextLayers,
         surfaces: nextSurfaces,
         selectedId: selectedLayer.id,
@@ -10930,6 +10966,7 @@ export default function Home() {
         height: doc.h,
         workingDepth: workingDepthRef.current,
         sceneReferred: sceneReferredRef.current,
+        colorProfile: colorProfileRef.current,
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
         layerComps: layerCompsRef.current,
@@ -11041,6 +11078,11 @@ export default function Home() {
         throw Error('Invalid project');
       checkDimensions(data.width, data.height);
       const projectDepth = normalizeWorkingDepth(data.workingDepth);
+      if (
+        data.colorProfile !== undefined &&
+        normalizeColorProfile(data.colorProfile) !== data.colorProfile
+      )
+        throw Error('Unsupported document color profile');
       if (
         (data.sceneReferred !== undefined &&
           typeof data.sceneReferred !== 'boolean') ||
@@ -11393,6 +11435,7 @@ export default function Home() {
         undefined,
         projectDepth,
         data.sceneReferred === true,
+        normalizeColorProfile(data.colorProfile),
       );
       setPaths(importedPaths);
       setArtboards(importedArtboards);
@@ -13474,6 +13517,7 @@ export default function Home() {
             d.zoom,
             d.workingDepth ?? '8u',
             d.sceneReferred ? 1 : 0,
+            normalizeColorProfile(d.colorProfile),
             JSON.stringify(d.view ?? {}),
             d.selectedId,
           ].join(':'),
@@ -13526,6 +13570,7 @@ export default function Home() {
           height: d.doc.h,
           workingDepth: d.workingDepth ?? '8u',
           sceneReferred: d.sceneReferred === true,
+          colorProfile: normalizeColorProfile(d.colorProfile),
           selectedId: d.selectedId,
           selectedIds: d.selectedIds,
           layerComps: d.layerComps,
@@ -15170,6 +15215,101 @@ export default function Home() {
     }
   };
 
+  const applyDocumentColorProfile = (options: {
+    operation: ColorProfileOperation;
+    target: ColorProfileId;
+    intent: RenderingIntent;
+    blackPointCompensation: boolean;
+  }) => {
+    const source = colorProfileRef.current,
+      targetName = COLOR_PROFILES[options.target].name;
+    if (source === options.target) {
+      setColorProfileDialog(null);
+      setStatus(`Document already uses ${targetName}`);
+      return;
+    }
+    if (options.operation === 'assign') {
+      setColorProfile(options.target);
+      snapshot(`Assign profile: ${targetName}`);
+      render();
+      setColorProfileDialog(null);
+      setStatus(`${targetName} assigned · pixel values were not changed`);
+      return;
+    }
+    try {
+      const convertedSurfaces = [...surfacesRef.current.values()].map(
+        (surface) => {
+          const context = surface.pixels.getContext('2d', {
+            willReadFrequently: true,
+          })!;
+          if (surface.precision) {
+            syncPrecisionSurface(surface);
+            const converted = convertRgba(
+              workingSurfaceToFloat32(surface.precision),
+              source,
+              options.target,
+              options.intent,
+              options.blackPointCompensation,
+            ) as Float32Array;
+            const precision = workingSurfaceFromFloat32(
+                converted,
+                surface.precision.width,
+                surface.precision.height,
+                surface.precision.depth,
+              ),
+              image = new ImageData(
+                workingSurfaceToRgba8(precision),
+                surface.pixels.width,
+                surface.pixels.height,
+              );
+            return { surface, precision, image };
+          }
+          const sourceImage = context.getImageData(
+              0,
+              0,
+              surface.pixels.width,
+              surface.pixels.height,
+            ),
+            image = new ImageData(
+              new Uint8ClampedArray(
+                convertRgba(
+                  sourceImage.data,
+                  source,
+                  options.target,
+                  options.intent,
+                  options.blackPointCompensation,
+                ),
+              ),
+              sourceImage.width,
+              sourceImage.height,
+            );
+          return { surface, image };
+        },
+      );
+      for (const converted of convertedSurfaces) {
+        if (converted.precision)
+          converted.surface.precision = converted.precision;
+        converted.surface.pixels
+          .getContext('2d')!
+          .putImageData(converted.image, 0, 0);
+      }
+      setColorProfile(options.target);
+      snapshot(`Convert to ${targetName}`);
+      render();
+      setStatus(
+        `Document converted to ${targetName} · ${options.intent.replaceAll('-', ' ')}${options.blackPointCompensation ? ' · black-point compensation' : ''}`,
+      );
+    } catch (error) {
+      setPsdError(
+        error instanceof Error
+          ? error.message
+          : 'The document color conversion failed safely.',
+      );
+    } finally {
+      setColorProfileDialog(null);
+    }
+  };
+
   const menu = (
     label: string,
     items: {
@@ -15645,6 +15785,22 @@ export default function Home() {
             {
               name: 'Convert to 32-bit float',
               action: () => convertDocumentWorkingDepth('32f'),
+            },
+            { separator: true },
+            {
+              name: 'Document color profile',
+              action: () =>
+                setStatus(
+                  `Current profile: ${COLOR_PROFILES[colorProfile].name} · ICC v${COLOR_PROFILES[colorProfile].version}`,
+                ),
+            },
+            {
+              name: 'Assign Profile…',
+              action: () => setColorProfileDialog('assign'),
+            },
+            {
+              name: 'Convert to Profile…',
+              action: () => setColorProfileDialog('convert'),
             },
             { separator: true },
             { name: 'Auto enhance', action: () => filter('brightness') },
@@ -18037,6 +18193,7 @@ export default function Home() {
                   ? 'Layer group'
                   : 'Layer pixels'}{' '}
           · RGB {WORKING_DEPTH_LABELS[workingDepth]}
+          {` · ${COLOR_PROFILES[colorProfile].name}`}
           {workingDepth !== '8u' && ' · Float render'}
           {sceneReferred &&
             ` · HDR ${
@@ -21307,6 +21464,13 @@ export default function Home() {
         open={newDocumentOpen}
         onOpenChange={setNewDocumentOpen}
         onCreate={createBlankDocument}
+      />
+      <ColorProfileDialog
+        open={colorProfileDialog !== null}
+        operation={colorProfileDialog ?? 'convert'}
+        currentProfile={colorProfile}
+        onClose={() => setColorProfileDialog(null)}
+        onApply={applyDocumentColorProfile}
       />
       <ImageSizeDialog
         open={imageSizeOpen}
