@@ -19,6 +19,7 @@ import { pixelTransfers } from './pixel-transfers';
 import { precisionToDisplayRgba } from './high-depth';
 import { readSupportedPsdHeader } from './psd-header';
 import { unsupportedPsdTextReasons } from './psd-text';
+import { supportedPsdAdjustment } from './psd-adjustment';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -94,10 +95,8 @@ function decode(buffer: ArrayBuffer) {
       );
     if (
       layer.effects ||
-      layer.adjustment ||
       layer.clipping ||
       layer.vectorMask ||
-      layer.vectorFill ||
       layer.vectorStroke ||
       layer.placedLayer ||
       (layer.fillOpacity !== undefined && layer.fillOpacity !== 1)
@@ -105,10 +104,18 @@ function decode(buffer: ArrayBuffer) {
       warnings.add(
         'Smart objects, clipping, effects, vector content or adjustment layers',
       );
+    if (layer.adjustment && !supportedPsdAdjustment(layer.adjustment))
+      warnings.add(`Unsupported adjustment layer: ${layer.adjustment.type}`);
     if (layer.text)
       unsupportedPsdTextReasons(layer.text).forEach((reason) =>
         warnings.add(`Unsupported text: ${reason}`),
       );
+    if (
+      layer.vectorFill &&
+      layer.vectorFill.type !== 'color' &&
+      layer.vectorFill.type !== 'solid'
+    )
+      warnings.add('Unsupported noise-gradient or pattern fill layer');
     if (layer.realMask || layer.knockout || layer.artboard)
       warnings.add('Additional masks, knockout blending or artboards');
     const ranges = layer.blendingRanges;
@@ -168,6 +175,8 @@ function decode(buffer: ArrayBuffer) {
     opened: layer.opened,
     transparencyProtected: layer.transparencyProtected,
     text: layer.text,
+    vectorFill: layer.vectorFill,
+    adjustment: layer.adjustment,
     children: layer.children?.map(convert),
     imageData: layer.children
       ? undefined

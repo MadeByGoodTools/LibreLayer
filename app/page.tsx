@@ -147,6 +147,11 @@ import {
 } from '@/lib/brush-library';
 import type { Layer as PsdLayer } from 'ag-psd';
 import { portableTextToPsd, psdTextToPortable } from '@/lib/psd-text';
+import { fillRecipeToPsd, psdFillToRecipe } from '@/lib/psd-fill';
+import {
+  highDepthToPsdBrightness,
+  psdBrightnessToHighDepth,
+} from '@/lib/psd-adjustment';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -10993,11 +10998,27 @@ export default function Home() {
           y: 0,
           hasMask: !!mask,
           maskEnabled: !node.mask?.disabled,
-          kind: node.children ? 'group' : 'pixel',
+          kind: node.children
+            ? 'group'
+            : node.adjustment?.type === 'brightness/contrast'
+              ? 'adjustment'
+              : node.vectorFill?.type === 'color' ||
+                  node.vectorFill?.type === 'solid'
+                ? 'fill'
+                : 'pixel',
           parentId,
           collapsed: node.opened === false,
           locked: !!node.transparencyProtected,
           textLayer: node.text ? psdTextToPortable(node.text) : undefined,
+          fillLayer:
+            node.vectorFill?.type === 'color' ||
+            node.vectorFill?.type === 'solid'
+              ? psdFillToRecipe(node.vectorFill)
+              : undefined,
+          precisionAdjustment:
+            node.adjustment?.type === 'brightness/contrast'
+              ? psdBrightnessToHighDepth(node.adjustment)
+              : undefined,
         });
         nextSurfaces.set(id, { pixels, mask });
         if (node.children) walk(node.children, id);
@@ -11059,7 +11080,9 @@ export default function Home() {
       !flattened &&
       layers.some(
         (l) =>
-          l.kind === 'adjustment' ||
+          (l.kind === 'adjustment' &&
+            !highDepthToPsdBrightness(l.precisionAdjustment)) ||
+          (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
           l.clipping ||
           l.blendIf ||
           l.blendSpace === 'linear' ||
@@ -11075,7 +11098,7 @@ export default function Home() {
       )
     ) {
       setPsdError(
-        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
+        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, pattern fill layers, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
       );
       return;
     }
@@ -11162,6 +11185,13 @@ export default function Home() {
               top: 0,
               imageData: layerImage,
               text: l.textLayer ? portableTextToPsd(l.textLayer) : undefined,
+              vectorFill: l.fillLayer
+                ? fillRecipeToPsd(l.fillLayer)
+                : undefined,
+              adjustment:
+                l.kind === 'adjustment'
+                  ? highDepthToPsdBrightness(l.precisionAdjustment)
+                  : undefined,
               mask,
             };
           });

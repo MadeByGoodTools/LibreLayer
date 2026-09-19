@@ -5,6 +5,8 @@
 - PSD and PSB in 8-, 16- or 32-bit RGB. Supported high-depth layers are preserved structurally and tone-mapped into the current 8-bit browser working canvas; Photoshop ICC conversion is not implemented.
 - Raster layer names, order, visibility, whole-percent opacity, supported Canvas blend modes, masks and pass-through groups.
 - Native editable point and paragraph text with one character and paragraph style, including font, size, color, faux bold/italic, scale, tracking, kerning, leading, baseline shift, alignment, simple warp, underline, strike, small caps, ligatures and direction. The rendered bitmap is included for visual fallback. Vertical, path-based and mixed-style type is reported as unsupported and opens only through the explicit saved-composite choice.
+- Native editable solid-color and two-color linear-gradient fill layers retain color, angle, scale, offset and rendered fallback. Noise-gradient and pattern fill layers are explicitly blocked from layered export and reported on import until their native PSD recipes are supported.
+- Native editable Brightness/Contrast adjustment layers retain both values and masks. Combined LibreLayer adjustments and other Photoshop adjustment families are explicitly blocked or reported until each can be represented without losing settings.
 - Mask offsets, default outside color and disabled state.
 - Layered PSD export preserves supported raster structure and masks; transforms and pixel adjustments are baked into pixels. Native .pixelstudio saving remains the editable master.
 - Flattened PSD export writes the current composite as one pixel layer.
