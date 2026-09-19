@@ -1,4 +1,4 @@
-import type { Layer, Psd } from 'ag-psd';
+import type { Layer, LinkedFile, Psd } from 'ag-psd';
 import PsdWorker from './psd-worker?worker';
 import { pixelTransfers } from './pixel-transfers';
 export type PsdImport = {
@@ -7,6 +7,7 @@ export type PsdImport = {
   bitDepth: number;
   warnings: string[];
   children: Layer[];
+  linkedFiles?: LinkedFile[];
 };
 export function processPsd<T>(
   request:

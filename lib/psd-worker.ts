@@ -21,6 +21,7 @@ import { readSupportedPsdHeader } from './psd-header';
 import { unsupportedPsdTextReasons } from './psd-text';
 import { supportedPsdAdjustment } from './psd-adjustment';
 import { supportedPsdEffects } from './psd-effects';
+import { supportedPsdSmartObject } from './psd-smart-object';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -69,7 +70,7 @@ function decode(buffer: ArrayBuffer) {
     useRawData: true,
     useRawThumbnail: true,
     skipThumbnail: true,
-    skipLinkedFilesData: true,
+    skipLinkedFilesData: false,
     totalMemoryLimit: 256 * 1024 * 1024,
   });
   let count = 0,
@@ -98,7 +99,6 @@ function decode(buffer: ArrayBuffer) {
       layer.clipping ||
       layer.vectorMask ||
       layer.vectorStroke ||
-      layer.placedLayer ||
       (layer.fillOpacity !== undefined && layer.fillOpacity !== 1)
     )
       warnings.add(
@@ -106,6 +106,11 @@ function decode(buffer: ArrayBuffer) {
       );
     if (layer.effects && !supportedPsdEffects(layer.effects))
       warnings.add('Unsupported or non-lossless layer effects');
+    if (
+      layer.placedLayer &&
+      !supportedPsdSmartObject(layer.placedLayer, psd.linkedFiles)
+    )
+      warnings.add('Unsupported or non-lossless Smart Object or Smart Filter');
     if (layer.adjustment && !supportedPsdAdjustment(layer.adjustment))
       warnings.add(`Unsupported adjustment layer: ${layer.adjustment.type}`);
     if (layer.text)
@@ -180,6 +185,7 @@ function decode(buffer: ArrayBuffer) {
     vectorFill: layer.vectorFill,
     adjustment: layer.adjustment,
     effects: layer.effects,
+    placedLayer: layer.placedLayer,
     children: layer.children?.map(convert),
     imageData: layer.children
       ? undefined
@@ -201,6 +207,7 @@ function decode(buffer: ArrayBuffer) {
     bitDepth,
     warnings: [],
     children: psd.children.map(convert),
+    linkedFiles: psd.linkedFiles,
   };
 }
 self.onmessage = (

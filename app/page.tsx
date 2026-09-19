@@ -153,6 +153,7 @@ import {
   psdAdjustmentToHighDepth,
 } from '@/lib/psd-adjustment';
 import { layerEffectsToPsd, psdEffectsToLayerEffects } from '@/lib/psd-effects';
+import { psdToSmartObject, smartObjectToPsd } from '@/lib/psd-smart-object';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -11023,6 +11024,11 @@ export default function Home() {
           effects: node.effects
             ? psdEffectsToLayerEffects(node.effects)
             : undefined,
+          smartObject: node.placedLayer
+            ? (psdToSmartObject(node.placedLayer, data.linkedFiles) as
+                | SmartObjectData
+                | undefined)
+            : undefined,
         });
         nextSurfaces.set(id, { pixels, mask });
         if (node.children) walk(node.children, id);
@@ -11087,6 +11093,7 @@ export default function Home() {
           (l.kind === 'adjustment' &&
             !highDepthToPsdAdjustment(l.precisionAdjustment)) ||
           (l.effects && !layerEffectsToPsd(l.effects)) ||
+          (l.smartObject && !smartObjectToPsd(l.smartObject, doc.w, doc.h)) ||
           (l.kind === 'fill' && l.fillLayer?.mode === 'pattern') ||
           l.clipping ||
           l.blendIf ||
@@ -11103,7 +11110,7 @@ export default function Home() {
       )
     ) {
       setPsdError(
-        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, pattern fills or effects, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
+        'Layered PSD export cannot preserve these clipping, Blend If, extended blend modes, adjustment layers, pattern fills or effects, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
       );
       return;
     }
@@ -11117,6 +11124,10 @@ export default function Home() {
         .getImageData(0, 0, doc.w, doc.h);
       composite.width = 1;
       composite.height = 1;
+      const linkedFiles = new Map<
+        string,
+        NonNullable<ReturnType<typeof smartObjectToPsd>>['linkedFile']
+      >();
       const build = (parentId?: string): PsdLayer[] =>
         layersRef.current
           .filter((l) => l.parentId === parentId)
@@ -11129,8 +11140,16 @@ export default function Home() {
                 blendMode: 'pass through',
                 children: build(l.id),
               };
-            const s = surfacesRef.current.get(l.id)!,
+            const smartObject = l.smartObject
+                ? smartObjectToPsd(l.smartObject, doc.w, doc.h)
+                : undefined,
+              s = surfacesRef.current.get(l.id)!,
               pixels = makeCanvas(doc.w, doc.h);
+            if (smartObject)
+              linkedFiles.set(
+                smartObject.linkedFile.id,
+                smartObject.linkedFile,
+              );
             drawLayer(
               pixels.getContext('2d')!,
               {
@@ -11139,6 +11158,7 @@ export default function Home() {
                 blend: 'source-over',
                 hasMask: false,
                 effects: undefined,
+                smartObject: undefined,
               },
               s,
               doc.w,
@@ -11204,9 +11224,13 @@ export default function Home() {
                   ? highDepthToPsdAdjustment(l.precisionAdjustment)
                   : undefined,
               effects: l.effects ? layerEffectsToPsd(l.effects) : undefined,
+              placedLayer: smartObject?.placedLayer,
               mask,
             };
           });
+      const children = flattened
+        ? [{ name: 'Flattened artwork', imageData }]
+        : build();
       const buffer = await processPsd<ArrayBuffer>({
         action: 'write',
         psb,
@@ -11214,9 +11238,8 @@ export default function Home() {
           width: doc.w,
           height: doc.h,
           imageData,
-          children: flattened
-            ? [{ name: 'Flattened artwork', imageData }]
-            : build(),
+          linkedFiles: flattened ? undefined : [...linkedFiles.values()],
+          children,
         },
       });
       checkFileSize(buffer.byteLength);
