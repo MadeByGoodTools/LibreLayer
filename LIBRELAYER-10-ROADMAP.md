@@ -119,6 +119,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [x] Common web formats, PSD/PSB import, layered/flattened PSD export, native projects, TIFF, and RAW.
 - [x] Explicit PSD compatibility report and unsupported-content warnings.
 - [ ] Native text, shape, fill, adjustment, effect, Smart Object, and Smart Filter PSD round-trip.
+  - [x] Native editable point/paragraph PSD text with a single character/paragraph style, rendered fallback pixels, import/export mapping, project persistence, and explicit warnings for unsupported vertical, path, and mixed-style type.
 - [ ] Exact clipping, knockout, Blend If, group, comp, channel, path, guide, metadata, and ICC fidelity.
 - [ ] CMYK, Lab, indexed, bitmap, 16-bit, and 32-bit PSD/PSB documents.
 - [ ] Layered TIFF, multipart EXR, HDR, SVG, PDF, EPS, JPEG XL, JPEG 2000, HEIC, AVIF, and animated WebP.

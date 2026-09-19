@@ -4,6 +4,7 @@
 
 - PSD and PSB in 8-, 16- or 32-bit RGB. Supported high-depth layers are preserved structurally and tone-mapped into the current 8-bit browser working canvas; Photoshop ICC conversion is not implemented.
 - Raster layer names, order, visibility, whole-percent opacity, supported Canvas blend modes, masks and pass-through groups.
+- Native editable point and paragraph text with one character and paragraph style, including font, size, color, faux bold/italic, scale, tracking, kerning, leading, baseline shift, alignment, simple warp, underline, strike, small caps, ligatures and direction. The rendered bitmap is included for visual fallback. Vertical, path-based and mixed-style type is reported as unsupported and opens only through the explicit saved-composite choice.
 - Mask offsets, default outside color and disabled state.
 - Layered PSD export preserves supported raster structure and masks; transforms and pixel adjustments are baked into pixels. Native .pixelstudio saving remains the editable master.
 - Flattened PSD export writes the current composite as one pixel layer.
@@ -22,6 +23,7 @@
 - Isolated-group fixture: compatibility dialog shown; explicit flattened-preview action opened the saved green composite, confirmed [0,255,0,255].
 - Oversized 90,000×90,000 header: rejected with size-limit dialog; current document retained.
 - File / Export flattened PSD: exactly one raster layer, pixel bytes match current composite.
+- Native paragraph-text fixture: LibreLayer text metadata serialized through the PSD codec and reopened with content, font and box type intact; production-browser QA created the same editable text layer with its real character controls and no runtime errors.
 - TypeScript no-emit check and production build passed.
 
 These are editor/library round-trip tests, not independent validation in Adobe Photoshop. Full PSD import/export remain partial in the 300-feature checklist.

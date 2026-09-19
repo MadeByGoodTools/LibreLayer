@@ -146,6 +146,7 @@ import {
   normalizeBrushTags,
 } from '@/lib/brush-library';
 import type { Layer as PsdLayer } from 'ag-psd';
+import { portableTextToPsd, psdTextToPortable } from '@/lib/psd-text';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -10996,6 +10997,7 @@ export default function Home() {
           parentId,
           collapsed: node.opened === false,
           locked: !!node.transparencyProtected,
+          textLayer: node.text ? psdTextToPortable(node.text) : undefined,
         });
         nextSurfaces.set(id, { pixels, mask });
         if (node.children) walk(node.children, id);
@@ -11159,6 +11161,7 @@ export default function Home() {
               left: 0,
               top: 0,
               imageData: layerImage,
+              text: l.textLayer ? portableTextToPsd(l.textLayer) : undefined,
               mask,
             };
           });
