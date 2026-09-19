@@ -4,6 +4,7 @@
 
 - PSD and PSB in 8-, 16- or 32-bit RGB. Supported high-depth layers are preserved structurally and tone-mapped into the current 8-bit browser working canvas; Photoshop ICC conversion is not implemented.
 - Raster layer names, order, visibility, whole-percent opacity and fill opacity, supported Canvas blend modes, masks, native clipping stacks, pass-through or isolated groups, translucent/masked groups, and one editable gray, red, green, or blue Blend If channel per layer. Photoshop files with simultaneous non-default Blend If ranges on multiple channels are reported instead of silently simplified.
+- Document resolution, ruler guides, grid spacing, and visibility/position Layer Comps remain editable. Layer Comps that capture appearance changes are reported instead of being imported or exported with missing state.
 - Native editable point and paragraph text with one character and paragraph style, including font, size, color, faux bold/italic, scale, tracking, kerning, leading, baseline shift, alignment, simple warp, underline, strike, small caps, ligatures and direction. The rendered bitmap is included for visual fallback. Vertical, path-based and mixed-style type is reported as unsupported and opens only through the explicit saved-composite choice.
 - Native editable solid-color and two-color linear-gradient fill layers retain color, angle, scale, offset and rendered fallback. Noise-gradient and pattern fill layers are explicitly blocked from layered export and reported on import until their native PSD recipes are supported.
 - Native editable Brightness/Contrast, Exposure, Vibrance, Hue/Saturation, Color Balance, Black & White, Photo Filter, Levels, Curves, Channel Mixer, Gradient Map, and Selective Color adjustment layers retain their supported values and masks. Combined LibreLayer recipes and other Photoshop adjustment families are explicitly blocked or reported until each can be represented without losing settings.
@@ -29,6 +30,7 @@
 - File / Export flattened PSD: exactly one raster layer, pixel bytes match current composite.
 - Native paragraph-text fixture: LibreLayer text metadata serialized through the PSD codec and reopened with content, font and box type intact; production-browser QA created the same editable text layer with its real character controls and no runtime errors.
 - Native compositing fixture: clipping, fill opacity, gray/RGB single-channel Blend If ranges, isolated-group opacity, group fill and raster group masks survive codec round trip; simultaneous active Blend If channels fail closed.
+- Native document-structure fixture: horizontal/vertical guides, grid spacing, resolution, and visibility/position Layer Comp records survive codec round trip; malformed and appearance-changing comps fail closed.
 - TypeScript no-emit check and production build passed.
 
 These are editor/library round-trip tests, not independent validation in Adobe Photoshop. Full PSD import/export remain partial in the 300-feature checklist.

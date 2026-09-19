@@ -160,6 +160,13 @@ import {
   psdBlendIfToPortable,
   psdFillOpacityToPortable,
 } from '@/lib/psd-compositing';
+import {
+  canExportPsdLayerComps,
+  editorViewToPsdResources,
+  importPsdLayerComps,
+  planPsdLayerComps,
+  psdResourcesToEditorView,
+} from '@/lib/psd-document-structure';
 import { processPsd, type PsdImport } from '@/lib/psd-transfer';
 import {
   EncryptedProjectPasswordInvalid,
@@ -10859,7 +10866,12 @@ export default function Home() {
     smartObjectSource?: EditorDocument['smartObjectSource'],
     extras?: Pick<
       EditorDocument,
-      'paths' | 'artboards' | 'layerComps' | 'savedSelections' | 'feather'
+      | 'paths'
+      | 'artboards'
+      | 'layerComps'
+      | 'savedSelections'
+      | 'feather'
+      | 'view'
     >,
     nextWorkingDepth: WorkingDepth = '8u',
     sceneReferred = false,
@@ -10895,6 +10907,7 @@ export default function Home() {
         paths: structuredClone(extras?.paths ?? []),
         artboards: structuredClone(extras?.artboards ?? []),
         layerComps: structuredClone(extras?.layerComps ?? []),
+        view: extras?.view ? structuredClone(extras.view) : undefined,
         surfaces: nextLayers.map((meta) => {
           const s = nextSurfaces.get(meta.id)!;
           const backing = syncTiledBacking(s);
@@ -10929,6 +10942,7 @@ export default function Home() {
         paths: structuredClone(extras?.paths ?? []),
         artboards: structuredClone(extras?.artboards ?? []),
         layerComps: structuredClone(extras?.layerComps ?? []),
+        view: extras?.view ? structuredClone(extras.view) : undefined,
         savedSelections: structuredClone(extras?.savedSelections ?? []),
         feather: extras?.feather ?? 0,
         smartObjectSource,
@@ -10952,7 +10966,8 @@ export default function Home() {
     inspectUnits(data.children);
     requireRoom(data.width, data.height, data.width * data.height * units);
     const nextLayers: LayerMeta[] = [],
-      nextSurfaces = new Map<string, LayerSurface>();
+      nextSurfaces = new Map<string, LayerSurface>(),
+      importedCompLayers: Parameters<typeof importPsdLayerComps>[1] = [];
     const toCanvas = (data: NonNullable<PsdLayer['imageData']>) => {
       const canvas = makeCanvas(data.width, data.height);
       canvas
@@ -11044,11 +11059,48 @@ export default function Home() {
                 | undefined)
             : undefined,
         });
+        importedCompLayers.push({
+          sourceId: node.id,
+          layerId: id,
+          visible: !node.hidden,
+          comps: node.comps,
+        });
         nextSurfaces.set(id, { pixels, mask });
         if (node.children) walk(node.children, id);
       }
     };
     walk(data.children);
+    const importedComps: LayerComp[] = importPsdLayerComps(
+        data.imageResources?.layerComps,
+        importedCompLayers,
+      ).map((comp) => ({
+        id: crypto.randomUUID(),
+        name: comp.name,
+        comment: comp.comment,
+        states: comp.states.map((state) => {
+          const layer = nextLayers.find((candidate) => candidate.id === state.id)!;
+          return {
+            id: state.id,
+            visible: state.visible,
+            x: state.x,
+            y: state.y,
+            opacity: layer.opacity,
+            fill: layer.fill,
+            blend: layer.blend,
+            rotation: layer.rotation,
+            scaleX: layer.scaleX,
+            scaleY: layer.scaleY,
+            brightness: layer.brightness,
+            contrast: layer.contrast,
+            saturation: layer.saturation,
+            blur: layer.blur,
+          };
+        }),
+      })),
+      importedView = {
+        ...defaultView,
+        ...psdResourcesToEditorView(data.imageResources),
+      };
     loadImportedDocument(
       name,
       data.width,
@@ -11056,6 +11108,9 @@ export default function Home() {
       nextLayers,
       nextSurfaces,
       'Open PSD',
+      undefined,
+      undefined,
+      { layerComps: importedComps, view: importedView },
     );
     setStatus(
       data.warnings.length
@@ -11118,10 +11173,11 @@ export default function Home() {
               (l.maskDensity ?? 100) !== 100 ||
               (l.maskFeather ?? 0) > 0 ||
               l.maskLinked === false)),
-      )
+      ) ||
+      !canExportPsdLayerComps(layerCompsRef.current, layersRef.current)
     ) {
       setPsdError(
-        'Layered PSD export cannot preserve these extended blend modes, deep or shallow knockout, pattern fills, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
+        'Layered PSD export cannot preserve these extended blend modes, deep or shallow knockout, appearance-changing layer comps, pattern fills, linked or advanced Smart Objects and Smart Filters, vector masks, or advanced raster-mask settings yet. Use File → Export flattened PSD for the visible result, or Save layered project to keep editing.',
       );
       return;
     }
@@ -11138,7 +11194,13 @@ export default function Home() {
       const linkedFiles = new Map<
         string,
         NonNullable<ReturnType<typeof smartObjectToPsd>>['linkedFile']
-      >();
+      >(),
+        layerIds = new Map(
+          layersRef.current.map((layer, index) => [layer.id, index + 1]),
+        ),
+        compPlan = flattened
+          ? { byLayerId: {} }
+          : planPsdLayerComps(layerCompsRef.current, layersRef.current);
       const buildMask = (l: LayerMeta): PsdLayer['mask'] => {
         const s = surfacesRef.current.get(l.id);
         if (!l.hasMask || !s?.mask) return undefined;
@@ -11182,6 +11244,7 @@ export default function Home() {
           .map((l) => {
             if (l.kind === 'group')
               return {
+                id: layerIds.get(l.id),
                 name: l.name,
                 hidden: !l.visible,
                 opened: !l.collapsed,
@@ -11192,6 +11255,7 @@ export default function Home() {
                 blendMode:
                   l.groupIsolation === 'isolated' ? 'normal' : 'pass through',
                 mask: buildMask(l),
+                comps: compPlan.byLayerId[l.id],
                 children: build(l.id),
               };
             const smartObject = l.smartObject
@@ -11225,6 +11289,7 @@ export default function Home() {
             pixels.width = 1;
             pixels.height = 1;
             return {
+              id: layerIds.get(l.id),
               name: l.name,
               hidden: !l.visible,
               opacity: l.opacity / 100,
@@ -11249,6 +11314,7 @@ export default function Home() {
               effects: l.effects ? layerEffectsToPsd(l.effects) : undefined,
               placedLayer: smartObject?.placedLayer,
               mask,
+              comps: compPlan.byLayerId[l.id],
             };
           });
       const children = flattened
@@ -11261,6 +11327,10 @@ export default function Home() {
           width: doc.w,
           height: doc.h,
           imageData,
+          imageResources: {
+            ...editorViewToPsdResources(view),
+            layerComps: flattened ? undefined : compPlan.resource,
+          },
           linkedFiles: flattened ? undefined : [...linkedFiles.values()],
           children,
         },

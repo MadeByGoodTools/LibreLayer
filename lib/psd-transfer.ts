@@ -1,4 +1,4 @@
-import type { Layer, LinkedFile, Psd } from 'ag-psd';
+import type { ImageResources, Layer, LinkedFile, Psd } from 'ag-psd';
 import PsdWorker from './psd-worker?worker';
 import { pixelTransfers } from './pixel-transfers';
 export type PsdImport = {
@@ -8,6 +8,10 @@ export type PsdImport = {
   warnings: string[];
   children: Layer[];
   linkedFiles?: LinkedFile[];
+  imageResources?: Pick<
+    ImageResources,
+    'gridAndGuidesInformation' | 'resolutionInfo' | 'layerComps'
+  >;
 };
 export function processPsd<T>(
   request:

@@ -23,6 +23,10 @@ import { supportedPsdAdjustment } from './psd-adjustment';
 import { supportedPsdEffects } from './psd-effects';
 import { supportedPsdSmartObject } from './psd-smart-object';
 import { supportedPsdBlendIf } from './psd-compositing';
+import {
+  supportedPsdDocumentView,
+  supportedPsdLayerComps,
+} from './psd-document-structure';
 
 initializeCanvas(
   (w, h) => new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement,
@@ -145,6 +149,15 @@ function decode(buffer: ArrayBuffer) {
     layer.children?.forEach((child) => inspect(child, depth + 1));
   };
   psd.children?.forEach((layer) => inspect(layer));
+  if (
+    !supportedPsdLayerComps(
+      psd.imageResources?.layerComps,
+      psd.children ?? [],
+    )
+  )
+    warnings.add('Unsupported appearance-based or malformed layer comps');
+  if (!supportedPsdDocumentView(psd.imageResources))
+    warnings.add('Unsupported or excessive PSD guides, grid, or resolution');
   const displayData = (data: PixelData | undefined) =>
     data
       ? new ImageData(precisionToDisplayRgba(data), data.width, data.height)
@@ -174,6 +187,8 @@ function decode(buffer: ArrayBuffer) {
     left: layer.left,
     top: layer.top,
     opened: layer.opened,
+    id: layer.id,
+    comps: layer.comps,
     transparencyProtected: layer.transparencyProtected,
     text: layer.text,
     vectorFill: layer.vectorFill,
@@ -202,6 +217,14 @@ function decode(buffer: ArrayBuffer) {
     warnings: [],
     children: psd.children.map(convert),
     linkedFiles: psd.linkedFiles,
+    imageResources: psd.imageResources
+      ? {
+          gridAndGuidesInformation:
+            psd.imageResources.gridAndGuidesInformation,
+          resolutionInfo: psd.imageResources.resolutionInfo,
+          layerComps: psd.imageResources.layerComps,
+        }
+      : undefined,
   };
 }
 self.onmessage = (
