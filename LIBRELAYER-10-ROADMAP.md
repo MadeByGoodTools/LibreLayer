@@ -150,6 +150,7 @@ This is the release ledger for closing the remaining gap with a professional des
   - [x] Full-document profile conversion runs as an atomic, cancelable, progress-reporting Web Worker job with chunked cooperative fallback and crash journal.
 - [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
   - [x] Bounded LRU render-target reuse for dirty-region brush tiles, with deterministic release after compositing and memory-budget eviction.
+  - [x] Document-signature composite cache with zoom-selected mip pyramids, edit-safe forced invalidation, HDR/profile separation, and bounded full-resolution retention.
 - [x] Memory-pressure adaptation and preview/final quality scheduling.
 - [x] OPFS scratch storage with selectable locations and quotas.
 - [x] Incremental saving, pixel deduplication, compressed history, and transaction journal.

@@ -319,6 +319,11 @@ import {
   GpuBrushRenderer,
   type BrushRendererBackend,
 } from '@/lib/gpu-brush-renderer';
+import {
+  displayCompositeKey,
+  mipChainDimensions,
+  mipLevelForZoom,
+} from '@/lib/composite-mip-cache';
 import { correctRedEyePixels, highFrequencyPixels } from '@/lib/retouch-engine';
 import {
   contentAwareFill,
@@ -2845,6 +2850,22 @@ export default function Home() {
     return () => window.removeEventListener('beforeunload', warn);
   });
   const displayRef = useRef<HTMLCanvasElement>(null);
+  const displayCompositeCache = useRef<{
+    key: string;
+    base?: HTMLCanvasElement;
+    mips: HTMLCanvasElement[];
+    dynamicRange: string;
+    hdrPreview?: string;
+    renderPrecision: string;
+  } | null>(null);
+  const releaseDisplayCompositeCache = () => {
+    const cached = displayCompositeCache.current;
+    if (!cached) return;
+    if (cached.base) cached.base.width = cached.base.height = 1;
+    for (const mip of cached.mips) mip.width = mip.height = 1;
+    displayCompositeCache.current = null;
+  };
+  useEffect(() => () => releaseDisplayCompositeCache(), []);
   const selectMaskPreviewSourceRef = useRef<HTMLCanvasElement | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const surfacesRef = useRef(new Map<string, LayerSurface>());
@@ -3661,159 +3682,233 @@ export default function Home() {
     region.width = region.height = 1;
     return { pixels: proxy, precision: backing, x, y };
   };
-  const render = useCallback(() => {
-    const out = displayRef.current;
-    if (!out) return;
-    if (out.width !== doc.w) out.width = doc.w;
-    if (out.height !== doc.h) out.height = doc.h;
-    const highDepth = workingDepthRef.current !== '8u',
-      renderPrecision: RenderPrecision =
-        highDepth && floatCanvasSupported() ? 'f16' : 'u8';
-    if (highDepth)
-      for (const surface of surfacesRef.current.values())
-        if (surface.precision) syncPrecisionSurface(surface);
-    const ctx = canvasContext(out, renderPrecision, true)!;
-    renderLayers(
-      ctx,
-      layersRef.current,
-      surfacesRef.current,
-      doc,
-      smartFilterPreviewRef.current ? 'preview' : 'final',
-      renderPrecision,
-    );
-    if (renderPrecision === 'f16') {
-      const raw = readFloatCanvas(ctx, 0, 0, doc.w, doc.h),
-        capability = hdrDisplayCapability(),
-        previewMode = normalizeHdrPreviewMode(preferences.hdrPreviewMode),
-        preview = sceneReferred
-          ? createHdrPreviewPixels(
-              raw,
-              previewMode,
-              capability.css && capability.media && capability.float16,
-            )
-          : { pixels: raw, extended: false };
-      putFloatCanvas(ctx, preview.pixels, doc.w, doc.h);
-      out.style.setProperty(
-        'dynamic-range-limit',
-        preview.extended ? 'no-limit' : 'standard',
-      );
-      out.dataset.hdrPreview = sceneReferred
-        ? preview.extended
-          ? 'extended'
-          : previewMode === 'highlights'
-            ? 'highlights'
-            : 'sdr'
-        : 'display-referred';
-      out.dataset.renderPrecision = 'float16';
-    } else {
-      out.style.removeProperty('dynamic-range-limit');
-      delete out.dataset.hdrPreview;
-      out.dataset.renderPrecision = 'uint8-fallback';
-    }
-    const activeLayer = layersRef.current.find(
-        (layer) => layer.id === selectedRef.current,
-      ),
-      activeSurface = activeLayer && surfacesRef.current.get(activeLayer.id);
-    if (
-      activeLayer?.maskOverlay &&
-      activeLayer.hasMask &&
-      activeSurface?.mask
-    ) {
-      const transform =
-          activeLayer.maskLinked === false
-            ? activeLayer.maskTransform
-            : {
-                x: activeLayer.x,
-                y: activeLayer.y,
-                rotation: activeLayer.rotation,
-                scaleX: activeLayer.scaleX,
-                scaleY: activeLayer.scaleY,
-              },
-        alpha = positionedMaskAlpha(
-          activeSurface.mask,
-          activeLayer.maskDensity,
-          activeLayer.maskFeather,
-          transform,
-          doc.w,
-          doc.h,
-        ),
-        overlay = makeCanvas(doc.w, doc.h),
-        overlayContext = overlay.getContext('2d')!;
-      overlayContext.fillStyle = 'rgba(255,35,85,.48)';
-      overlayContext.fillRect(0, 0, doc.w, doc.h);
-      overlayContext.globalCompositeOperation = 'destination-out';
-      overlayContext.drawImage(alpha, 0, 0);
-      ctx.drawImage(overlay, 0, 0);
-      alpha.width = alpha.height = overlay.width = overlay.height = 1;
-    }
-    if (soloChannel && channelView !== 'rgb') {
-      const image = ctx.getImageData(0, 0, doc.w, doc.h);
-      for (let i = 0; i < image.data.length; i += 4) {
-        const value =
-          channelView === 'red'
-            ? image.data[i]
-            : channelView === 'green'
-              ? image.data[i + 1]
-              : channelView === 'blue'
-                ? image.data[i + 2]
-                : image.data[i + 3];
-        image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
-        if (channelView === 'alpha') image.data[i + 3] = 255;
+  const render = useCallback(
+    (forceComposite = true) => {
+      const out = displayRef.current;
+      if (!out) return;
+      if (out.width !== doc.w) out.width = doc.w;
+      if (out.height !== doc.h) out.height = doc.h;
+      const highDepth = workingDepthRef.current !== '8u',
+        renderPrecision: RenderPrecision =
+          highDepth && floatCanvasSupported() ? 'f16' : 'u8',
+        quality = smartFilterPreviewRef.current ? 'preview' : 'final',
+        cacheKey = displayCompositeKey({
+          documentId: activeDocumentRef.current,
+          width: doc.w,
+          height: doc.h,
+          precision: renderPrecision,
+          quality,
+          sceneReferred,
+          profileId: colorProfileRef.current,
+          hdrPreviewMode: preferences.hdrPreviewMode ?? 'auto',
+          layerSignature: JSON.stringify(layersRef.current),
+        }),
+        cached = displayCompositeCache.current,
+        reusableCache =
+          !forceComposite && cached?.key === cacheKey ? cached : null,
+        requestedMip = mipLevelForZoom(zoom, reusableCache?.mips.length ?? 0),
+        cachedSource = reusableCache
+          ? requestedMip === 0
+            ? reusableCache.base
+            : reusableCache.mips[requestedMip - 1]
+          : undefined,
+        ctx = canvasContext(out, renderPrecision, true)!;
+      if (cachedSource && reusableCache) {
+        ctx.clearRect(0, 0, doc.w, doc.h);
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(cachedSource, 0, 0, doc.w, doc.h);
+        ctx.restore();
+        if (reusableCache.dynamicRange)
+          out.style.setProperty(
+            'dynamic-range-limit',
+            reusableCache.dynamicRange,
+          );
+        else out.style.removeProperty('dynamic-range-limit');
+        if (reusableCache.hdrPreview)
+          out.dataset.hdrPreview = reusableCache.hdrPreview;
+        else delete out.dataset.hdrPreview;
+        out.dataset.renderPrecision = reusableCache.renderPrecision;
+        out.dataset.compositeSource =
+          requestedMip === 0 ? 'cache-full' : `cache-mip-${requestedMip}`;
+      } else {
+        if (highDepth)
+          for (const surface of surfacesRef.current.values())
+            if (surface.precision) syncPrecisionSurface(surface);
+        renderLayers(
+          ctx,
+          layersRef.current,
+          surfacesRef.current,
+          doc,
+          quality,
+          renderPrecision,
+        );
+        if (renderPrecision === 'f16') {
+          const raw = readFloatCanvas(ctx, 0, 0, doc.w, doc.h),
+            capability = hdrDisplayCapability(),
+            previewMode = normalizeHdrPreviewMode(preferences.hdrPreviewMode),
+            preview = sceneReferred
+              ? createHdrPreviewPixels(
+                  raw,
+                  previewMode,
+                  capability.css && capability.media && capability.float16,
+                )
+              : { pixels: raw, extended: false };
+          putFloatCanvas(ctx, preview.pixels, doc.w, doc.h);
+          out.style.setProperty(
+            'dynamic-range-limit',
+            preview.extended ? 'no-limit' : 'standard',
+          );
+          out.dataset.hdrPreview = sceneReferred
+            ? preview.extended
+              ? 'extended'
+              : previewMode === 'highlights'
+                ? 'highlights'
+                : 'sdr'
+            : 'display-referred';
+          out.dataset.renderPrecision = 'float16';
+        } else {
+          out.style.removeProperty('dynamic-range-limit');
+          delete out.dataset.hdrPreview;
+          out.dataset.renderPrecision = 'uint8-fallback';
+        }
+        releaseDisplayCompositeCache();
+        if (!gesturePaintTool.current) {
+          const base =
+              doc.w * doc.h <= 16_000_000
+                ? makeCanvas(doc.w, doc.h)
+                : undefined,
+            mips: HTMLCanvasElement[] = [];
+          if (base) base.getContext('2d')!.drawImage(out, 0, 0);
+          let source: CanvasImageSource = out;
+          for (const dimensions of mipChainDimensions(doc.w, doc.h)) {
+            const mip = makeCanvas(dimensions.width, dimensions.height),
+              mipContext = mip.getContext('2d')!;
+            mipContext.imageSmoothingEnabled = true;
+            mipContext.imageSmoothingQuality = 'high';
+            mipContext.drawImage(source, 0, 0, mip.width, mip.height);
+            mips.push(mip);
+            source = mip;
+          }
+          displayCompositeCache.current = {
+            key: cacheKey,
+            base,
+            mips,
+            dynamicRange:
+              out.style.getPropertyValue('dynamic-range-limit') || '',
+            hdrPreview: out.dataset.hdrPreview,
+            renderPrecision: out.dataset.renderPrecision ?? 'uint8-fallback',
+          };
+        }
+        if (!cachedSource) out.dataset.compositeSource = 'fresh';
       }
-      ctx.putImageData(image, 0, 0);
-    }
-    const quick = quickMaskRef.current;
-    if (quick) {
-      const overlay = makeCanvas(doc.w, doc.h),
-        oc = overlay.getContext('2d')!,
-        alpha = maskToAlpha(quick);
-      oc.fillStyle = 'rgba(255,35,85,.48)';
-      oc.fillRect(0, 0, doc.w, doc.h);
-      oc.globalCompositeOperation = 'destination-out';
-      oc.drawImage(alpha, 0, 0);
-      ctx.drawImage(overlay, 0, 0);
-      alpha.width = alpha.height = overlay.width = overlay.height = 1;
-    }
-    if (
-      cloneOverlay &&
-      cloneSource.current &&
-      (tool === 'clone' || (tool === 'retouch' && retouchMode === 'healing'))
-    ) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,.95)';
-      ctx.lineWidth = Math.max(1, 1 / (zoom / 100));
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.arc(
-        cloneSource.current.x,
-        cloneSource.current.y,
-        size / 2,
-        0,
-        Math.PI * 2,
-      );
-      ctx.moveTo(cloneSource.current.x - 7, cloneSource.current.y);
-      ctx.lineTo(cloneSource.current.x + 7, cloneSource.current.y);
-      ctx.moveTo(cloneSource.current.x, cloneSource.current.y - 7);
-      ctx.lineTo(cloneSource.current.x, cloneSource.current.y + 7);
-      ctx.stroke();
-      ctx.restore();
-    }
-  }, [
-    doc,
-    channelView,
-    soloChannel,
-    cloneOverlay,
-    tool,
-    retouchMode,
-    zoom,
-    size,
-    selectedId,
-    workingDepth,
-    sceneReferred,
-    preferences.hdrPreviewMode,
-  ]);
+      const activeLayer = layersRef.current.find(
+          (layer) => layer.id === selectedRef.current,
+        ),
+        activeSurface = activeLayer && surfacesRef.current.get(activeLayer.id);
+      if (
+        activeLayer?.maskOverlay &&
+        activeLayer.hasMask &&
+        activeSurface?.mask
+      ) {
+        const transform =
+            activeLayer.maskLinked === false
+              ? activeLayer.maskTransform
+              : {
+                  x: activeLayer.x,
+                  y: activeLayer.y,
+                  rotation: activeLayer.rotation,
+                  scaleX: activeLayer.scaleX,
+                  scaleY: activeLayer.scaleY,
+                },
+          alpha = positionedMaskAlpha(
+            activeSurface.mask,
+            activeLayer.maskDensity,
+            activeLayer.maskFeather,
+            transform,
+            doc.w,
+            doc.h,
+          ),
+          overlay = makeCanvas(doc.w, doc.h),
+          overlayContext = overlay.getContext('2d')!;
+        overlayContext.fillStyle = 'rgba(255,35,85,.48)';
+        overlayContext.fillRect(0, 0, doc.w, doc.h);
+        overlayContext.globalCompositeOperation = 'destination-out';
+        overlayContext.drawImage(alpha, 0, 0);
+        ctx.drawImage(overlay, 0, 0);
+        alpha.width = alpha.height = overlay.width = overlay.height = 1;
+      }
+      if (soloChannel && channelView !== 'rgb') {
+        const image = ctx.getImageData(0, 0, doc.w, doc.h);
+        for (let i = 0; i < image.data.length; i += 4) {
+          const value =
+            channelView === 'red'
+              ? image.data[i]
+              : channelView === 'green'
+                ? image.data[i + 1]
+                : channelView === 'blue'
+                  ? image.data[i + 2]
+                  : image.data[i + 3];
+          image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
+          if (channelView === 'alpha') image.data[i + 3] = 255;
+        }
+        ctx.putImageData(image, 0, 0);
+      }
+      const quick = quickMaskRef.current;
+      if (quick) {
+        const overlay = makeCanvas(doc.w, doc.h),
+          oc = overlay.getContext('2d')!,
+          alpha = maskToAlpha(quick);
+        oc.fillStyle = 'rgba(255,35,85,.48)';
+        oc.fillRect(0, 0, doc.w, doc.h);
+        oc.globalCompositeOperation = 'destination-out';
+        oc.drawImage(alpha, 0, 0);
+        ctx.drawImage(overlay, 0, 0);
+        alpha.width = alpha.height = overlay.width = overlay.height = 1;
+      }
+      if (
+        cloneOverlay &&
+        cloneSource.current &&
+        (tool === 'clone' || (tool === 'retouch' && retouchMode === 'healing'))
+      ) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,.95)';
+        ctx.lineWidth = Math.max(1, 1 / (zoom / 100));
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(
+          cloneSource.current.x,
+          cloneSource.current.y,
+          size / 2,
+          0,
+          Math.PI * 2,
+        );
+        ctx.moveTo(cloneSource.current.x - 7, cloneSource.current.y);
+        ctx.lineTo(cloneSource.current.x + 7, cloneSource.current.y);
+        ctx.moveTo(cloneSource.current.x, cloneSource.current.y - 7);
+        ctx.lineTo(cloneSource.current.x, cloneSource.current.y + 7);
+        ctx.stroke();
+        ctx.restore();
+      }
+    },
+    [
+      doc,
+      channelView,
+      soloChannel,
+      cloneOverlay,
+      tool,
+      retouchMode,
+      zoom,
+      size,
+      selectedId,
+      workingDepth,
+      sceneReferred,
+      preferences.hdrPreviewMode,
+    ],
+  );
   useEffect(() => {
-    render();
+    render(false);
   }, [layers, render]);
   useEffect(() => {
     selectionRef.current = selection;
@@ -9440,7 +9535,7 @@ export default function Home() {
     setDoc({ w: nextW, h: nextH });
     snapshot(`Rotate image ${degrees}°`);
     setStatus(`Image rotated ${degrees}°`);
-    requestAnimationFrame(render);
+    requestAnimationFrame(() => render());
   };
 
   const trimTransparent = () => {
