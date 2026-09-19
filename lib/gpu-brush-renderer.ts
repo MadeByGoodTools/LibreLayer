@@ -1,3 +1,5 @@
+import { BoundedResourcePool } from './render-target-pool.ts';
+
 export type BrushRendererBackend = 'webgl2' | 'canvas2d';
 
 export type BrushDab = {
@@ -18,6 +20,7 @@ export type BrushTileBounds = {
 
 export type RenderedBrushTile = BrushTileBounds & {
   canvas: HTMLCanvasElement;
+  release(): void;
 };
 
 const VERTEX_SHADER = `#version 300 es
@@ -169,6 +172,12 @@ export class GpuBrushRenderer {
   private program: WebGLProgram | null = null;
   private cornerBuffer: WebGLBuffer | null = null;
   private instanceBuffer: WebGLBuffer | null = null;
+  private readonly tilePool = new BoundedResourcePool<HTMLCanvasElement>(
+    64 * 1024 * 1024,
+    (canvas) => {
+      canvas.width = canvas.height = 1;
+    },
+  );
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -259,9 +268,7 @@ export class GpuBrushRenderer {
   ) {
     const gl = this.gl!,
       program = this.program!,
-      corners = new Float32Array([
-        -1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1,
-      ]),
+      corners = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
       instances = new Float32Array(dabs.length * 6);
     for (let index = 0; index < dabs.length; index++) {
       const dab = dabs[index],
@@ -310,7 +317,11 @@ export class GpuBrushRenderer {
       bounds.width,
       bounds.height,
     );
-    gl.uniform2f(gl.getUniformLocation(program, 'u_origin'), bounds.x, bounds.y);
+    gl.uniform2f(
+      gl.getUniformLocation(program, 'u_origin'),
+      bounds.x,
+      bounds.y,
+    );
     const [red, green, blue] = parseHex(color);
     gl.uniform3f(gl.getUniformLocation(program, 'u_color'), red, green, blue);
     gl.uniform1f(
@@ -345,16 +356,30 @@ export class GpuBrushRenderer {
           options.color,
           Math.max(0, Math.min(1, options.hardness)),
         );
-      const copy = document.createElement('canvas');
+      const poolKey = `${bounds.width}x${bounds.height}`,
+        bytes = bounds.width * bounds.height * 4,
+        copy = this.tilePool.acquire(poolKey, bytes, () =>
+          document.createElement('canvas'),
+        );
       copy.width = bounds.width;
       copy.height = bounds.height;
       copy.getContext('2d')!.drawImage(this.canvas, 0, 0);
-      tiles.push({ ...bounds, canvas: copy });
+      let released = false;
+      tiles.push({
+        ...bounds,
+        canvas: copy,
+        release: () => {
+          if (released) return;
+          released = true;
+          this.tilePool.release(poolKey, copy, bytes);
+        },
+      });
     }
     return tiles;
   }
 
   dispose() {
+    this.tilePool.clear();
     if (this.gl) {
       if (this.cornerBuffer) this.gl.deleteBuffer(this.cornerBuffer);
       if (this.instanceBuffer) this.gl.deleteBuffer(this.instanceBuffer);

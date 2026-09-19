@@ -149,6 +149,7 @@ This is the release ledger for closing the remaining gap with a professional des
 - [ ] OffscreenCanvas workers and WASM SIMD/threaded operations.
   - [x] Full-document profile conversion runs as an atomic, cancelable, progress-reporting Web Worker job with chunked cooperative fallback and crash journal.
 - [ ] Tiled document backing, mipmaps, dirty regions, cached composites, and GPU texture pooling.
+  - [x] Bounded LRU render-target reuse for dirty-region brush tiles, with deterministic release after compositing and memory-budget eviction.
 - [x] Memory-pressure adaptation and preview/final quality scheduling.
 - [x] OPFS scratch storage with selectable locations and quotas.
 - [x] Incremental saving, pixel deduplication, compressed history, and transaction journal.

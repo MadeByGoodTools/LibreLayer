@@ -5791,7 +5791,7 @@ export default function Home() {
             ctx.globalCompositeOperation = 'source-over';
             for (const tile of tiles) {
               ctx.drawImage(tile.canvas, tile.x, tile.y);
-              tile.canvas.width = tile.canvas.height = 1;
+              tile.release();
             }
             ctx.restore();
             return;
@@ -16596,7 +16596,7 @@ export default function Home() {
                       aria-label={`Brush renderer ${brushRendererBackend}`}
                     >
                       {brushRendererBackend === 'webgl2'
-                        ? 'GPU subpixel renderer active'
+                        ? 'WebGL2 subpixel renderer active'
                         : 'Canvas renderer fallback active'}
                     </p>
                     <section
