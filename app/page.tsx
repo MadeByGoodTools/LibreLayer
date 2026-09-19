@@ -68,6 +68,7 @@ import {
   captureTiles,
   restoreTiles,
   historyBytes,
+  type DirtyRegion,
   type HistorySurface,
   type TiledImage,
 } from '@/lib/tiled-history';
@@ -2886,6 +2887,7 @@ export default function Home() {
   const cloneBuffer = useRef<HTMLCanvasElement | null>(null);
   const historyBrushBuffer = useRef<HTMLCanvasElement | null>(null);
   const gesturePaintTool = useRef<'brush' | 'eraser' | null>(null);
+  const paintDirtyRegion = useRef<DirtyRegion | null>(null);
   const brushRenderer = useRef<GpuBrushRenderer | null>(null);
   const rawMasterCache = useRef(new Map<string, RawLinearImage>());
   const exportRawGeneration = useRef(0);
@@ -3920,7 +3922,15 @@ export default function Home() {
     if (dragRect && tool === 'marquee') selectionChannelRef.current = null;
   }, [dragRect, tool]);
   const snapshot = useCallback(
-    (label: string, named = false) => {
+    (
+      label: string,
+      named = false,
+      dirtySurface?: {
+        surfaceId: string;
+        pixels?: DirtyRegion;
+        mask?: DirtyRegion;
+      },
+    ) => {
       const first = surfacesRef.current.values().next().value as
           | LayerSurface
           | undefined,
@@ -3940,7 +3950,9 @@ export default function Home() {
         selectedId: selectedRef.current,
         selectedIds: [...selectedIdsRef.current],
         selection: selectionCanvas
-          ? captureTiles(selectionCanvas, previous?.selection)
+          ? dirtySurface && previous?.selection
+            ? previous.selection
+            : captureTiles(selectionCanvas, previous?.selection)
           : undefined,
         selectionBounds: selectionRef.current
           ? { ...selectionRef.current }
@@ -3974,7 +3986,8 @@ export default function Home() {
         })(),
         surfaces: layersRef.current.map((meta) => {
           const s = surfacesRef.current.get(meta.id)!,
-            old = previous?.surfaces.find((x) => x.id === meta.id);
+            old = previous?.surfaces.find((x) => x.id === meta.id),
+            localized = dirtySurface?.surfaceId === meta.id;
           if (workingDepthRef.current !== '8u' && !s.precision)
             s.precision = createPrecisionBacking(
               s,
@@ -3983,8 +3996,19 @@ export default function Home() {
           const precisionChanges = syncPrecisionSurface(s);
           return {
             id: meta.id,
-            pixels: captureTiles(s.pixels, old?.pixels),
-            mask: s.mask ? captureTiles(s.mask, old?.mask) : undefined,
+            pixels:
+              dirtySurface && old && !localized
+                ? old.pixels
+                : localized && old && !dirtySurface?.pixels
+                  ? old.pixels
+                  : captureTiles(s.pixels, old?.pixels, dirtySurface?.pixels),
+            mask: s.mask
+              ? dirtySurface && old && !localized
+                ? old.mask
+                : localized && old && !dirtySurface?.mask
+                  ? old.mask
+                  : captureTiles(s.mask, old?.mask, dirtySurface?.mask)
+              : undefined,
             precision: s.precision
               ? precisionChanges === 0 && old?.precision
                 ? old.precision
@@ -5446,6 +5470,7 @@ export default function Home() {
         : tool === 'brush' || tool === 'eraser'
           ? tool
           : null;
+    paintDirtyRegion.current = null;
     if (
       (curveTargetChannel || levelsTarget || hueTarget) &&
       meta?.kind === 'adjustment'
@@ -5814,6 +5839,31 @@ export default function Home() {
           ? Math.min(0.82, Math.hypot(e.tiltX, e.tiltY) / 90)
           : 0,
         tiltAngle = Math.atan2(e.tiltY, e.tiltX),
+        recordDirty = (x: number, y: number, radius: number) => {
+          const next = {
+              x: Math.floor(x - radius - 2),
+              y: Math.floor(y - radius - 2),
+              width: Math.ceil(radius * 2 + 4),
+              height: Math.ceil(radius * 2 + 4),
+            },
+            current = paintDirtyRegion.current;
+          if (!current) paintDirtyRegion.current = next;
+          else {
+            const left = Math.min(current.x, next.x),
+              top = Math.min(current.y, next.y),
+              right = Math.max(current.x + current.width, next.x + next.width),
+              bottom = Math.max(
+                current.y + current.height,
+                next.y + next.height,
+              );
+            paintDirtyRegion.current = {
+              x: left,
+              y: top,
+              width: right - left,
+              height: bottom - top,
+            };
+          }
+        },
         drawStroke = (ctx: CanvasRenderingContext2D) => {
           const paint =
               editing === 'mask'
@@ -5881,6 +5931,7 @@ export default function Home() {
                 color: paint === 'white' ? '#ffffff' : paint,
                 hardness: hardness / 100,
               });
+            for (const dab of dabs) recordDirty(dab.x, dab.y, dab.size / 2);
             ctx.save();
             ctx.globalAlpha = 1;
             ctx.globalCompositeOperation = 'source-over';
@@ -5951,6 +6002,7 @@ export default function Home() {
                     )
                     .join('')}`;
                 })();
+              recordDirty(x, y, dabSize * (dualBrush ? 0.85 : 0.5));
               const baseAlpha =
                   (((opacity / 100) * flow) / 100) * pressureAlpha,
                 transferredAlpha =
@@ -6343,7 +6395,9 @@ export default function Home() {
     if (!drawing.current) return;
     drawing.current = false;
     const paintTool = gesturePaintTool.current;
+    const paintDirty = paintDirtyRegion.current;
     gesturePaintTool.current = null;
+    paintDirtyRegion.current = null;
     if (tool === 'lasso' && lassoMode !== 'polygonal') {
       finishPolygon('lasso');
       render();
@@ -6374,6 +6428,15 @@ export default function Home() {
                 : paintTool === 'eraser'
                   ? 'Erase'
                   : 'Brush stroke',
+        false,
+        (paintTool === 'brush' || paintTool === 'eraser') && paintDirty
+          ? {
+              surfaceId: selectedRef.current,
+              ...(editing === 'mask'
+                ? { mask: paintDirty }
+                : { pixels: paintDirty }),
+            }
+          : undefined,
       );
     if (tool === 'marquee' || tool === 'crop') {
       if (dragRect && dragRect.w > 2 && dragRect.h > 2) {

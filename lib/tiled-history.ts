@@ -1,6 +1,12 @@
 import type { WorkingSurface } from './working-depth.ts';
 
 const TILE = 256;
+export type DirtyRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export type ImageTile = {
   w: number;
   h: number;
@@ -14,6 +20,39 @@ export type HistorySurface = {
   mask?: TiledImage;
   precision?: WorkingSurface;
 };
+export function dirtyTileIndices(
+  width: number,
+  height: number,
+  dirty: DirtyRegion,
+) {
+  if (
+    !Number.isFinite(dirty.x) ||
+    !Number.isFinite(dirty.y) ||
+    !Number.isFinite(dirty.width) ||
+    !Number.isFinite(dirty.height) ||
+    dirty.width <= 0 ||
+    dirty.height <= 0
+  )
+    return new Set<number>();
+  const columns = Math.ceil(width / TILE),
+    rows = Math.ceil(height / TILE),
+    left = Math.max(0, Math.floor(dirty.x / TILE)),
+    top = Math.max(0, Math.floor(dirty.y / TILE)),
+    right = Math.min(
+      columns - 1,
+      Math.floor((dirty.x + dirty.width - Number.EPSILON) / TILE),
+    ),
+    bottom = Math.min(
+      rows - 1,
+      Math.floor((dirty.y + dirty.height - Number.EPSILON) / TILE),
+    ),
+    indices = new Set<number>();
+  if (right < left || bottom < top) return indices;
+  for (let row = top; row <= bottom; row++)
+    for (let column = left; column <= right; column++)
+      indices.add(row * columns + column);
+  return indices;
+}
 function equal(a: Uint8ClampedArray, b: Uint8ClampedArray) {
   if (a.length !== b.length) return false;
   const av = new Uint32Array(a.buffer, a.byteOffset, a.length / 4),
@@ -24,6 +63,7 @@ function equal(a: Uint8ClampedArray, b: Uint8ClampedArray) {
 export function captureTiles(
   canvas: HTMLCanvasElement,
   previous?: TiledImage,
+  dirty?: DirtyRegion,
 ): TiledImage {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx)
@@ -31,9 +71,17 @@ export function captureTiles(
   const width = canvas.width,
     height = canvas.height,
     tiles: ImageTile[] = [];
-  const compatible = previous?.width === width && previous?.height === height;
+  const compatible = previous?.width === width && previous?.height === height,
+    dirtyIndices =
+      compatible && dirty ? dirtyTileIndices(width, height, dirty) : null;
   for (let y = 0; y < height; y += TILE)
     for (let x = 0; x < width; x += TILE) {
+      const index = tiles.length,
+        old = compatible ? previous!.tiles[index] : undefined;
+      if (old && dirtyIndices && !dirtyIndices.has(index)) {
+        tiles.push(old);
+        continue;
+      }
       const w = Math.min(TILE, width - x),
         h = Math.min(TILE, height - y),
         image = ctx.getImageData(x, y, w, h),
@@ -45,7 +93,6 @@ export function captureTiles(
           solid = false;
           break;
         }
-      const old = compatible ? previous!.tiles[tiles.length] : undefined;
       if (solid)
         tiles.push(old?.solid === first ? old : { w, h, solid: first });
       else
